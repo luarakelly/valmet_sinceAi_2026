@@ -1,8 +1,17 @@
 
 # Ask Your Factory
+
 ### Conversational Spatial Intelligence for Industrial Digital Twins
 
 **Since AI Hackathon 2026 | Challenge Partner: Valmet Automation**
+
+## Run:
+
+1. Copy `.env.example` to `.env` and add `GEMINI_API_KEY`.
+2. Install [uv](https://docs.astral.sh/uv/).
+3. Initialize once, then run:
+	- **Linux:** `./initialize.sh`, then `./run.sh`
+	- **Windows:** `initialize.bat`, then `run.bat`
 
 Ask Your Factory is an AI-powered conversational spatial intelligence system that enables industrial field-service personnel to interact with complex industrial environments through natural language.
 

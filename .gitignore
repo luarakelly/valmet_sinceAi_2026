@@ -1,1 +1,82 @@
-.txt
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.template
+*.env
+*.secret
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+MANIFEST
+
+# Python tooling and virtual environments
+.venv/
+venv/
+env/
+ENV/
+.uv/
+.python-version
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.hypothesis/
+
+# Local application data and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+logs/
+tmp/
+.cache/
+
+# IDE and OS files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Build and coverage output
+coverage/
+out/
+
+# Project-local data and generated files
+backend/database.db
+.agents/
+
+# Large local challenge downloads
+Valmet challenge data/
+
+# Large binary point cloud / splat capture (>100MB exceeds GitHub push limit)
+Industrial Boiler Room.ply
