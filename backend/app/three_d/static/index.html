@@ -7,34 +7,40 @@
       Ask Your Factory — 3D Spatial Digital Twin & Field-Service Copilot
     </title>
     <!-- Three.js and Loaders -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
     <style>
       :root {
-        --bg: #070b12;
-        --panel: rgba(15, 23, 42, 0.75);
-        --panel-solid: #0d1522;
-        --card: rgba(20, 32, 50, 0.7);
-        --card-hover: rgba(30, 48, 75, 0.85);
-        --border: rgba(255, 255, 255, 0.08);
-        --border-accent: rgba(0, 210, 255, 0.35);
-        --text: #f0f6fc;
-        --muted: #8b9bb4;
+        --bg: #070c14;
+        --panel: rgba(13, 21, 35, 0.88);
+        --panel-solid: #0c1422;
+        --card: rgba(18, 29, 48, 0.75);
+        --card-hover: rgba(28, 44, 72, 0.95);
+        --border: rgba(255, 255, 255, 0.12);
+        --border-accent: rgba(0, 210, 255, 0.45);
+        --text: #f8fafc;
+        --text-secondary: #cbd5e1;
+        --muted: #94a3b8;
         --accent: #00d2ff;
-        --accent-hover: #00b4db;
-        --accent-dim: rgba(0, 210, 255, 0.12);
+        --accent-hover: #38bdf8;
+        --accent-dim: rgba(0, 210, 255, 0.15);
         --green: #10b981;
         --yellow: #f59e0b;
         --orange: #f97316;
         --red: #ef4444;
         --font-sans:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          "Helvetica Neue", Arial, sans-serif;
+          "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, sans-serif;
         --font-mono:
-          ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
-          monospace;
+          "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
       }
       * {
         box-sizing: border-box;
@@ -404,28 +410,32 @@
         gap: 6px;
         flex: 1;
         overflow-y: auto;
-        padding-right: 2px;
+        padding-right: 4px;
       }
       .asset-card {
-        background: rgba(13, 21, 34, 0.6);
-        border: 1px solid var(--border);
+        background: #0d1626;
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 6px;
         overflow: hidden;
-        transition:
-          border-color 0.15s,
-          background 0.15s;
+        transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .asset-card:hover {
+        border-color: rgba(0, 210, 255, 0.4);
+        background: #121e33;
       }
       .asset-card.active {
         border-color: var(--accent);
-        background: rgba(0, 210, 255, 0.08);
+        background: rgba(0, 210, 255, 0.12);
+        box-shadow: 0 0 14px rgba(0, 210, 255, 0.22);
       }
       .asset-card-main {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 8px 10px;
+        padding: 9px 12px;
         cursor: pointer;
-        font-size: 11px;
+        font-size: 11.5px;
+        user-select: none;
       }
       .asset-card-main:hover {
         background: rgba(255, 255, 255, 0.03);
@@ -612,6 +622,30 @@
       .render-mode-btn:hover {
         background: var(--card-hover);
         color: var(--accent);
+      }
+      #vision-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 12;
+      }
+      .vision-detection {
+        position: absolute;
+        border: 2px solid #ffbf47;
+        border-radius: 4px;
+        background: rgba(255, 191, 71, 0.08);
+        box-shadow: 0 0 14px rgba(255, 191, 71, 0.3);
+      }
+      .vision-detection-label {
+        position: absolute;
+        top: -22px;
+        left: -2px;
+        white-space: nowrap;
+        padding: 3px 6px;
+        border-radius: 3px 3px 0 0;
+        background: #ffbf47;
+        color: #14100a;
+        font: 700 10px var(--font-mono);
       }
 
       .freecam-hud {
@@ -1051,6 +1085,29 @@
                 >30 Mapped</span
               >
             </div>
+            <button
+              class="btn"
+              id="btn-semantic-extract"
+              style="
+                width: 100%;
+                margin-bottom: 8px;
+                background: linear-gradient(135deg, #00d2ff, #7928ca);
+                color: #fff;
+                font-weight: 700;
+                font-size: 11px;
+                padding: 7px 10px;
+                border: 1px solid rgba(255, 255, 255, 0.25);
+                box-shadow: 0 0 12px rgba(0, 210, 255, 0.3);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                cursor: pointer;
+              "
+              title="Runs 3D Euclidean density peak & connected slice segmentation on raw PLY"
+            >
+              <span>⚡ Re-run 3D Semantic Extraction</span>
+            </button>
             <input
               type="text"
               id="asset-search"
@@ -1150,14 +1207,14 @@
           </div>
 
           <div class="view-toolbar">
-            <button
-              class="tool-btn active"
-              id="btn-cam-drone"
-              title="Follow Drone"
-            >
+            <button class="tool-btn" id="btn-cam-drone" title="Follow Drone">
               📷 Drone
             </button>
-            <button class="tool-btn" id="btn-cam-orbit" title="Orbit Controls">
+            <button
+              class="tool-btn active"
+              id="btn-cam-orbit"
+              title="Orbit Controls"
+            >
               🌐 Orbit
             </button>
             <button
@@ -1174,16 +1231,16 @@
           <div class="render-mode-toolbar" aria-label="PLY render modes">
             <span class="render-mode-label">Render</span>
             <button
-              class="render-mode-btn"
+              class="render-mode-btn active"
               data-render-mode="splat"
-              aria-pressed="false"
+              aria-pressed="true"
             >
               Splat
             </button>
             <button
-              class="render-mode-btn active"
+              class="render-mode-btn"
               data-render-mode="studio"
-              aria-pressed="true"
+              aria-pressed="false"
             >
               Studio
             </button>
@@ -1194,8 +1251,17 @@
             >
               Heat
             </button>
+            <button
+              class="render-mode-btn"
+              id="btn-vision-analyze"
+              title="Analyze the current 3D view with YOLO-World"
+            >
+              AI Scan
+            </button>
           </div>
         </div>
+
+        <div id="vision-overlay" aria-live="polite"></div>
 
         <div class="freecam-hud" id="freecam-hud">
           FREE CAM &nbsp; WASD + mouse &nbsp; Shift+F to exit
@@ -1443,10 +1509,10 @@
       let navProgress = 0;
       let isNavigating = false;
       let navSpeed = 1.5;
-      let cameraMode = "drone";
+      let cameraMode = "orbit";
       let currentSelectedAsset = "ASSET-017";
-      let pointSize = 0.014;
-      let renderMode = "studio";
+      let pointSize = 0.038;
+      let renderMode = "splat";
       let sidebarOpen = true;
       let copilotOpen = true;
 
@@ -1504,7 +1570,7 @@
         grid.material.opacity = 0.42;
         scene.add(grid);
 
-        boundingFramesGroup.visible = false;
+        boundingFramesGroup.visible = true;
         scene.add(boundingFramesGroup);
 
         createRobotAvatar();
@@ -1516,12 +1582,61 @@
         setupOmnibar();
         setupPanelCollapses();
         setupSettingsModal();
+        setupViewportRaycaster();
         if (window.innerWidth <= 900) {
           toggleLeftSidebar();
           toggleCopilotDrawer();
         }
 
         animate();
+      }
+
+      // Interactive 3D Raycasting to click any equipment in the 3D scene
+      function setupViewportRaycaster() {
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let mouseDownTime = 0;
+        let mouseDownPos = { x: 0, y: 0 };
+
+        renderer.domElement.addEventListener("mousedown", (e) => {
+          mouseDownTime = Date.now();
+          mouseDownPos = { x: e.clientX, y: e.clientY };
+        });
+
+        renderer.domElement.addEventListener("mouseup", (e) => {
+          // If dragged, do not trigger click
+          const dt = Date.now() - mouseDownTime;
+          const dx = Math.abs(e.clientX - mouseDownPos.x);
+          const dy = Math.abs(e.clientY - mouseDownPos.y);
+          if (dt > 300 || dx > 4 || dy > 4) return;
+
+          const rect = renderer.domElement.getBoundingClientRect();
+          mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+          raycaster.setFromCamera(mouse, camera);
+          const intersects = raycaster.intersectObjects(
+            boundingFramesGroup.children,
+            true,
+          );
+          if (intersects.length > 0) {
+            let topObj = intersects[0].object;
+            while (
+              topObj &&
+              (!topObj.userData || !topObj.userData.id) &&
+              topObj.parent
+            ) {
+              topObj = topObj.parent;
+            }
+            if (topObj && topObj.userData && topObj.userData.id) {
+              const targetId = topObj.userData.id;
+              selectAsset(targetId);
+              showToast(
+                "Selected " + (topObj.userData.tag || targetId) + " in 3D",
+              );
+            }
+          }
+        });
       }
 
       // Create 3D Autonomous Inspection Drone / Robot Avatar
@@ -1632,13 +1747,16 @@
               float edge = smoothstep(0.5, 0.16, distanceToCenter);
               if (edge < 0.01) discard;
               vec3 outputColor = vColor;
-              if (uMode == 1) {
+              if (uMode == 0) {
+                // High-fidelity Photorealistic Splat Mesh blending
+                outputColor = pow(vColor, vec3(0.92)) * (0.85 + edge * 0.35);
+              } else if (uMode == 1) {
                 outputColor = mix(vec3(0.03, 0.18, 0.28), vec3(0.04, 0.85, 0.92), vHeight);
                 outputColor *= 0.82 + edge * 0.28;
               } else if (uMode == 2) {
                 outputColor = heatColor(vHeight);
               }
-              gl_FragColor = vec4(outputColor, edge * uOpacity);
+              gl_FragColor = vec4(outputColor, clamp(edge * 1.4, 0.0, 1.0) * uOpacity);
             }
           `,
           transparent: true,
@@ -1667,6 +1785,70 @@
         showToast(
           "Render mode: " + mode.charAt(0).toUpperCase() + mode.slice(1),
         );
+      }
+
+      function renderVisionDetections(result) {
+        const overlay = document.getElementById("vision-overlay");
+        overlay.innerHTML = "";
+        const imageWidth = result.image.width;
+        const imageHeight = result.image.height;
+        result.detections.forEach(function (detection) {
+          const box = document.createElement("div");
+          box.className = "vision-detection";
+          box.style.left = (detection.box.x / imageWidth) * 100 + "%";
+          box.style.top = (detection.box.y / imageHeight) * 100 + "%";
+          box.style.width = (detection.box.width / imageWidth) * 100 + "%";
+          box.style.height = (detection.box.height / imageHeight) * 100 + "%";
+
+          const label = document.createElement("span");
+          label.className = "vision-detection-label";
+          label.innerText =
+            detection.label +
+            " " +
+            Math.round(detection.confidence * 100) +
+            "%";
+          box.appendChild(label);
+          overlay.appendChild(box);
+        });
+      }
+
+      async function analyzeCurrentView() {
+        const button = document.getElementById("btn-vision-analyze");
+        const canvas = renderer.domElement;
+        button.disabled = true;
+        button.innerText = "Scanning...";
+        try {
+          const blob = await new Promise(function (resolve) {
+            canvas.toBlob(resolve, "image/jpeg", 0.82);
+          });
+          if (!blob) {
+            throw new Error("Could not capture the 3D view.");
+          }
+          const form = new FormData();
+          form.append("file", blob, "ask-your-factory-view.jpg");
+          form.append(
+            "classes",
+            "person, worker, safety helmet, pump, valve, pipe, tank, boiler, motor, industrial machine, pressure gauge, ladder, fire extinguisher",
+          );
+          const response = await fetch("/api/vision/analyze", {
+            method: "POST",
+            body: form,
+          });
+          const result = await response.json();
+          if (!response.ok) {
+            throw new Error(result.detail || "YOLO-World analysis failed.");
+          }
+          renderVisionDetections(result);
+          showToast(
+            "YOLO-World found " + result.detections.length + " object(s)",
+          );
+        } catch (error) {
+          console.error("YOLO-World analysis error", error);
+          showToast(error.message);
+        } finally {
+          button.disabled = false;
+          button.innerText = "AI Scan";
+        }
       }
 
       // Load Industrial Boiler Room PLY with switchable volumetric presentation modes
@@ -1742,7 +1924,46 @@
         }
       }
 
-      // Build 3D Bounding Boxes
+      // Helper to generate floating 3D text sprites
+      function createFloatingLabelSprite(tag, stateText, colorHex) {
+        const canvas = document.createElement("canvas");
+        canvas.width = 256;
+        canvas.height = 72;
+        const ctx = canvas.getContext("2d");
+
+        // Background pill
+        ctx.fillStyle = "rgba(10, 18, 30, 0.88)";
+        ctx.strokeStyle = colorHex;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.roundRect(4, 4, 248, 64, 12);
+        ctx.fill();
+        ctx.stroke();
+
+        // Tag label
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 26px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(tag, 128, 34);
+
+        // Status subtitle
+        ctx.fillStyle = colorHex;
+        ctx.font = "bold 18px monospace";
+        ctx.fillText(stateText.toUpperCase(), 128, 58);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const spriteMat = new THREE.SpriteMaterial({
+          map: texture,
+          transparent: true,
+          opacity: 0.0,
+          depthTest: false,
+        });
+        const sprite = new THREE.Sprite(spriteMat);
+        sprite.scale.set(0.9, 0.28, 1);
+        return sprite;
+      }
+
+      // Build 3D Bounding Boxes with Floating Labels and Dynamic Illumination support
       function build3DBoundingBoxes(frames) {
         while (boundingFramesGroup.children.length > 0) {
           boundingFramesGroup.remove(boundingFramesGroup.children[0]);
@@ -1753,12 +1974,19 @@
           const [x, y, z] = frame.pos;
 
           let colorHex = 0x10b981;
+          let colorCss = "#10b981";
           if (frame.state === "watch") {
             colorHex = 0xf59e0b;
+            colorCss = "#f59e0b";
           } else if (frame.state === "degraded") {
             colorHex = 0xf97316;
+            colorCss = "#f97316";
           } else if (frame.state === "attention_required") {
             colorHex = 0xef4444;
+            colorCss = "#ef4444";
+          } else if (frame.is_extracted) {
+            colorHex = 0x00d2ff;
+            colorCss = "#00d2ff";
           }
 
           const boxGeo = new THREE.BoxGeometry(w, h, d);
@@ -1767,16 +1995,42 @@
             color: colorHex,
             linewidth: 2,
             transparent: true,
-            opacity: 0.85,
+            opacity: 0.45,
           });
           const boxMesh = new THREE.LineSegments(edges, lineMat);
           boxMesh.position.set(x, y + h / 2, z);
+
+          // Subtle semi-transparent volumetric fill
+          const fillMat = new THREE.MeshBasicMaterial({
+            color: colorHex,
+            transparent: true,
+            opacity: 0.0,
+            depthWrite: false,
+          });
+          const fillMesh = new THREE.Mesh(boxGeo, fillMat);
+          boxMesh.add(fillMesh);
+
+          // Floating 3D label above bounding box
+          const labelSprite = createFloatingLabelSprite(
+            frame.tag || frame.id,
+            frame.state || "HEALTHY",
+            colorCss,
+          );
+          labelSprite.position.set(0, h / 2 + 0.35, 0);
+          boxMesh.add(labelSprite);
+
           boxMesh.userData = {
             id: frame.id,
             tag: frame.tag,
-            state: frame.state,
+            state: frame.state || "healthy",
+            health: frame.health || 100,
             pos: [x, y, z],
             size: [w, h, d],
+            lineMat: lineMat,
+            fillMat: fillMat,
+            labelSprite: labelSprite,
+            baseColor: colorHex,
+            isExtracted: !!frame.is_extracted,
           };
 
           const cornerMat = new THREE.MeshBasicMaterial({ color: colorHex });
@@ -2068,8 +2322,16 @@
           diag.issue_code + " Signature (" + diag.health_score + "% Health)";
         if (diag.diagnosis_summary) {
           const sentences = diag.diagnosis_summary.split(".");
-          if (sentences.length > 1 && sentences[1].trim().length > 0) {
-            findingTitle = sentences[1].trim();
+          for (let s of sentences) {
+            const clean = s.trim();
+            if (
+              clean.length > 5 &&
+              !clean.includes("/100") &&
+              !clean.includes("evaluated as")
+            ) {
+              findingTitle = clean;
+              break;
+            }
           }
         }
         const findingEl = document.getElementById("primary-finding-text");
@@ -2550,17 +2812,43 @@
         renderer.render(scene, camera);
       }
 
-      // Check proximity events
+      // Check proximity events & dynamically illuminate bounding frames and reveal floating 3D labels
       function checkProximityEvents(rx, rz) {
         const alertEl = document.getElementById("proximity-alert");
         let foundNearby = null;
+        const PROXIMITY_RADIUS = 2.4;
 
         boundingFramesGroup.children.forEach(function (c) {
           if (c.userData && c.userData.pos) {
             const [ax, ay, az] = c.userData.pos;
             const dist = Math.sqrt((rx - ax) ** 2 + (rz - az) ** 2);
-            if (dist < 2.2) {
-              foundNearby = c.userData;
+            const isNear = dist < PROXIMITY_RADIUS;
+
+            // Dynamic Proximity Revelation: illuminate bounding frame & reveal 3D floating tag
+            if (
+              c.userData.lineMat &&
+              c.userData.fillMat &&
+              c.userData.labelSprite
+            ) {
+              if (isNear) {
+                // Bright high-intensity illumination
+                c.userData.lineMat.opacity = 1.0;
+                c.userData.fillMat.opacity = 0.22;
+                c.userData.labelSprite.material.opacity = 1.0;
+                c.userData.labelSprite.position.y =
+                  c.userData.size[1] / 2 +
+                  0.42 +
+                  Math.sin(Date.now() * 0.005) * 0.04;
+              } else {
+                // Dim resting state
+                c.userData.lineMat.opacity = 0.45;
+                c.userData.fillMat.opacity = 0.0;
+                c.userData.labelSprite.material.opacity = 0.0;
+              }
+            }
+
+            if (isNear && (!foundNearby || dist < foundNearby._dist)) {
+              foundNearby = Object.assign({}, c.userData, { _dist: dist });
             }
           }
         });
@@ -2568,11 +2856,18 @@
         if (foundNearby) {
           alertEl.style.display = "flex";
           document.getElementById("alert-tag").innerText =
-            foundNearby.tag + " Nearby (" + foundNearby.id + ")";
+            (foundNearby.tag || foundNearby.id) +
+            " Nearby (" +
+            foundNearby.id +
+            ")";
           document.getElementById("alert-desc").innerText =
-            "Status: " + foundNearby.state.toUpperCase();
+            "Status: " +
+            (foundNearby.state ? foundNearby.state.toUpperCase() : "ACTIVE") +
+            " • Health: " +
+            (foundNearby.health || 98) +
+            "%";
 
-          let dotClass = foundNearby.state;
+          let dotClass = foundNearby.state || "healthy";
           if (foundNearby.state === "attention_required") {
             dotClass = "attention";
           }
@@ -2726,6 +3021,50 @@
       }
 
       // UI Events Wiring
+      const btnSemanticExtract = document.getElementById(
+        "btn-semantic-extract",
+      );
+      if (btnSemanticExtract) {
+        btnSemanticExtract.onclick = async function () {
+          const origHtml = btnSemanticExtract.innerHTML;
+          btnSemanticExtract.disabled = true;
+          btnSemanticExtract.innerHTML =
+            "<span>⏳ Segmenting Point Cloud...</span>";
+
+          try {
+            const res = await fetch("/api/scene/extract-assets", {
+              method: "POST",
+            });
+            const data = await res.json();
+            if (data.status === "success") {
+              // Rebuild 3D bounding boxes with newly extracted structural assets
+              build3DBoundingBoxes(data.all_frames);
+              document.getElementById("asset-count").innerText =
+                data.all_frames.length +
+                " Objects (" +
+                data.extracted_count +
+                " Extracted)";
+
+              // Show success toast / badge
+              btnSemanticExtract.innerHTML = `<span>✔ ${data.extracted_count} Structural Assets Extracted</span>`;
+              setTimeout(() => {
+                btnSemanticExtract.disabled = false;
+                btnSemanticExtract.innerHTML = origHtml;
+              }, 3000);
+            } else {
+              alert("Segmentation error: " + (data.message || "Unknown error"));
+              btnSemanticExtract.disabled = false;
+              btnSemanticExtract.innerHTML = origHtml;
+            }
+          } catch (err) {
+            console.error("Semantic extraction error", err);
+            alert("Failed to run 3D semantic extraction: " + err.message);
+            btnSemanticExtract.disabled = false;
+            btnSemanticExtract.innerHTML = origHtml;
+          }
+        };
+      }
+
       document.getElementById("btn-start-nav").onclick = toggleDroneNavigation;
 
       document.getElementById("btn-reset-nav").onclick = function () {
@@ -2757,11 +3096,15 @@
       };
       document.getElementById("btn-cam-free").onclick = enterFreeCamera;
 
-      document.querySelectorAll(".render-mode-btn").forEach(function (button) {
-        button.onclick = function () {
-          applyRenderMode(button.dataset.renderMode);
-        };
-      });
+      document
+        .querySelectorAll(".render-mode-btn[data-render-mode]")
+        .forEach(function (button) {
+          button.onclick = function () {
+            applyRenderMode(button.dataset.renderMode);
+          };
+        });
+      document.getElementById("btn-vision-analyze").onclick =
+        analyzeCurrentView;
 
       document.getElementById("btn-open-copilot").onclick = function () {
         if (!copilotOpen) {

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from sqlmodel import Session
 
@@ -23,6 +23,7 @@ from app.schemas import (
 )
 from app.metaverse.copilot import get_copilot
 from app.metaverse.scene_processor import get_scene
+from app.metaverse.vision import analyze_image
 
 router = APIRouter(tags=["Ask Your Factory Digital Twin"])
 
@@ -186,6 +187,26 @@ def api_get_raw_ply():
     if not scene.raw_path.exists():
         return FileResponse(path=str(scene.get_ply_path()), media_type="application/octet-stream")
     return FileResponse(path=str(scene.raw_path), media_type="application/octet-stream", filename="Industrial Boiler Room.ply")
+
+
+@router.post("/vision/analyze")
+async def api_analyze_frontend_view(
+    file: UploadFile = File(...),
+    classes: str = Form(default=""),
+    confidence: float = Form(default=0.15, ge=0.01, le=0.95),
+):
+    """Run open-vocabulary YOLO-World detection on a screenshot from the viewer."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="An image upload is required.")
+
+    image_bytes = await file.read()
+    requested_classes = [item for item in classes.split(",") if item.strip()]
+    try:
+        return analyze_image(image_bytes, requested_classes, confidence)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"YOLO-World analysis unavailable: {exc}") from exc
 
 
 @router.post("/copilot/query", response_model=CopilotQueryResponse)
