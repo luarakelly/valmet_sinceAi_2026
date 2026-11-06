@@ -1,0 +1,2823 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      Ask Your Factory — 3D Spatial Digital Twin & Field-Service Copilot
+    </title>
+    <!-- Three.js and Loaders -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    <style>
+      :root {
+        --bg: #070b12;
+        --panel: rgba(15, 23, 42, 0.75);
+        --panel-solid: #0d1522;
+        --card: rgba(20, 32, 50, 0.7);
+        --card-hover: rgba(30, 48, 75, 0.85);
+        --border: rgba(255, 255, 255, 0.08);
+        --border-accent: rgba(0, 210, 255, 0.35);
+        --text: #f0f6fc;
+        --muted: #8b9bb4;
+        --accent: #00d2ff;
+        --accent-hover: #00b4db;
+        --accent-dim: rgba(0, 210, 255, 0.12);
+        --green: #10b981;
+        --yellow: #f59e0b;
+        --orange: #f97316;
+        --red: #ef4444;
+        --font-sans:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+        --font-mono:
+          ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+          monospace;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: var(--font-sans);
+        background: var(--bg);
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+        user-select: none;
+      }
+
+      /* Header */
+      header {
+        height: 50px;
+        background: var(--panel-solid);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 16px;
+        z-index: 50;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+        font-size: 14px;
+        letter-spacing: 0.5px;
+      }
+      .ask-your-factory-logo {
+        background: linear-gradient(135deg, #00d2ff, #3a7bd5);
+        color: #fff;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-weight: 900;
+        font-size: 11px;
+        letter-spacing: 1px;
+      }
+      .badge {
+        background: var(--accent-dim);
+        color: var(--accent);
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-family: var(--font-mono);
+        border: 1px solid rgba(0, 210, 255, 0.3);
+      }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .nav-tabs {
+        display: flex;
+        gap: 6px;
+      }
+      .tab-btn {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        padding: 6px 12px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .tab-btn.active,
+      .tab-btn:hover {
+        background: var(--card);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .icon-btn {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        padding: 6px 10px;
+        border-radius: 5px;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .icon-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--card);
+      }
+
+      /* Settings Modal */
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(4, 7, 12, 0.7);
+        backdrop-filter: blur(4px);
+        z-index: 100;
+        display: none;
+        align-items: center;
+        justify-content: center;
+      }
+      .modal-box {
+        width: 380px;
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(16px);
+        border: 1px solid var(--border-accent);
+        border-radius: 8px;
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
+      }
+      .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 13px;
+        font-weight: 700;
+        color: #fff;
+      }
+
+      /* Layout */
+      .layout {
+        display: flex;
+        flex: 1;
+        height: calc(100vh - 50px);
+        position: relative;
+        overflow: hidden;
+      }
+
+      /* Collapsible Left Sidebar */
+      .sidebar-container {
+        position: relative;
+        display: flex;
+        height: 100%;
+        z-index: 20;
+        transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .sidebar {
+        width: 340px;
+        height: 100%;
+        background: var(--panel);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-right: 1px solid var(--border);
+        overflow-y: auto;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        transition:
+          transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+          opacity 0.2s ease;
+      }
+      .sidebar.collapsed {
+        transform: translateX(-100%);
+        pointer-events: none;
+        opacity: 0;
+      }
+      .sidebar-toggle-pill {
+        position: absolute;
+        top: 14px;
+        right: -24px;
+        width: 24px;
+        height: 38px;
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(8px);
+        border: 1px solid var(--border);
+        border-left: none;
+        border-radius: 0 6px 6px 0;
+        color: var(--muted);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        z-index: 25;
+        transition: all 0.15s ease;
+      }
+      .sidebar-toggle-pill:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+        background: rgba(15, 23, 42, 0.95);
+      }
+      .collapsed-icons-bar {
+        position: absolute;
+        top: 60px;
+        left: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        z-index: 22;
+      }
+      .collapsed-icon-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(12px);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        transition: all 0.15s;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+      .collapsed-icon-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        transform: scale(1.05);
+      }
+
+      /* Collapsible Right Copilot Drawer */
+      .copilot-container {
+        position: relative;
+        display: flex;
+        height: 100%;
+        z-index: 20;
+      }
+      .copilot-drawer {
+        width: 380px;
+        height: 100%;
+        background: var(--panel);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        transition:
+          transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+          opacity 0.2s ease;
+      }
+      .copilot-drawer.collapsed {
+        transform: translateX(100%);
+        pointer-events: none;
+        opacity: 0;
+      }
+      .copilot-toggle-pill {
+        position: absolute;
+        top: 14px;
+        left: -24px;
+        width: 24px;
+        height: 38px;
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(8px);
+        border: 1px solid var(--border);
+        border-right: none;
+        border-radius: 6px 0 0 6px;
+        color: var(--muted);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        z-index: 25;
+        transition: all 0.15s ease;
+      }
+      .copilot-toggle-pill:hover {
+        color: var(--accent);
+        border-color: var(--accent);
+        background: rgba(15, 23, 42, 0.95);
+      }
+      .right-collapsed-bar {
+        position: absolute;
+        top: 60px;
+        right: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        z-index: 22;
+      }
+
+      /* Panel Boxes */
+      .heading {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: var(--muted);
+        letter-spacing: 0.8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .panel-box {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      /* Buttons & Inputs */
+      .btn {
+        background: var(--accent);
+        color: #051626;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 5px;
+        font-weight: 700;
+        font-size: 12px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: all 0.15s;
+      }
+      .btn:hover {
+        background: var(--accent-hover);
+        box-shadow: 0 0 12px rgba(0, 210, 255, 0.4);
+      }
+      .btn-secondary {
+        background: rgba(20, 32, 50, 0.6);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 7px 10px;
+        border-radius: 5px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        transition: all 0.15s;
+      }
+      .btn-secondary:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      select,
+      input[type="text"],
+      input[type="number"],
+      input[type="range"] {
+        width: 100%;
+        background: #080d16;
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 6px 8px;
+        border-radius: 5px;
+        font-size: 12px;
+        outline: none;
+      }
+      input[type="text"]:focus {
+        border-color: var(--accent);
+      }
+
+      /* Unified Asset List */
+      .asset-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1;
+        overflow-y: auto;
+        padding-right: 2px;
+      }
+      .asset-card {
+        background: rgba(13, 21, 34, 0.6);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+      }
+      .asset-card.active {
+        border-color: var(--accent);
+        background: rgba(0, 210, 255, 0.08);
+      }
+      .asset-card-main {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        cursor: pointer;
+        font-size: 11px;
+      }
+      .asset-card-main:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 6px;
+        flex-shrink: 0;
+      }
+      .status-healthy {
+        background: var(--green);
+        box-shadow: 0 0 6px var(--green);
+      }
+      .status-watch {
+        background: var(--yellow);
+        box-shadow: 0 0 6px var(--yellow);
+      }
+      .status-degraded {
+        background: var(--orange);
+        box-shadow: 0 0 6px var(--orange);
+      }
+      .status-attention {
+        background: var(--red);
+        box-shadow: 0 0 8px var(--red);
+        animation: pulse-red 1.2s infinite;
+      }
+      @keyframes pulse-red {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+      .asset-actions {
+        display: none;
+        padding: 6px 10px 8px;
+        background: rgba(8, 13, 22, 0.7);
+        border-top: 1px solid var(--border);
+        gap: 4px;
+      }
+      .asset-card.active .asset-actions {
+        display: flex;
+      }
+      .action-pill {
+        flex: 1;
+        padding: 4px 6px;
+        font-size: 10px;
+        font-weight: 600;
+        background: rgba(20, 32, 50, 0.8);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        transition: all 0.15s;
+      }
+      .action-pill:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(0, 210, 255, 0.15);
+      }
+
+      /* 3D Viewport */
+      .viewport {
+        flex: 1;
+        height: 100%;
+        position: relative;
+        background: #04070c;
+        overflow: hidden;
+      }
+      #canvas-container {
+        width: 100%;
+        height: 100%;
+      }
+
+      /* Consolidated Sleek Viewport Toolbar */
+      .floating-top-bar {
+        position: absolute;
+        top: 14px;
+        right: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        z-index: 15;
+      }
+      .hud-nav-pill {
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid var(--border-accent);
+        border-radius: 20px;
+        padding: 5px 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        font-family: var(--font-mono);
+        color: var(--text);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      }
+      .hud-nav-pill .mini-bar {
+        width: 50px;
+        height: 4px;
+        background: var(--border);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .hud-nav-pill .mini-fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #00d2ff, #10b981);
+        transition: width 0.1s ease;
+      }
+      .view-toolbar {
+        display: flex;
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 3px;
+        gap: 3px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      }
+      .tool-btn {
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        padding: 6px 10px;
+        border-radius: 5px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        transition: all 0.15s;
+      }
+      .tool-btn.active,
+      .tool-btn:hover {
+        background: var(--card-hover);
+        color: var(--accent);
+      }
+      .render-mode-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        padding: 3px;
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      }
+      .render-mode-label {
+        padding: 0 6px 0 8px;
+        color: var(--muted);
+        font: 600 10px var(--font-mono);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .render-mode-btn {
+        border: none;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--muted);
+        padding: 6px 8px;
+        font: 600 11px var(--font-sans);
+        cursor: pointer;
+        transition:
+          background 0.15s ease,
+          color 0.15s ease;
+      }
+      .render-mode-btn.active,
+      .render-mode-btn:hover {
+        background: var(--card-hover);
+        color: var(--accent);
+      }
+
+      .freecam-hud {
+        position: absolute;
+        top: 60px;
+        right: 14px;
+        display: none;
+        padding: 6px 12px;
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        background: rgba(15, 23, 42, 0.9);
+        backdrop-filter: blur(8px);
+        color: var(--accent);
+        font: 600 11px var(--font-mono);
+        z-index: 15;
+      }
+
+      /* Conversational Omnibar Front and Center */
+      .omnibar-container {
+        position: absolute;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(680px, 90vw);
+        z-index: 30;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
+      .omnibar-suggestions {
+        width: 100%;
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid var(--border-accent);
+        border-radius: 10px;
+        max-height: 220px;
+        overflow-y: auto;
+        display: none;
+        flex-direction: column;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
+      }
+      .omnibar-suggestion-item {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12px;
+        transition: background 0.15s;
+      }
+      .omnibar-suggestion-item:last-child {
+        border-bottom: none;
+      }
+      .omnibar-suggestion-item:hover {
+        background: rgba(0, 210, 255, 0.12);
+      }
+      .omnibar {
+        width: 100%;
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(0, 210, 255, 0.35);
+        border-radius: 9999px;
+        padding: 6px 10px 6px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        box-shadow:
+          0 10px 30px rgba(0, 0, 0, 0.6),
+          0 0 20px rgba(0, 210, 255, 0.12);
+        transition:
+          border-color 0.2s,
+          box-shadow 0.2s;
+      }
+      .omnibar:focus-within {
+        border-color: var(--accent);
+        box-shadow:
+          0 12px 35px rgba(0, 0, 0, 0.8),
+          0 0 25px rgba(0, 210, 255, 0.25);
+      }
+      .omnibar-icon {
+        color: var(--accent);
+        font-size: 15px;
+      }
+      .omnibar-input {
+        flex: 1;
+        background: transparent !important;
+        border: none !important;
+        outline: none !important;
+        color: #fff;
+        font-size: 13px;
+        padding: 6px 0 !important;
+      }
+      .omnibar-input::placeholder {
+        color: #71839b;
+      }
+      .omnibar-btn {
+        background: var(--accent);
+        color: #051626;
+        border: none;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.15s;
+        flex-shrink: 0;
+      }
+      .omnibar-btn:hover {
+        background: var(--accent-hover);
+        transform: scale(1.05);
+      }
+
+      /* Proximity Alert Toast in Viewport */
+      .proximity-alert {
+        position: absolute;
+        bottom: 84px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(15, 23, 42, 0.95);
+        backdrop-filter: blur(12px);
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        padding: 8px 16px;
+        display: none;
+        align-items: center;
+        gap: 12px;
+        font-size: 12px;
+        z-index: 25;
+        box-shadow: 0 0 20px rgba(0, 210, 255, 0.25);
+        animation: slide-up 0.25s ease;
+      }
+      @keyframes slide-up {
+        from {
+          transform: translate(-50%, 15px);
+          opacity: 0;
+        }
+        to {
+          transform: translate(-50%, 0);
+          opacity: 1;
+        }
+      }
+
+      /* Copilot Header & Content */
+      .copilot-header {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(0, 0, 0, 0.2);
+      }
+      .copilot-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: #fff;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .copilot-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        font-size: 12px;
+      }
+
+      /* Chunked Diagnosis Cards */
+      .diag-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .primary-finding-box {
+        background: rgba(239, 68, 68, 0.12);
+        border: 1px solid rgba(239, 68, 68, 0.35);
+        border-radius: 6px;
+        padding: 10px 12px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .finding-icon {
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+      .finding-text {
+        font-weight: 700;
+        font-size: 12px;
+        color: #fca5a5;
+      }
+      .root-cause-list {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding-left: 2px;
+      }
+      .root-cause-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: 11px;
+        line-height: 1.4;
+        color: #cbd5e1;
+      }
+      .root-cause-bullet {
+        color: var(--accent);
+        font-weight: 800;
+      }
+      .evidence-chips-wrapper {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+      .evidence-chip {
+        background: rgba(0, 210, 255, 0.12);
+        color: #38bdf8;
+        border: 1px solid rgba(0, 210, 255, 0.3);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        padding: 2px 7px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .evidence-chip:hover {
+        background: rgba(0, 210, 255, 0.25);
+        border-color: var(--accent);
+      }
+      .safety-card {
+        background: rgba(245, 158, 11, 0.1);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 11px;
+        color: #fde68a;
+      }
+      #telem-canvas {
+        width: 100%;
+        height: 80px;
+        background: #080d16;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+      }
+
+      /* Toast */
+      .toast {
+        position: fixed;
+        top: 60px;
+        left: 50%;
+        transform: translateX(-50%) translateY(-20px);
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid var(--accent);
+        color: var(--text);
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-family: var(--font-mono);
+        opacity: 0;
+        pointer-events: none;
+        transition: all 0.25s ease;
+        z-index: 120;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      @media (max-width: 900px) {
+        header {
+          height: 44px;
+          padding: 0 8px;
+        }
+        .brand {
+          gap: 0;
+        }
+        .brand .badge,
+        .nav-tabs {
+          display: none;
+        }
+        .layout {
+          height: calc(100vh - 44px);
+        }
+        .sidebar-container,
+        .copilot-container {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          height: auto;
+        }
+        .sidebar-container {
+          left: 0;
+        }
+        .copilot-container {
+          right: 0;
+        }
+        .sidebar-container.collapsed,
+        .copilot-container.collapsed {
+          width: 24px;
+          pointer-events: none;
+        }
+        .sidebar-container.collapsed .sidebar-toggle-pill,
+        .sidebar-container.collapsed .collapsed-icons-bar,
+        .copilot-container.collapsed .copilot-toggle-pill,
+        .copilot-container.collapsed .right-collapsed-bar {
+          pointer-events: auto;
+        }
+        .sidebar,
+        .copilot-drawer {
+          width: min(86vw, 340px);
+        }
+        .floating-top-bar {
+          top: 8px;
+          left: 8px;
+          right: 8px;
+          justify-content: flex-end;
+          flex-wrap: wrap;
+          gap: 5px;
+          pointer-events: none;
+        }
+        .floating-top-bar > * {
+          pointer-events: auto;
+        }
+        .hud-nav-pill,
+        .view-toolbar,
+        .render-mode-toolbar {
+          max-width: 100%;
+          overflow-x: auto;
+        }
+        .tool-btn,
+        .render-mode-btn {
+          flex-shrink: 0;
+        }
+        .render-mode-label {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="toast" class="toast"></div>
+
+    <!-- Engine Settings Modal (Moved from Section 1 for Clean KISS UI) -->
+    <div class="modal-backdrop" id="settings-modal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <span>Base 3D Environment Engine</span>
+          <button class="icon-btn" id="btn-close-settings" style="border: none">
+            ✕
+          </button>
+        </div>
+        <div style="font-size: 11px; color: var(--muted); line-height: 1.5">
+          Scene: <b style="color: #fff">Industrial Boiler Room.ply</b><br />
+          Capture: <b>Gaussian Splatting & Photogrammetry</b><br />
+          Points:
+          <b style="color: var(--accent)" id="engine-point-count"
+            >317,826 verified points</b
+          ><br />
+          Target Rate: <b>60 FPS Spatial WebGL</b>
+        </div>
+        <div
+          style="
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 4px;
+          "
+        >
+          <button class="btn-secondary" id="btn-reload-ply">
+            🔄 Reload 3D Point Cloud
+          </button>
+          <button class="btn-secondary" id="btn-toggle-boxes">
+            🔲 Toggle 3D Bounding Frames
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Header -->
+    <header>
+      <div class="brand">
+        <span class="ask-your-factory-logo">ASK YOUR FACTORY</span>
+        <span class="badge">SINCE AI 2026 DIGITAL TWIN</span>
+      </div>
+      <div class="header-right">
+        <div class="nav-tabs">
+          <a
+            href="/docs"
+            target="_blank"
+            style="
+              color: var(--muted);
+              font-size: 12px;
+              text-decoration: none;
+              display: flex;
+              align-items: center;
+              margin-left: 4px;
+            "
+            >API Specs</a
+          >
+        </div>
+        <button
+          class="icon-btn"
+          id="btn-open-settings"
+          title="Base 3D Engine Settings"
+        >
+          ⚙
+        </button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- Left Collapsible Sidebar -->
+      <div class="sidebar-container" id="left-sidebar-container">
+        <aside class="sidebar" id="sidebar-metaverse">
+          <div class="panel-box" style="flex: 1; min-height: 0">
+            <div class="heading">
+              <span>Equipment Directory</span>
+              <span
+                style="color: var(--accent); font-family: var(--font-mono)"
+                id="asset-count"
+                >30 Mapped</span
+              >
+            </div>
+            <input
+              type="text"
+              id="asset-search"
+              placeholder="Search tag, class, or area (e.g. P-005, CV, Boiler)..."
+              style="font-size: 11px; padding: 6px 8px"
+            />
+            <div class="asset-list" id="asset-list-container">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+
+          <!-- Drone Quick Controls Footer -->
+          <div class="panel-box" style="flex-shrink: 0">
+            <div class="heading">
+              <span>Drone Nav Controller</span>
+              <span id="nav-badge" style="color: var(--green)">Ready</span>
+            </div>
+            <div style="display: flex; gap: 6px">
+              <button class="btn" id="btn-start-nav" style="flex: 1">
+                <span id="nav-btn-text">▶ Start Drone</span>
+              </button>
+              <button class="btn-secondary" id="btn-reset-nav" style="flex: 1">
+                ↺ Reset Start
+              </button>
+            </div>
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 10px;
+                margin-top: 2px;
+              "
+            >
+              <span style="color: var(--muted)">Flight Speed:</span>
+              <span
+                id="speed-val"
+                style="color: var(--accent); font-family: var(--font-mono)"
+                >1.5x</span
+              >
+            </div>
+            <input
+              type="range"
+              id="speed-slider"
+              min="0.5"
+              max="4.0"
+              step="0.5"
+              value="1.5"
+            />
+          </div>
+        </aside>
+
+        <!-- Sidebar Collapse Toggle Pill -->
+        <button
+          class="sidebar-toggle-pill"
+          id="btn-toggle-left-sidebar"
+          title="Toggle Equipment Panel"
+        >
+          ◀
+        </button>
+
+        <!-- Compact Floating Icons when Collapsed -->
+        <div
+          class="collapsed-icons-bar"
+          id="left-collapsed-bar"
+          style="display: none"
+        >
+          <button
+            class="collapsed-icon-btn"
+            id="btn-quick-search"
+            title="Quick Search"
+          >
+            🔍
+          </button>
+          <button
+            class="collapsed-icon-btn"
+            id="btn-quick-nav"
+            title="Drone Navigation"
+          >
+            🚀
+          </button>
+        </div>
+      </div>
+
+      <!-- Center 3D Viewport -->
+      <main class="viewport">
+        <div id="canvas-container"></div>
+
+        <!-- Sleek Consolidated Top Right Floating Toolbar -->
+        <div class="floating-top-bar">
+          <div class="hud-nav-pill" id="hud-nav-pill">
+            <span id="hud-target-name">Target: P-005</span>
+            <div class="mini-bar">
+              <div class="mini-fill" id="hud-nav-fill"></div>
+            </div>
+            <span id="hud-dist" style="color: #fff">11.8m</span>
+          </div>
+
+          <div class="view-toolbar">
+            <button
+              class="tool-btn active"
+              id="btn-cam-drone"
+              title="Follow Drone"
+            >
+              📷 Drone
+            </button>
+            <button class="tool-btn" id="btn-cam-orbit" title="Orbit Controls">
+              🌐 Orbit
+            </button>
+            <button
+              class="tool-btn"
+              id="btn-cam-top"
+              title="Top-down 2D NavMesh"
+            >
+              🗺 2D
+            </button>
+            <button class="tool-btn" id="btn-cam-free" title="Free Camera">
+              ⌖ Free <span style="opacity: 0.6">Shift+F</span>
+            </button>
+          </div>
+          <div class="render-mode-toolbar" aria-label="PLY render modes">
+            <span class="render-mode-label">Render</span>
+            <button
+              class="render-mode-btn"
+              data-render-mode="splat"
+              aria-pressed="false"
+            >
+              Splat
+            </button>
+            <button
+              class="render-mode-btn active"
+              data-render-mode="studio"
+              aria-pressed="true"
+            >
+              Studio
+            </button>
+            <button
+              class="render-mode-btn"
+              data-render-mode="heat"
+              aria-pressed="false"
+            >
+              Heat
+            </button>
+          </div>
+        </div>
+
+        <div class="freecam-hud" id="freecam-hud">
+          FREE CAM &nbsp; WASD + mouse &nbsp; Shift+F to exit
+        </div>
+
+        <!-- Proximity Alert Banner -->
+        <div class="proximity-alert" id="proximity-alert">
+          <div class="status-dot status-attention" id="alert-dot"></div>
+          <div>
+            <b id="alert-tag" style="color: var(--accent)">P-005 Approached</b>
+            &bull;
+            <span id="alert-desc" style="color: #cbd5e1"
+              >FOULING signature detected (Health: 44%)</span
+            >
+          </div>
+          <button
+            class="btn"
+            id="btn-open-copilot"
+            style="padding: 4px 10px; font-size: 11px"
+          >
+            Copilot Dossier →
+          </button>
+        </div>
+
+        <!-- Conversational Omnibar Front and Center -->
+        <div class="omnibar-container" id="omnibar-container">
+          <div class="omnibar-suggestions" id="omnibar-suggestions"></div>
+          <div class="omnibar">
+            <span class="omnibar-icon">🔍</span>
+            <input
+              type="text"
+              class="omnibar-input"
+              id="omnibar-input"
+              placeholder="Ask anything about equipment, alarms, or routes... (e.g., 'Find degraded pumps')"
+            />
+            <button
+              class="omnibar-btn"
+              id="omnibar-submit"
+              title="Execute Query"
+            >
+              ↵
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <!-- Right Collapsible Copilot Drawer -->
+      <div class="copilot-container" id="right-copilot-container">
+        <!-- Copilot Collapse Toggle Pill -->
+        <button
+          class="copilot-toggle-pill"
+          id="btn-toggle-copilot"
+          title="Toggle AI Copilot"
+        >
+          ▶
+        </button>
+
+        <!-- Compact Floating Icon when Collapsed -->
+        <div
+          class="right-collapsed-bar"
+          id="right-collapsed-bar"
+          style="display: none"
+        >
+          <button
+            class="collapsed-icon-btn"
+            id="btn-quick-copilot"
+            title="Open AI Copilot"
+          >
+            🤖
+          </button>
+        </div>
+
+        <aside class="copilot-drawer" id="copilot-drawer">
+          <div class="copilot-header">
+            <div class="copilot-title">
+              <span style="color: var(--accent)">🤖</span>
+              <span>ASK YOUR FACTORY COPILOT</span>
+            </div>
+            <span class="badge" id="copilot-model-badge">GEMINI + RAG</span>
+          </div>
+
+          <div class="copilot-body" id="copilot-content">
+            <!-- Asset Quick Overview Card -->
+            <div class="diag-card">
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
+                <span
+                  id="card-asset-tag"
+                  style="
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: var(--accent);
+                  "
+                  >ASSET: P-005</span
+                >
+                <span
+                  class="badge"
+                  id="card-health-badge"
+                  style="color: var(--red); border-color: var(--red)"
+                  >44% CRITICAL</span
+                >
+              </div>
+              <div style="font-size: 11px; color: var(--muted)">
+                Class:
+                <b id="card-asset-class" style="color: #fff">PROCESS_PUMP</b>
+                &bull; Area:
+                <b id="card-asset-area" style="color: #fff">Utility Island</b>
+              </div>
+
+              <!-- Sparkline Telemetry -->
+              <div style="margin-top: 2px">
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 10px;
+                    font-family: var(--font-mono);
+                    color: var(--muted);
+                    margin-bottom: 2px;
+                  "
+                >
+                  <span>14-Day Pressure / Flow Trend</span>
+                  <span style="color: #38bdf8">Live OPC UA</span>
+                </div>
+                <canvas id="telem-canvas"></canvas>
+              </div>
+            </div>
+
+            <!-- Chunked Scannable Diagnosis Box -->
+            <div class="diag-card">
+              <div class="heading">
+                <span>Diagnostic Assessment</span>
+                <span
+                  id="diag-conf"
+                  style="color: var(--green); font-family: var(--font-mono)"
+                  >Conf: 0.91</span
+                >
+              </div>
+
+              <!-- 1. Primary Finding First -->
+              <div class="primary-finding-box" id="finding-box">
+                <span class="finding-icon" id="finding-icon">⚠️</span>
+                <span class="finding-text" id="primary-finding-text"
+                  >Impeller Fouling Detected (44% Health)</span
+                >
+              </div>
+
+              <!-- 2. Root Cause 2 concise bullets -->
+              <div>
+                <div
+                  style="
+                    font-size: 10px;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    color: var(--muted);
+                    margin-bottom: 4px;
+                  "
+                >
+                  Root Cause Indicators
+                </div>
+                <ul class="root-cause-list" id="root-cause-list">
+                  <li class="root-cause-item">
+                    <span class="root-cause-bullet">•</span>
+                    <span
+                      >Discharge pressure drop of 1.4 bar below nominal
+                      profile</span
+                    >
+                  </li>
+                  <li class="root-cause-item">
+                    <span class="root-cause-bullet">•</span>
+                    <span
+                      >Stiction index elevated at 8.7% indicating hydraulic
+                      fouling</span
+                    >
+                  </li>
+                </ul>
+              </div>
+
+              <!-- 3. Clickable Evidence Chips -->
+              <div>
+                <div
+                  style="
+                    font-size: 10px;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    color: var(--muted);
+                    margin-bottom: 4px;
+                  "
+                >
+                  Corroborating Evidence
+                </div>
+                <div class="evidence-chips-wrapper" id="evidence-citations-box">
+                  <!-- Dynamically rendered badges -->
+                </div>
+              </div>
+            </div>
+
+            <!-- 4. Field Safety Protocol -->
+            <div class="safety-card" id="safety-alert-box">
+              <div
+                style="
+                  font-weight: 700;
+                  display: flex;
+                  align-items: center;
+                  gap: 4px;
+                  margin-bottom: 3px;
+                "
+              >
+                <span>⚠️</span>
+                <span>Field Safety Protocol (DOC-FIELD-SAFETY):</span>
+              </div>
+              <div id="safety-text" style="line-height: 1.4">
+                Ensure pneumatic & electrical LOTO and 0.0 bar depressurization
+                verification before physical inspection.
+              </div>
+            </div>
+
+            <!-- Single Primary Action Button -->
+            <button
+              class="btn"
+              id="btn-submit-wo"
+              style="padding: 10px; font-size: 13px"
+            >
+              <span>📝 Draft Field Work Order</span>
+            </button>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <script>
+      // Global State
+      let scene, camera, renderer, controls;
+      let pointCloud = null;
+      let boundingFramesGroup = new THREE.Group();
+      let pathLineMesh = null;
+      let robotAvatar = null;
+      let assetsData = [];
+      let currentPath = [];
+      let navProgress = 0;
+      let isNavigating = false;
+      let navSpeed = 1.5;
+      let cameraMode = "drone";
+      let currentSelectedAsset = "ASSET-017";
+      let pointSize = 0.014;
+      let renderMode = "studio";
+      let sidebarOpen = true;
+      let copilotOpen = true;
+
+      const freeCam = {
+        active: false,
+        keys: new Set(),
+        yaw: 0,
+        pitch: 0,
+        speed: 2.8,
+        lastTime: 0,
+      };
+
+      // Initialize 3D Environment
+      function init3D() {
+        const container = document.getElementById("canvas-container");
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x06090e);
+        scene.fog = new THREE.FogExp2(0x06090e, 0.038);
+
+        camera = new THREE.PerspectiveCamera(
+          60,
+          container.clientWidth / container.clientHeight,
+          0.05,
+          120,
+        );
+        camera.position.set(-3.5, 1.2, 2.5);
+
+        renderer = new THREE.WebGLRenderer({
+          antialias: true,
+          powerPreference: "high-performance",
+        });
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.15;
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.target.set(0, -0.4, -1.8);
+
+        // Ambient & Directional Lighting
+        const ambLight = new THREE.AmbientLight(0xffffff, 0.9);
+        scene.add(ambLight);
+        const dirLight = new THREE.DirectionalLight(0x00d2ff, 0.65);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
+
+        // Floor grid for industrial spatial depth
+        const grid = new THREE.GridHelper(16, 16, 0x183040, 0x0b1722);
+        grid.position.y = -0.92;
+        grid.material.transparent = true;
+        grid.material.opacity = 0.42;
+        scene.add(grid);
+
+        boundingFramesGroup.visible = false;
+        scene.add(boundingFramesGroup);
+
+        createRobotAvatar();
+        loadBoilerRoomPLY();
+        fetchAssetsAndFrames();
+
+        window.addEventListener("resize", onWindowResize);
+        setupFreeCamera();
+        setupOmnibar();
+        setupPanelCollapses();
+        setupSettingsModal();
+        if (window.innerWidth <= 900) {
+          toggleLeftSidebar();
+          toggleCopilotDrawer();
+        }
+
+        animate();
+      }
+
+      // Create 3D Autonomous Inspection Drone / Robot Avatar
+      function createRobotAvatar() {
+        robotAvatar = new THREE.Group();
+
+        const bodyGeo = new THREE.BoxGeometry(0.5, 0.22, 0.6);
+        const bodyMat = new THREE.MeshStandardMaterial({
+          color: 0x1e293b,
+          metalness: 0.8,
+          roughness: 0.3,
+        });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        robotAvatar.add(body);
+
+        const mastGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.28, 12);
+        const mastMat = new THREE.MeshStandardMaterial({ color: 0x475569 });
+        const mast = new THREE.Mesh(mastGeo, mastMat);
+        mast.position.set(0, 0.22, -0.1);
+        robotAvatar.add(mast);
+
+        const headGeo = new THREE.BoxGeometry(0.18, 0.1, 0.14);
+        const headMat = new THREE.MeshStandardMaterial({
+          color: 0x00d2ff,
+          emissive: 0x00d2ff,
+          emissiveIntensity: 0.4,
+        });
+        const head = new THREE.Mesh(headGeo, headMat);
+        head.position.set(0, 0.38, -0.1);
+        robotAvatar.add(head);
+
+        const light = new THREE.SpotLight(0x00d2ff, 2.5, 6, Math.PI / 4, 0.5);
+        light.position.set(0, 0.38, -0.2);
+        light.target.position.set(0, -0.5, -3.0);
+        robotAvatar.add(light);
+        robotAvatar.add(light.target);
+
+        const ringGeo = new THREE.RingGeometry(2.3, 2.38, 48);
+        ringGeo.rotateX(-Math.PI / 2);
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: 0x00d2ff,
+          transparent: true,
+          opacity: 0.35,
+          side: THREE.DoubleSide,
+        });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.y = -0.1;
+        robotAvatar.add(ring);
+
+        robotAvatar.position.set(-3.0, -0.82, 0.8);
+        scene.add(robotAvatar);
+      }
+
+      function createPointMaterial(geometry) {
+        if (!geometry.hasAttribute("color")) {
+          const color = new Float32Array(
+            geometry.attributes.position.count * 3,
+          );
+          for (let i = 0; i < color.length; i += 3) {
+            color[i] = 0.45;
+            color[i + 1] = 0.78;
+            color[i + 2] = 0.92;
+          }
+          geometry.setAttribute("color", new THREE.BufferAttribute(color, 3));
+        }
+
+        geometry.computeBoundingBox();
+        const bounds = geometry.boundingBox;
+        return new THREE.ShaderMaterial({
+          uniforms: {
+            uPointSize: { value: pointSize },
+            uOpacity: { value: 0.96 },
+            uMode: {
+              value:
+                renderMode === "studio" ? 1 : renderMode === "heat" ? 2 : 0,
+            },
+            uMinY: { value: bounds ? bounds.min.y : -1 },
+            uMaxY: { value: bounds ? bounds.max.y : 1 },
+          },
+          vertexShader: `
+            attribute vec3 color;
+            uniform float uPointSize;
+            uniform float uMinY;
+            uniform float uMaxY;
+            varying vec3 vColor;
+            varying float vHeight;
+            void main() {
+              vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+              float heightRange = max(uMaxY - uMinY, 0.001);
+              vHeight = clamp((position.y - uMinY) / heightRange, 0.0, 1.0);
+              vColor = color;
+              gl_PointSize = clamp(uPointSize * (260.0 / max(-viewPosition.z, 0.1)), 1.5, 28.0);
+              gl_Position = projectionMatrix * viewPosition;
+            }
+          `,
+          fragmentShader: `
+            uniform float uOpacity;
+            uniform int uMode;
+            varying vec3 vColor;
+            varying float vHeight;
+            vec3 heatColor(float value) {
+              vec3 cool = vec3(0.02, 0.55, 0.95);
+              vec3 warm = vec3(1.0, 0.25, 0.08);
+              return mix(cool, warm, smoothstep(0.2, 0.85, value));
+            }
+            void main() {
+              float distanceToCenter = length(gl_PointCoord - vec2(0.5));
+              float edge = smoothstep(0.5, 0.16, distanceToCenter);
+              if (edge < 0.01) discard;
+              vec3 outputColor = vColor;
+              if (uMode == 1) {
+                outputColor = mix(vec3(0.03, 0.18, 0.28), vec3(0.04, 0.85, 0.92), vHeight);
+                outputColor *= 0.82 + edge * 0.28;
+              } else if (uMode == 2) {
+                outputColor = heatColor(vHeight);
+              }
+              gl_FragColor = vec4(outputColor, edge * uOpacity);
+            }
+          `,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.NormalBlending,
+        });
+      }
+
+      function applyRenderMode(mode) {
+        renderMode = mode;
+        const modeIndex = mode === "studio" ? 1 : mode === "heat" ? 2 : 0;
+        document
+          .querySelectorAll(".render-mode-btn")
+          .forEach(function (button) {
+            const active = button.dataset.renderMode === mode;
+            button.classList.toggle("active", active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+          });
+        if (pointCloud && pointCloud.material.uniforms) {
+          pointCloud.material.uniforms.uMode.value = modeIndex;
+          pointCloud.material.uniforms.uPointSize.value =
+            mode === "splat" ? pointSize * 1.35 : pointSize;
+          pointCloud.material.uniforms.uOpacity.value =
+            mode === "heat" ? 0.92 : 0.96;
+        }
+        showToast(
+          "Render mode: " + mode.charAt(0).toUpperCase() + mode.slice(1),
+        );
+      }
+
+      // Load Industrial Boiler Room PLY with switchable volumetric presentation modes
+      function loadBoilerRoomPLY() {
+        showToast("Streaming Industrial Boiler Room PLY point cloud...");
+        const loader = new THREE.PLYLoader();
+
+        loader.load(
+          "/api/scene/boiler-room.ply",
+          function (geometry) {
+            if (pointCloud) {
+              scene.remove(pointCloud);
+            }
+
+            geometry.computeBoundingSphere();
+            const material = createPointMaterial(geometry);
+
+            pointCloud = new THREE.Points(geometry, material);
+            scene.add(pointCloud);
+            document.getElementById("engine-point-count").innerText =
+              "317,826 verified points";
+            showToast("Boiler Room 3D model loaded! (317,826 points)");
+          },
+          undefined,
+          function (err) {
+            console.warn("Falling back to procedural cloud", err);
+            generateProceduralPointcloud();
+          },
+        );
+      }
+
+      // Fallback procedural points if PLY is building
+      function generateProceduralPointcloud() {
+        const pCount = 80000;
+        const positions = new Float32Array(pCount * 3);
+        const colors = new Float32Array(pCount * 3);
+        for (let i = 0; i < pCount; i++) {
+          const x = (Math.random() - 0.5) * 8.0;
+          const y = (Math.random() - 0.5) * 3.0;
+          const z = (Math.random() - 0.5) * 8.0 - 1.5;
+          positions[i * 3] = x;
+          positions[i * 3 + 1] = y;
+          positions[i * 3 + 2] = z;
+
+          colors[i * 3] = 0.5 + Math.sin(x) * 0.2;
+          colors[i * 3 + 1] = 0.5 + Math.cos(z) * 0.2;
+          colors[i * 3 + 2] = 0.6;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+        const mat = createPointMaterial(geo);
+        pointCloud = new THREE.Points(geo, mat);
+        scene.add(pointCloud);
+        applyRenderMode(renderMode);
+      }
+
+      // Fetch Assets and Build 3D Bounding Boxes
+      async function fetchAssetsAndFrames() {
+        try {
+          const [assetsRes, framesRes] = await Promise.all([
+            fetch("/api/assets"),
+            fetch("/api/scene/frames"),
+          ]);
+          assetsData = await assetsRes.json();
+          const frames = await framesRes.json();
+
+          renderAssetList(assetsData);
+          build3DBoundingBoxes(frames);
+          loadNavigationPath(currentSelectedAsset);
+        } catch (e) {
+          console.error("Error fetching assets", e);
+        }
+      }
+
+      // Build 3D Bounding Boxes
+      function build3DBoundingBoxes(frames) {
+        while (boundingFramesGroup.children.length > 0) {
+          boundingFramesGroup.remove(boundingFramesGroup.children[0]);
+        }
+
+        frames.forEach((frame) => {
+          const [w, h, d] = frame.size;
+          const [x, y, z] = frame.pos;
+
+          let colorHex = 0x10b981;
+          if (frame.state === "watch") {
+            colorHex = 0xf59e0b;
+          } else if (frame.state === "degraded") {
+            colorHex = 0xf97316;
+          } else if (frame.state === "attention_required") {
+            colorHex = 0xef4444;
+          }
+
+          const boxGeo = new THREE.BoxGeometry(w, h, d);
+          const edges = new THREE.EdgesGeometry(boxGeo);
+          const lineMat = new THREE.LineBasicMaterial({
+            color: colorHex,
+            linewidth: 2,
+            transparent: true,
+            opacity: 0.85,
+          });
+          const boxMesh = new THREE.LineSegments(edges, lineMat);
+          boxMesh.position.set(x, y + h / 2, z);
+          boxMesh.userData = {
+            id: frame.id,
+            tag: frame.tag,
+            state: frame.state,
+            pos: [x, y, z],
+            size: [w, h, d],
+          };
+
+          const cornerMat = new THREE.MeshBasicMaterial({ color: colorHex });
+          const cGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+          const c1 = new THREE.Mesh(cGeo, cornerMat);
+          c1.position.set(x - w / 2, y + h, z - d / 2);
+          const c2 = new THREE.Mesh(cGeo, cornerMat);
+          c2.position.set(x + w / 2, y + h, z + d / 2);
+          boundingFramesGroup.add(c1);
+          boundingFramesGroup.add(c2);
+
+          boundingFramesGroup.add(boxMesh);
+        });
+      }
+
+      // Load Navigation Path
+      async function loadNavigationPath(targetId) {
+        try {
+          const res = await fetch(
+            "/api/navigation/path?target_id=" + encodeURIComponent(targetId),
+          );
+          const data = await res.json();
+          currentPath = data.waypoints;
+
+          document.getElementById("hud-target-name").innerText =
+            "Target: " + data.target_tag;
+          document.getElementById("hud-dist").innerText =
+            data.total_distance_m + "m";
+
+          renderPathRibbon(currentPath);
+        } catch (err) {
+          console.error("Path error", err);
+        }
+      }
+
+      // Render Collision-Free Path Ribbon
+      function renderPathRibbon(waypoints) {
+        if (pathLineMesh) {
+          scene.remove(pathLineMesh);
+        }
+
+        const points = waypoints.map(function (p) {
+          return new THREE.Vector3(p.x, p.y + 0.02, p.z);
+        });
+        const curve = new THREE.CatmullRomCurve3(points);
+        const tubeGeo = new THREE.TubeGeometry(curve, 64, 0.035, 8, false);
+        const tubeMat = new THREE.MeshBasicMaterial({
+          color: 0x00d2ff,
+          transparent: true,
+          opacity: 0.75,
+        });
+        pathLineMesh = new THREE.Mesh(tubeGeo, tubeMat);
+        scene.add(pathLineMesh);
+      }
+
+      // Render Unified Sidebar Asset List with Inline Actions
+      function renderAssetList(assets) {
+        const listEl = document.getElementById("asset-list-container");
+        listEl.innerHTML = "";
+
+        assets.forEach(function (a) {
+          const card = document.createElement("div");
+          card.id = "asset-card-" + a.asset_id;
+
+          let cardClass = "asset-card";
+          if (a.asset_id === currentSelectedAsset) {
+            cardClass = "asset-card active";
+          }
+          card.className = cardClass;
+
+          let stateClass = "healthy";
+          let health = 100;
+          if (a.state) {
+            stateClass = a.state.condition_state;
+            health = a.state.health_score;
+          }
+
+          let dotClass = stateClass;
+          if (stateClass === "attention_required") {
+            dotClass = "attention";
+          }
+
+          let healthColor = "#10b981";
+          if (health < 50) {
+            healthColor = "#ef4444";
+          } else if (health < 75) {
+            healthColor = "#f59e0b";
+          }
+
+          const mainRow = document.createElement("div");
+          mainRow.className = "asset-card-main";
+          mainRow.innerHTML =
+            '<div style="display:flex; align-items:center;">' +
+            '<span class="status-dot status-' +
+            dotClass +
+            '"></span>' +
+            '<span style="font-weight:700; color:#fff;">' +
+            a.tag +
+            "</span>" +
+            '<span style="font-size:10px; color:var(--muted); margin-left:6px;">' +
+            a.asset_class.replace("_", " ") +
+            "</span>" +
+            "</div>" +
+            '<span style="font-family:var(--font-mono); font-weight:700; color:' +
+            healthColor +
+            ';">' +
+            health +
+            "%</span>";
+
+          mainRow.onclick = function () {
+            selectAsset(a.asset_id);
+          };
+
+          const actionsRow = document.createElement("div");
+          actionsRow.className = "asset-actions";
+
+          const focusBtn = document.createElement("button");
+          focusBtn.className = "action-pill";
+          focusBtn.innerHTML = "📍 Focus 3D";
+          focusBtn.onclick = function (e) {
+            e.stopPropagation();
+            focusAssetIn3D(a.asset_id);
+          };
+
+          const navBtn = document.createElement("button");
+          navBtn.className = "action-pill";
+          navBtn.innerHTML = "🚀 Navigate";
+          navBtn.onclick = function (e) {
+            e.stopPropagation();
+            startNavigationTo(a.asset_id);
+          };
+
+          const copilotBtn = document.createElement("button");
+          copilotBtn.className = "action-pill";
+          copilotBtn.innerHTML = "📋 Dossier";
+          copilotBtn.onclick = function (e) {
+            e.stopPropagation();
+            openCopilotForAsset(a.asset_id);
+          };
+
+          actionsRow.appendChild(focusBtn);
+          actionsRow.appendChild(navBtn);
+          actionsRow.appendChild(copilotBtn);
+
+          card.appendChild(mainRow);
+          card.appendChild(actionsRow);
+          listEl.appendChild(card);
+        });
+      }
+
+      // Smooth camera transition to focus asset in 3D
+      function focusAssetIn3D(assetId) {
+        let targetPos = null;
+        boundingFramesGroup.children.forEach(function (child) {
+          if (
+            child.userData &&
+            child.userData.id === assetId &&
+            child.userData.pos
+          ) {
+            targetPos = child.userData.pos;
+          }
+        });
+
+        if (!targetPos) {
+          assetsData.forEach(function (a) {
+            if (a.asset_id === assetId && a.anchor) {
+              targetPos = [a.anchor.pos_x, a.anchor.pos_y, a.anchor.pos_z];
+            }
+          });
+        }
+
+        if (targetPos) {
+          if (cameraMode !== "orbit") {
+            setCameraMode("orbit", document.getElementById("btn-cam-orbit"));
+          }
+          const [tx, ty, tz] = targetPos;
+          controls.target.set(tx, ty + 0.4, tz);
+          camera.position.set(tx + 2.2, ty + 1.6, tz + 2.5);
+          controls.update();
+          showToast("Camera routed to 3D equipment " + assetId);
+        }
+      }
+
+      // Select asset
+      async function selectAsset(assetId) {
+        currentSelectedAsset = assetId;
+
+        document.querySelectorAll(".asset-card").forEach(function (el) {
+          el.classList.remove("active");
+        });
+        const currentCard = document.getElementById("asset-card-" + assetId);
+        if (currentCard) {
+          currentCard.classList.add("active");
+        }
+
+        await loadNavigationPath(assetId);
+        runCopilotDiagnosis(assetId);
+      }
+
+      function startNavigationTo(assetId) {
+        selectAsset(assetId);
+        focusAssetIn3D(assetId);
+        if (!isNavigating) {
+          toggleDroneNavigation();
+        }
+      }
+
+      function openCopilotForAsset(assetId) {
+        selectAsset(assetId);
+        if (!copilotOpen) {
+          toggleCopilotDrawer();
+        }
+      }
+
+      // Trigger Grounded AI Copilot Diagnosis
+      async function runCopilotDiagnosis(assetId) {
+        try {
+          const [assetRes, diagRes] = await Promise.all([
+            fetch("/api/assets/" + encodeURIComponent(assetId)),
+            fetch("/api/copilot/query", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ asset_id: assetId }),
+            }),
+          ]);
+          const assetDossier = await assetRes.json();
+          const diag = await diagRes.json();
+
+          updateCopilotDrawer(assetDossier, diag);
+        } catch (err) {
+          console.error("Copilot error", err);
+        }
+      }
+
+      // Update Chunked Copilot UI Drawer
+      function updateCopilotDrawer(dossier, diag) {
+        document.getElementById("card-asset-tag").innerText =
+          "ASSET: " + diag.tag + " (" + diag.asset_id + ")";
+        document.getElementById("card-asset-class").innerText =
+          diag.asset_class;
+
+        let areaText = "Boiler Room";
+        if (dossier.asset && dossier.asset.area_name) {
+          areaText = dossier.asset.area_name;
+        }
+        document.getElementById("card-asset-area").innerText = areaText;
+
+        const hBadge = document.getElementById("card-health-badge");
+        hBadge.innerText =
+          diag.health_score + "% " + diag.condition_state.toUpperCase();
+        if (diag.health_score < 50) {
+          hBadge.style.color = "var(--red)";
+          hBadge.style.borderColor = "var(--red)";
+        } else if (diag.health_score < 75) {
+          hBadge.style.color = "var(--orange)";
+          hBadge.style.borderColor = "var(--orange)";
+        } else {
+          hBadge.style.color = "var(--green)";
+          hBadge.style.borderColor = "var(--green)";
+        }
+
+        document.getElementById("diag-conf").innerText =
+          "Conf: " + diag.confidence_score;
+
+        // 1. Primary Finding
+        let findingIcon = "⚠️";
+        let findingColor = "#fca5a5";
+        let findingBg = "rgba(239, 68, 68, 0.12)";
+        let findingBorder = "rgba(239, 68, 68, 0.35)";
+
+        if (diag.condition_state === "healthy") {
+          findingIcon = "✅";
+          findingColor = "#6ee7b7";
+          findingBg = "rgba(16, 185, 129, 0.12)";
+          findingBorder = "rgba(16, 185, 129, 0.35)";
+        } else if (diag.condition_state === "watch") {
+          findingIcon = "🔍";
+          findingColor = "#fde68a";
+          findingBg = "rgba(245, 158, 11, 0.12)";
+          findingBorder = "rgba(245, 158, 11, 0.35)";
+        }
+
+        const findingBox = document.getElementById("finding-box");
+        findingBox.style.background = findingBg;
+        findingBox.style.borderColor = findingBorder;
+        document.getElementById("finding-icon").innerText = findingIcon;
+
+        let findingTitle =
+          diag.issue_code + " Signature (" + diag.health_score + "% Health)";
+        if (diag.diagnosis_summary) {
+          const sentences = diag.diagnosis_summary.split(".");
+          if (sentences.length > 1 && sentences[1].trim().length > 0) {
+            findingTitle = sentences[1].trim();
+          }
+        }
+        const findingEl = document.getElementById("primary-finding-text");
+        findingEl.innerText = findingTitle;
+        findingEl.style.color = findingColor;
+
+        // 2. Root Cause 2 Concise Bullet Points
+        const rootCauseList = document.getElementById("root-cause-list");
+        rootCauseList.innerHTML = "";
+
+        let rootCauses = [];
+        if (
+          diag.multivariate_evidence &&
+          diag.multivariate_evidence.length > 0
+        ) {
+          rootCauses = diag.multivariate_evidence.slice(0, 2);
+        } else {
+          rootCauses = [
+            "Sensor reading deviation detected against nominal operating envelope",
+            "Urgency level flagged for inspection: " +
+              diag.condition_state.toUpperCase(),
+          ];
+        }
+
+        rootCauses.forEach(function (cause) {
+          const li = document.createElement("li");
+          li.className = "root-cause-item";
+          li.innerHTML =
+            '<span class="root-cause-bullet">•</span><span>' +
+            cause +
+            "</span>";
+          rootCauseList.appendChild(li);
+        });
+
+        // 3. Evidence Chips
+        const citBox = document.getElementById("evidence-citations-box");
+        citBox.innerHTML = "";
+        let chipSources = [];
+        if (diag.citations && diag.citations.length > 0) {
+          chipSources = diag.citations;
+        } else if (
+          diag.evidence_citations &&
+          diag.evidence_citations.length > 0
+        ) {
+          chipSources = diag.evidence_citations.map(function (cid) {
+            return {
+              source_id: cid,
+              description: "Telemetry / Document Citation",
+            };
+          });
+        }
+
+        chipSources.forEach(function (c) {
+          const chip = document.createElement("button");
+          chip.className = "evidence-chip";
+          chip.innerText = "[" + c.source_id + "]";
+          chip.title = c.description;
+          chip.onclick = function () {
+            showToast("Evidence: " + c.description);
+          };
+          citBox.appendChild(chip);
+        });
+
+        // 4. Safety Guardrails
+        if (diag.safety_guardrails && diag.safety_guardrails.length > 0) {
+          document.getElementById("safety-text").innerText =
+            diag.safety_guardrails[0];
+        }
+
+        // 5. Draw Telemetry Sparkline
+        let telemRecords = [];
+        if (dossier.recent_telemetry) {
+          telemRecords = dossier.recent_telemetry;
+        }
+        drawTelemetryTrend(telemRecords);
+      }
+
+      // Draw Telemetry Trend Canvas
+      function drawTelemetryTrend(records) {
+        const canvas = document.getElementById("telem-canvas");
+        const ctx = canvas.getContext("2d");
+        canvas.width = canvas.clientWidth * window.devicePixelRatio;
+        canvas.height = canvas.clientHeight * window.devicePixelRatio;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!records || records.length < 2) {
+          return;
+        }
+
+        const pts = records.map(function (r) {
+          let val = 50.0;
+          if (
+            r.process_pressure_bar !== undefined &&
+            r.process_pressure_bar !== null
+          ) {
+            val = r.process_pressure_bar;
+          } else if (
+            r.vibration_mm_s !== undefined &&
+            r.vibration_mm_s !== null
+          ) {
+            val = r.vibration_mm_s;
+          }
+          return val;
+        });
+        const min = Math.min(...pts);
+        const max = Math.max(...pts) + 0.001;
+
+        ctx.strokeStyle = "#00d2ff";
+        ctx.lineWidth = 2 * window.devicePixelRatio;
+        ctx.beginPath();
+
+        pts.forEach(function (val, idx) {
+          const x = (idx / (pts.length - 1)) * canvas.width;
+          const y =
+            canvas.height -
+            ((val - min) / (max - min)) * (canvas.height * 0.72) -
+            canvas.height * 0.14;
+          if (idx === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+      }
+
+      // Conversational Omnibar
+      function setupOmnibar() {
+        const input = document.getElementById("omnibar-input");
+        const suggestionsBox = document.getElementById("omnibar-suggestions");
+        const submitBtn = document.getElementById("omnibar-submit");
+
+        function executeOmniQuery(query) {
+          const q = query.trim().toLowerCase();
+          if (q.length === 0) {
+            return;
+          }
+
+          let matched = null;
+
+          // Natural language matching rules
+          if (
+            q.includes("degraded") ||
+            q.includes("foul") ||
+            q.includes("cavitation") ||
+            q.includes("critical") ||
+            q.includes("fail")
+          ) {
+            matched = assetsData.find(function (a) {
+              if (a.state) {
+                return (
+                  a.state.condition_state === "attention_required" ||
+                  a.state.condition_state === "degraded"
+                );
+              }
+              return false;
+            });
+          } else if (q.includes("pump")) {
+            matched = assetsData.find(function (a) {
+              return a.asset_class === "PROCESS_PUMP";
+            });
+          } else if (q.includes("valve")) {
+            matched = assetsData.find(function (a) {
+              return a.asset_class === "CONTROL_VALVE";
+            });
+          } else if (q.includes("motor")) {
+            matched = assetsData.find(function (a) {
+              return a.asset_class === "ELECTRIC_MOTOR";
+            });
+          } else {
+            matched = assetsData.find(function (a) {
+              return (
+                a.tag.toLowerCase().includes(q) ||
+                a.asset_id.toLowerCase().includes(q)
+              );
+            });
+          }
+
+          if (!matched && assetsData.length > 0) {
+            matched = assetsData[0];
+          }
+
+          if (matched) {
+            suggestionsBox.style.display = "none";
+            input.value =
+              matched.tag + " (" + matched.asset_class.replace("_", " ") + ")";
+            selectAsset(matched.asset_id);
+            focusAssetIn3D(matched.asset_id);
+            if (!copilotOpen) {
+              toggleCopilotDrawer();
+            }
+            showToast(
+              "Omnibar matched: " +
+                matched.tag +
+                " — Focus & Diagnosis activated",
+            );
+          } else {
+            showToast("No equipment found matching query: " + query);
+          }
+        }
+
+        input.oninput = function () {
+          const q = input.value.trim().toLowerCase();
+          if (q.length === 0) {
+            suggestionsBox.style.display = "none";
+            return;
+          }
+
+          const matches = assetsData
+            .filter(function (a) {
+              let matchedText =
+                a.tag.toLowerCase() +
+                " " +
+                a.asset_class.toLowerCase() +
+                " " +
+                a.area_name.toLowerCase();
+              if (a.state) {
+                matchedText +=
+                  " " +
+                  a.state.condition_state.toLowerCase() +
+                  " " +
+                  a.state.issue_summary.toLowerCase();
+              }
+              return matchedText.includes(q);
+            })
+            .slice(0, 5);
+
+          if (matches.length > 0) {
+            suggestionsBox.innerHTML = "";
+            matches.forEach(function (m) {
+              const item = document.createElement("div");
+              item.className = "omnibar-suggestion-item";
+
+              let stClass = "healthy";
+              let hScore = 100;
+              if (m.state) {
+                stClass = m.state.condition_state;
+                hScore = m.state.health_score;
+              }
+
+              item.innerHTML =
+                '<div style="display:flex; align-items:center;">' +
+                '<span class="status-dot status-' +
+                stClass +
+                '"></span>' +
+                '<b style="color:#fff; margin-right:6px;">' +
+                m.tag +
+                "</b>" +
+                '<span style="color:var(--muted); font-size:11px;">' +
+                m.asset_class.replace("_", " ") +
+                " (" +
+                m.area_name +
+                ")</span>" +
+                "</div>" +
+                '<span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">' +
+                hScore +
+                "%</span>";
+
+              item.onclick = function () {
+                input.value = m.tag;
+                suggestionsBox.style.display = "none";
+                selectAsset(m.asset_id);
+                focusAssetIn3D(m.asset_id);
+                if (!copilotOpen) {
+                  toggleCopilotDrawer();
+                }
+              };
+              suggestionsBox.appendChild(item);
+            });
+            suggestionsBox.style.display = "flex";
+          } else {
+            suggestionsBox.style.display = "none";
+          }
+        };
+
+        input.onkeydown = function (e) {
+          if (e.key === "Enter") {
+            executeOmniQuery(input.value);
+          }
+        };
+
+        submitBtn.onclick = function () {
+          executeOmniQuery(input.value);
+        };
+      }
+
+      // Collapsible Sidebar & Copilot
+      function setupPanelCollapses() {
+        const sidebar = document.getElementById("sidebar-metaverse");
+        const leftToggle = document.getElementById("btn-toggle-left-sidebar");
+        const leftCollapsedBar = document.getElementById("left-collapsed-bar");
+
+        const copilot = document.getElementById("copilot-drawer");
+        const rightToggle = document.getElementById("btn-toggle-copilot");
+        const rightCollapsedBar = document.getElementById(
+          "right-collapsed-bar",
+        );
+
+        leftToggle.onclick = toggleLeftSidebar;
+        rightToggle.onclick = toggleCopilotDrawer;
+
+        document.getElementById("btn-quick-search").onclick = function () {
+          if (!sidebarOpen) {
+            toggleLeftSidebar();
+          }
+          document.getElementById("asset-search").focus();
+        };
+
+        document.getElementById("btn-quick-nav").onclick = function () {
+          if (!sidebarOpen) {
+            toggleLeftSidebar();
+          }
+        };
+
+        document.getElementById("btn-quick-copilot").onclick = function () {
+          if (!copilotOpen) {
+            toggleCopilotDrawer();
+          }
+        };
+      }
+
+      function toggleLeftSidebar() {
+        const sidebar = document.getElementById("sidebar-metaverse");
+        const sidebarContainer = document.getElementById(
+          "left-sidebar-container",
+        );
+        const leftToggle = document.getElementById("btn-toggle-left-sidebar");
+        const leftCollapsedBar = document.getElementById("left-collapsed-bar");
+
+        sidebarOpen = !sidebarOpen;
+        if (sidebarOpen) {
+          sidebarContainer.classList.remove("collapsed");
+          sidebar.classList.remove("collapsed");
+          leftToggle.innerText = "◀";
+          leftToggle.style.right = "-24px";
+          leftToggle.style.borderRadius = "0 6px 6px 0";
+          leftToggle.style.borderLeft = "none";
+          leftToggle.style.borderRight = "1px solid var(--border)";
+          leftCollapsedBar.style.display = "none";
+        } else {
+          sidebarContainer.classList.add("collapsed");
+          sidebar.classList.add("collapsed");
+          leftToggle.innerText = "▶";
+          leftToggle.style.right = "-24px";
+          leftToggle.style.borderRadius = "0 6px 6px 0";
+          leftCollapsedBar.style.display = "flex";
+        }
+        setTimeout(onWindowResize, 310);
+      }
+
+      function toggleCopilotDrawer() {
+        const copilot = document.getElementById("copilot-drawer");
+        const copilotContainer = document.getElementById(
+          "right-copilot-container",
+        );
+        const rightToggle = document.getElementById("btn-toggle-copilot");
+        const rightCollapsedBar = document.getElementById(
+          "right-collapsed-bar",
+        );
+
+        copilotOpen = !copilotOpen;
+        if (copilotOpen) {
+          copilotContainer.classList.remove("collapsed");
+          copilot.classList.remove("collapsed");
+          rightToggle.innerText = "▶";
+          rightToggle.style.left = "-24px";
+          rightCollapsedBar.style.display = "none";
+        } else {
+          copilotContainer.classList.add("collapsed");
+          copilot.classList.add("collapsed");
+          rightToggle.innerText = "◀";
+          rightToggle.style.left = "-24px";
+          rightCollapsedBar.style.display = "flex";
+        }
+        setTimeout(onWindowResize, 310);
+      }
+
+      // Base 3D Engine Settings Modal
+      function setupSettingsModal() {
+        const modal = document.getElementById("settings-modal");
+        document.getElementById("btn-open-settings").onclick = function () {
+          modal.style.display = "flex";
+        };
+        document.getElementById("btn-close-settings").onclick = function () {
+          modal.style.display = "none";
+        };
+        modal.onclick = function (e) {
+          if (e.target === modal) {
+            modal.style.display = "none";
+          }
+        };
+
+        document.getElementById("btn-reload-ply").onclick = function () {
+          modal.style.display = "none";
+          loadBoilerRoomPLY();
+        };
+
+        document.getElementById("btn-toggle-boxes").onclick = function () {
+          boundingFramesGroup.visible = !boundingFramesGroup.visible;
+          if (boundingFramesGroup.visible) {
+            showToast("3D Frames Visible");
+          } else {
+            showToast("3D Frames Hidden");
+          }
+        };
+      }
+
+      // Drone Navigation & Animation Loop
+      function toggleDroneNavigation() {
+        if (navProgress >= 1.0) {
+          navProgress = 0;
+        }
+        isNavigating = !isNavigating;
+
+        const navBtnText = document.getElementById("nav-btn-text");
+        const navBadge = document.getElementById("nav-badge");
+
+        if (isNavigating) {
+          navBtnText.innerHTML = "❚❚ Pause Drone";
+          navBadge.innerText = "Active";
+          navBadge.style.color = "var(--accent)";
+        } else {
+          navBtnText.innerHTML = "▶ Start Drone";
+          navBadge.innerText = "Paused";
+          navBadge.style.color = "var(--yellow)";
+        }
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        if (isNavigating && currentPath.length > 1) {
+          navProgress += 0.003 * navSpeed;
+          if (navProgress >= 1.0) {
+            navProgress = 1.0;
+            isNavigating = false;
+            document.getElementById("nav-btn-text").innerHTML = "▶ Start Drone";
+            document.getElementById("nav-badge").innerText = "Arrived";
+            document.getElementById("nav-badge").style.color = "var(--green)";
+            showToast("Drone arrived at " + currentSelectedAsset);
+            runCopilotDiagnosis(currentSelectedAsset);
+          }
+
+          const totalSegments = currentPath.length - 1;
+          const segmentProgress = navProgress * totalSegments;
+          const segIdx = Math.min(
+            Math.floor(segmentProgress),
+            totalSegments - 1,
+          );
+          const subT = segmentProgress - segIdx;
+
+          const p1 = currentPath[segIdx];
+          const p2 = currentPath[segIdx + 1];
+
+          const curX = p1.x + (p2.x - p1.x) * subT;
+          const curZ = p1.z + (p2.z - p1.z) * subT;
+          const heading = Math.atan2(p2.x - p1.x, p2.z - p1.z);
+
+          robotAvatar.position.x = curX;
+          robotAvatar.position.z = curZ;
+          robotAvatar.rotation.y = heading;
+
+          document.getElementById("hud-nav-fill").style.width =
+            (navProgress * 100).toFixed(1) + "%";
+
+          checkProximityEvents(curX, curZ);
+
+          if (cameraMode === "drone") {
+            camera.position.x = curX - Math.sin(heading) * 2.2;
+            camera.position.z = curZ - Math.cos(heading) * 2.2;
+            camera.position.y = -0.15;
+            controls.target.set(curX, -0.6, curZ);
+          }
+        }
+
+        updateFreeCamera();
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      // Check proximity events
+      function checkProximityEvents(rx, rz) {
+        const alertEl = document.getElementById("proximity-alert");
+        let foundNearby = null;
+
+        boundingFramesGroup.children.forEach(function (c) {
+          if (c.userData && c.userData.pos) {
+            const [ax, ay, az] = c.userData.pos;
+            const dist = Math.sqrt((rx - ax) ** 2 + (rz - az) ** 2);
+            if (dist < 2.2) {
+              foundNearby = c.userData;
+            }
+          }
+        });
+
+        if (foundNearby) {
+          alertEl.style.display = "flex";
+          document.getElementById("alert-tag").innerText =
+            foundNearby.tag + " Nearby (" + foundNearby.id + ")";
+          document.getElementById("alert-desc").innerText =
+            "Status: " + foundNearby.state.toUpperCase();
+
+          let dotClass = foundNearby.state;
+          if (foundNearby.state === "attention_required") {
+            dotClass = "attention";
+          }
+          document.getElementById("alert-dot").className =
+            "status-dot status-" + dotClass;
+        } else {
+          alertEl.style.display = "none";
+        }
+      }
+
+      // Setup Camera Modes & Freecam
+      function setupFreeCamera() {
+        const canvas = renderer.domElement;
+        canvas.addEventListener("click", function () {
+          if (freeCam.active && document.pointerLockElement !== canvas) {
+            canvas.requestPointerLock();
+          }
+        });
+
+        document.addEventListener("pointerlockchange", function () {
+          if (freeCam.active) {
+            if (document.pointerLockElement === canvas) {
+              document.getElementById("freecam-hud").textContent =
+                "FREE CAM  WASD + mouse  Shift+F to exit";
+            } else {
+              document.getElementById("freecam-hud").textContent =
+                "FREE CAM  click viewport to capture mouse  Shift+F to exit";
+            }
+          }
+        });
+
+        document.addEventListener("mousemove", function (event) {
+          if (!freeCam.active || document.pointerLockElement !== canvas) {
+            return;
+          }
+          freeCam.yaw -= event.movementX * 0.0022;
+          freeCam.pitch = THREE.MathUtils.clamp(
+            freeCam.pitch - event.movementY * 0.0022,
+            -Math.PI / 2 + 0.05,
+            Math.PI / 2 - 0.05,
+          );
+          camera.rotation.set(freeCam.pitch, freeCam.yaw, 0, "YXZ");
+        });
+
+        window.addEventListener("keydown", function (event) {
+          if (event.shiftKey && event.key.toLowerCase() === "f") {
+            event.preventDefault();
+            if (freeCam.active) {
+              exitFreeCamera();
+            } else {
+              enterFreeCamera();
+            }
+            return;
+          }
+          if (freeCam.active) {
+            freeCam.keys.add(event.key.toLowerCase());
+          }
+        });
+
+        window.addEventListener("keyup", function (event) {
+          freeCam.keys.delete(event.key.toLowerCase());
+        });
+      }
+
+      function enterFreeCamera() {
+        freeCam.active = true;
+        cameraMode = "free";
+        controls.enabled = false;
+        const euler = new THREE.Euler().setFromQuaternion(
+          camera.quaternion,
+          "YXZ",
+        );
+        freeCam.yaw = euler.y;
+        freeCam.pitch = euler.x;
+        camera.rotation.set(freeCam.pitch, freeCam.yaw, 0, "YXZ");
+        document.getElementById("freecam-hud").style.display = "block";
+        document
+          .querySelectorAll(".view-toolbar button")
+          .forEach(function (button) {
+            button.classList.remove("active");
+            if (button.id === "btn-cam-free") {
+              button.classList.add("active");
+            }
+          });
+        renderer.domElement.requestPointerLock();
+      }
+
+      function exitFreeCamera() {
+        freeCam.active = false;
+        freeCam.keys.clear();
+        controls.enabled = true;
+        if (document.exitPointerLock) {
+          document.exitPointerLock();
+        }
+        document.getElementById("freecam-hud").style.display = "none";
+        document.getElementById("btn-cam-orbit").classList.add("active");
+        cameraMode = "orbit";
+      }
+
+      function updateFreeCamera() {
+        if (!freeCam.active) {
+          return;
+        }
+        const now = performance.now();
+        let lastTime = now;
+        if (freeCam.lastTime) {
+          lastTime = freeCam.lastTime;
+        }
+        const delta = Math.min((now - lastTime) / 1000, 0.05);
+        freeCam.lastTime = now;
+
+        const direction = new THREE.Vector3();
+        camera.getWorldDirection(direction);
+        direction.y = 0;
+        direction.normalize();
+        const right = new THREE.Vector3()
+          .crossVectors(direction, camera.up)
+          .normalize();
+        const movement = new THREE.Vector3();
+
+        if (freeCam.keys.has("w")) movement.add(direction);
+        if (freeCam.keys.has("s")) movement.sub(direction);
+        if (freeCam.keys.has("d")) movement.add(right);
+        if (freeCam.keys.has("a")) movement.sub(right);
+        if (freeCam.keys.has(" ")) movement.y += 1;
+        if (freeCam.keys.has("control")) movement.y -= 1;
+
+        if (movement.lengthSq() > 0) {
+          movement.normalize().multiplyScalar(freeCam.speed * delta);
+          camera.position.add(movement);
+        }
+      }
+
+      function setCameraMode(mode, targetBtn) {
+        if (freeCam.active) {
+          exitFreeCamera();
+        }
+        cameraMode = mode;
+        document.querySelectorAll(".view-toolbar button").forEach(function (b) {
+          b.classList.remove("active");
+        });
+        targetBtn.classList.add("active");
+
+        if (mode === "top") {
+          camera.position.set(0, 7.5, -1.8);
+          controls.target.set(0, -0.85, -1.8);
+        } else if (mode === "orbit") {
+          camera.position.set(-3.5, 1.2, 2.5);
+          controls.target.set(0, -0.4, -1.8);
+        }
+      }
+
+      // UI Events Wiring
+      document.getElementById("btn-start-nav").onclick = toggleDroneNavigation;
+
+      document.getElementById("btn-reset-nav").onclick = function () {
+        isNavigating = false;
+        navProgress = 0;
+        document.getElementById("nav-btn-text").innerHTML = "▶ Start Drone";
+        document.getElementById("nav-badge").innerText = "Ready";
+        document.getElementById("nav-badge").style.color = "var(--green)";
+        document.getElementById("hud-nav-fill").style.width = "0%";
+        if (currentPath.length > 0) {
+          robotAvatar.position.set(currentPath[0].x, -0.82, currentPath[0].z);
+        }
+      };
+
+      document.getElementById("speed-slider").oninput = function (e) {
+        navSpeed = parseFloat(e.target.value);
+        document.getElementById("speed-val").innerText =
+          navSpeed.toFixed(1) + "x";
+      };
+
+      document.getElementById("btn-cam-drone").onclick = function (e) {
+        setCameraMode("drone", e.currentTarget);
+      };
+      document.getElementById("btn-cam-orbit").onclick = function (e) {
+        setCameraMode("orbit", e.currentTarget);
+      };
+      document.getElementById("btn-cam-top").onclick = function (e) {
+        setCameraMode("top", e.currentTarget);
+      };
+      document.getElementById("btn-cam-free").onclick = enterFreeCamera;
+
+      document.querySelectorAll(".render-mode-btn").forEach(function (button) {
+        button.onclick = function () {
+          applyRenderMode(button.dataset.renderMode);
+        };
+      });
+
+      document.getElementById("btn-open-copilot").onclick = function () {
+        if (!copilotOpen) {
+          toggleCopilotDrawer();
+        }
+        runCopilotDiagnosis(currentSelectedAsset);
+      };
+
+      document.getElementById("btn-submit-wo").onclick = async function () {
+        try {
+          const res = await fetch("/api/work-orders/draft", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ asset_id: currentSelectedAsset }),
+          });
+          const wo = await res.json();
+          showToast(
+            "Maintenance Work Order " + wo.work_order_id + " generated!",
+          );
+        } catch (err) {
+          showToast("Error generating work order");
+        }
+      };
+
+      document.getElementById("asset-search").oninput = function (e) {
+        const q = e.target.value.toLowerCase();
+        const filtered = assetsData.filter(function (a) {
+          return (
+            a.tag.toLowerCase().includes(q) ||
+            a.asset_class.toLowerCase().includes(q) ||
+            a.area_name.toLowerCase().includes(q)
+          );
+        });
+        renderAssetList(filtered);
+      };
+
+      function showToast(msg) {
+        const t = document.getElementById("toast");
+        t.innerText = msg;
+        t.classList.add("show");
+        setTimeout(function () {
+          t.classList.remove("show");
+        }, 3500);
+      }
+
+      function onWindowResize() {
+        const container = document.getElementById("canvas-container");
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+      }
+
+      window.onload = function () {
+        init3D();
+        runCopilotDiagnosis("ASSET-017");
+      };
+    </script>
+  </body>
+</html>
