@@ -1,12 +1,18 @@
-# Environment and secrets
+# ==============================================================================
+# Environment & Secrets
+# ==============================================================================
 .env
 .env.*
 !.env.example
 !.env.template
 *.env
 *.secret
+*.pem
+*.key
 
-# Python
+# ==============================================================================
+# Python & Bytecode
+# ==============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -18,6 +24,7 @@ dist/
 downloads/
 eggs/
 .eggs/
+lib/
 lib64/
 parts/
 sdist/
@@ -29,13 +36,21 @@ share/python-wheels/
 .installed.cfg
 MANIFEST
 
-# Python tooling and virtual environments
+# ==============================================================================
+# Virtual Environments & Package Managers (uv, pip, venv, poetry, conda)
+# ==============================================================================
 .venv/
 venv/
 env/
 ENV/
 .uv/
 .python-version
+.conda/
+.direnv/
+
+# ==============================================================================
+# Testing, Coverage & Linters
+# ==============================================================================
 .pytest_cache/
 .coverage
 .coverage.*
@@ -44,17 +59,28 @@ htmlcov/
 .ruff_cache/
 .pytype/
 .hypothesis/
+coverage/
+out/
 
-# Local application data and logs
+# ==============================================================================
+# Databases, SQLite Journals & Runtime Caches
+# ==============================================================================
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 *.sqlite
 *.sqlite3
+backend/database.db*
 *.log
 logs/
 tmp/
+temp/
 .cache/
-.db*
-# IDE and OS files
+
+# ==============================================================================
+# IDEs, Editors & OS Metadata
+# ==============================================================================
 .idea/
 .vscode/*
 !.vscode/extensions.json
@@ -66,19 +92,21 @@ tmp/
 *~
 .DS_Store
 Thumbs.db
-.json
-# Build and coverage output
-coverage/
-out/
-
-# Project-local data and generated files
-backend/database.db
+ehthumbs.db
+Desktop.ini
 .agents/
 
-# Large local challenge downloads
+# ==============================================================================
+# Large Binary Datasets & Models (>100MB / GitHub Push Limit)
+# ==============================================================================
+# Large 3D Gaussian Splatting / Raw Scans
+*.ply.zip
+*.ply.tar.gz
+**/Industrial Boiler Room.ply
+data/Industrial Boiler Room.ply
 Valmet challenge data/
 
-# Large binary point cloud / splat capture (>100MB exceeds GitHub push limit)
-Industrial Boiler Room.ply
+# Optional large model weights (keep pretrained downloads local)
+*.pt.cache
 backend/database.db-shm
 backend/database.db-wal

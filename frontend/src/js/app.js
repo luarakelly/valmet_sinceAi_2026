@@ -6,13 +6,23 @@ let robotAvatar = null;
 let assetsData = [];
 let currentPath = [];
 let navProgress = 0;
+let pathLengths = [0];
+let lastFrameTime = performance.now();
 let isNavigating = false;
 let navSpeed = 1.5;
 let cameraMode = "orbit";
 let currentSelectedAsset = "ASSET-017";
-let renderMode = "mesh";
+let pointSize = 0.070;
+let renderMode = "splat";
 let sidebarOpen = true;
 let copilotOpen = true;
+
+// Canonical scene frame from the backend: Y up, floor at y = 0, room centred on x = z = 0.
+const ROBOT_GROUND_OFFSET = 0.15;
+const PROXIMITY_RADIUS = 1.5;
+const ROBOT_SPEED_M_S = 0.8;
+const ORBIT_VIEW = { position: [-5.5, 3.2, 4.5], target: [0, 0.8, 0] };
+const TOP_VIEW = { position: [0, 9, 0.01], target: [0, 0, 0] };
 
 const freeCam = {
   active: false,
@@ -35,7 +45,7 @@ function init3D() {
     0.05,
     120,
   );
-  camera.position.set(-3.5, 1.2, 2.5);
+  camera.position.set(...ORBIT_VIEW.position);
 
   renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -51,7 +61,7 @@ function init3D() {
   controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.05;
-  controls.target.set(0, -0.4, -1.8);
+  controls.target.set(...ORBIT_VIEW.target);
 
   const ambLight = new THREE.AmbientLight(0xffffff, 0.9);
   scene.add(ambLight);
@@ -60,12 +70,12 @@ function init3D() {
   scene.add(dirLight);
 
   const grid = new THREE.GridHelper(16, 16, 0x183040, 0x0b1722);
-  grid.position.y = -0.92;
+  grid.position.y = 0;
   grid.material.transparent = true;
   grid.material.opacity = 0.42;
   scene.add(grid);
 
-  boundingFramesGroup.visible = false;
+  boundingFramesGroup.visible = true;
   scene.add(boundingFramesGroup);
 
   createRobotAvatar();
@@ -199,160 +209,223 @@ function createRobotAvatar() {
   ring.position.y = -0.1;
   robotAvatar.add(ring);
 
-  robotAvatar.position.set(-3.0, -0.82, 0.8);
+  robotAvatar.position.set(0, ROBOT_GROUND_OFFSET, 0);
   scene.add(robotAvatar);
 }
 
 /**
- * Filters out sparse floating outlier noise using a fast 3D spatial hash grid
- * and normalizes colors if missing or dark.
+ * Prepares the point cloud geometry with guaranteed bounding volumes and vertex colors.
  */
-function cleanAndPreparePointGeometry(rawGeometry, gridCellSize = 0.12, minNeighbors = 4) {
-  const posAttr = rawGeometry.attributes.position;
-  const count = posAttr.count;
-  const hasColor = rawGeometry.hasAttribute("color");
-  const colAttr = hasColor ? rawGeometry.attributes.color : null;
-
-  // 1. Spatial density pass to strip floating outlier noise
-  const gridCounts = new Map();
-  const cellKeys = new Array(count);
-
-  for (let i = 0; i < count; i++) {
-    const gx = Math.floor(posAttr.getX(i) / gridCellSize);
-    const gy = Math.floor(posAttr.getY(i) / gridCellSize);
-    const gz = Math.floor(posAttr.getZ(i) / gridCellSize);
-    const key = `${gx},${gy},${gz}`;
-    cellKeys[i] = key;
-    gridCounts.set(key, (gridCounts.get(key) || 0) + 1);
-  }
-
-  const cleanPositions = [];
-  const cleanColors = [];
-
-  for (let i = 0; i < count; i++) {
-    if (gridCounts.get(cellKeys[i]) < minNeighbors) continue; // Drop floating noise
-
-    const x = posAttr.getX(i);
-    const y = posAttr.getY(i);
-    const z = posAttr.getZ(i);
-    cleanPositions.push(x, y, z);
-
-    if (colAttr) {
-      cleanColors.push(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i));
-    } else {
-      cleanColors.push(0.45, 0.78, 0.92);
+function preparePointGeometry(geometry) {
+  if (!geometry.hasAttribute("color")) {
+    const count = geometry.attributes.position.count;
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < colors.length; i += 3) {
+      colors[i] = 0.45;
+      colors[i + 1] = 0.78;
+      colors[i + 2] = 0.92;
     }
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   }
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
 
-  const cleanGeo = new THREE.BufferGeometry();
-  cleanGeo.setAttribute("position", new THREE.Float32BufferAttribute(cleanPositions, 3));
-  cleanGeo.setAttribute("color", new THREE.Float32BufferAttribute(cleanColors, 3));
-
-  // Rotate 180° around Z to right-side up the Gaussian Splat scan into Three.js coordinates
-  cleanGeo.rotateZ(Math.PI);
-
-  cleanGeo.computeBoundingBox();
-  cleanGeo.computeBoundingSphere();
-  return cleanGeo;
+function cleanAndPreparePointGeometry(rawGeometry) {
+  return preparePointGeometry(rawGeometry);
 }
 
 function createPointMaterial(geometry) {
+  if (!geometry.hasAttribute("color")) {
+    const color = new Float32Array(geometry.attributes.position.count * 3);
+    for (let i = 0; i < color.length; i += 3) {
+      color[i] = 0.45;
+      color[i + 1] = 0.78;
+      color[i + 2] = 0.92;
+    }
+    geometry.setAttribute("color", new THREE.BufferAttribute(color, 3));
+  }
+
   geometry.computeBoundingBox();
   const bounds = geometry.boundingBox;
 
+  let minY = -1.0;
+  let maxY = 1.0;
+  if (bounds) {
+    minY = bounds.min.y;
+    maxY = bounds.max.y;
+  }
+
+  let modeVal = 0;
+  if (renderMode === "studio") {
+    modeVal = 1;
+  } else if (renderMode === "heat") {
+    modeVal = 2;
+  }
+
+  const container = document.getElementById("canvas-container");
+  let viewportHeight = 800.0;
+  if (container && container.clientHeight > 0) {
+    viewportHeight = container.clientHeight;
+  }
+
+  let fovHalfRad = THREE.MathUtils.degToRad(30.0);
+  if (camera && camera.fov) {
+    fovHalfRad = THREE.MathUtils.degToRad(camera.fov * 0.5);
+  }
+  const projScale = viewportHeight / (2.0 * Math.tan(fovHalfRad));
+
+  let currentPointSize = 0.088;
+  if (renderMode === "studio") {
+    currentPointSize = 0.065;
+  } else if (renderMode === "heat") {
+    currentPointSize = 0.065;
+  }
+
   return new THREE.ShaderMaterial({
     uniforms: {
-      uPointSize: { value: 0.055 },
-      uMode: {
-        value: renderMode === "studio" ? 1 : renderMode === "heat" ? 2 : 0,
-      },
-      uMinY: { value: bounds ? bounds.min.y : -1 },
-      uMaxY: { value: bounds ? bounds.max.y : 1 },
+      uPointSize: { value: currentPointSize },
+      uScale: { value: projScale },
+      uOpacity: { value: 0.98 },
+      uMode: { value: modeVal },
+      uMinY: { value: minY },
+      uMaxY: { value: maxY },
     },
     vertexShader: `
       attribute vec3 color;
       uniform float uPointSize;
+      uniform float uScale;
       uniform float uMinY;
       uniform float uMaxY;
       varying vec3 vColor;
       varying float vHeight;
-      varying float vDepth;
 
       void main() {
         vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
         float heightRange = max(uMaxY - uMinY, 0.001);
         vHeight = clamp((position.y - uMinY) / heightRange, 0.0, 1.0);
         vColor = color;
-        vDepth = -viewPosition.z;
 
-        // Perspective-scaled splat size
-        gl_PointSize = clamp(uPointSize * (340.0 / max(-viewPosition.z, 0.1)), 2.0, 28.0);
+        // Perspective splat footprint scaling with distance attenuation
+        float depth = max(-viewPosition.z, 0.1);
+        gl_PointSize = clamp(uPointSize * (uScale / depth), 3.0, 128.0);
         gl_Position = projectionMatrix * viewPosition;
       }
     `,
     fragmentShader: `
+      uniform float uOpacity;
       uniform int uMode;
       varying vec3 vColor;
       varying float vHeight;
 
       vec3 heatColor(float value) {
-        vec3 cool = vec3(0.02, 0.55, 0.95);
-        vec3 warm = vec3(1.0, 0.25, 0.08);
-        return mix(cool, warm, smoothstep(0.15, 0.85, value));
+        vec3 cool = vec3(0.04, 0.45, 0.95);
+        vec3 mid = vec3(0.12, 0.92, 0.55);
+        vec3 warm = vec3(0.98, 0.72, 0.08);
+        vec3 hot = vec3(0.95, 0.18, 0.06);
+
+        if (value < 0.33) {
+          return mix(cool, mid, value / 0.33);
+        } else if (value < 0.66) {
+          return mix(mid, warm, (value - 0.33) / 0.33);
+        } else {
+          return mix(warm, hot, (value - 0.66) / 0.34);
+        }
       }
 
       void main() {
-        // Circular disc with pseudo-3D normal shading
+        // Continuous soft Gaussian splat profile with ellipsoidal / circular falloff
         vec2 uv = gl_PointCoord * 2.0 - 1.0;
         float r2 = dot(uv, uv);
-        if (r2 > 1.0) discard; // Hard alpha cutout so depthWrite works cleanly!
+        if (r2 > 1.0) {
+          discard;
+        }
 
-        float z = sqrt(1.0 - r2);
-        vec3 normal = normalize(vec3(uv.x, -uv.y, z));
-        vec3 lightDir = normalize(vec3(0.4, 0.8, 0.6));
+        // True Gaussian radial attenuation: exp(-2.0 * r^2)
+        float gaussian = exp(-2.0 * r2);
+        float edgeCut = 1.0 - smoothstep(0.70, 1.0, r2);
+        float splatAlpha = gaussian * edgeCut * uOpacity;
+        if (splatAlpha < 0.02) {
+          discard;
+        }
+
+        // Pseudo-3D spherical normal impostor
+        float z = sqrt(max(0.0, 1.0 - r2));
+        vec3 normal = normalize(vec3(uv.x * 0.6, -uv.y * 0.6, z * 1.5));
+        vec3 lightDir = normalize(vec3(0.35, 0.75, 0.55));
         float diff = max(dot(normal, lightDir), 0.0);
-        float shade = 0.65 + 0.35 * diff;
+        float shade = 0.85 + 0.15 * diff;
 
         vec3 outputColor = vColor;
         if (uMode == 0) {
-          // Boost contrast & apply spherical impostor shading
-          outputColor = pow(vColor, vec3(0.85)) * shade;
+          // Photorealistic Splat mode: full fidelity, gamma adjustment & 3D curvature
+          outputColor = pow(vColor, vec3(0.92)) * shade;
+          outputColor += vec3(0.025) * exp(-4.0 * r2);
         } else if (uMode == 1) {
-          outputColor = mix(vec3(0.06, 0.22, 0.35), vec3(0.15, 0.88, 0.96), vHeight) * shade;
+          // Studio Engineering mode: digital twin cyber-cyan height gradient
+          vec3 cyberGradient = mix(vec3(0.03, 0.22, 0.38), vec3(0.00, 0.88, 0.98), vHeight);
+          outputColor = mix(outputColor, cyberGradient, 0.65) * shade;
+          outputColor += vec3(0.04, 0.10, 0.15) * exp(-4.0 * r2);
         } else if (uMode == 2) {
+          // Heatmap thermal inspection mode
           outputColor = heatColor(vHeight) * shade;
         }
 
-        gl_FragColor = vec4(outputColor, 1.0);
+        gl_FragColor = vec4(outputColor, splatAlpha);
       }
     `,
-    transparent: false,
-    depthWrite: true,
+    transparent: true,
+    depthWrite: false,
     depthTest: true,
+    blending: THREE.NormalBlending,
   });
-}
-
-function createMeshMaterial(geometry) {
-  return createPointMaterial(geometry);
-}
-
-function createVoxelMesh(pointGeometry) {
-  return cleanAndPreparePointGeometry(pointGeometry, 0.12, 4);
 }
 
 function applyRenderMode(mode) {
   renderMode = mode;
-  const modeIndex = mode === "studio" ? 1 : mode === "heat" ? 2 : 0;
-  document.querySelectorAll(".render-mode-btn").forEach(function (button) {
-    const active = button.dataset.renderMode === mode;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", active ? "true" : "false");
-  });
+  let modeIndex = 0;
+  if (mode === "studio") {
+    modeIndex = 1;
+  } else if (mode === "heat") {
+    modeIndex = 2;
+  }
+
+  document
+    .querySelectorAll(".render-mode-btn[data-render-mode]")
+    .forEach(function (button) {
+      let active = false;
+      if (button.dataset.renderMode === mode) {
+        active = true;
+      }
+      button.classList.toggle("active", active);
+      if (active) {
+        button.setAttribute("aria-pressed", "true");
+      } else {
+        button.setAttribute("aria-pressed", "false");
+      }
+    });
+
   if (pointCloud && pointCloud.material && pointCloud.material.uniforms) {
     if (pointCloud.material.uniforms.uMode) {
       pointCloud.material.uniforms.uMode.value = modeIndex;
     }
+    if (pointCloud.material.uniforms.uPointSize) {
+      if (mode === "splat") {
+        pointCloud.material.uniforms.uPointSize.value = 0.088;
+      } else {
+        pointCloud.material.uniforms.uPointSize.value = 0.065;
+      }
+    }
+    if (pointCloud.material.uniforms.uOpacity) {
+      if (mode === "heat") {
+        pointCloud.material.uniforms.uOpacity.value = 0.92;
+      } else {
+        pointCloud.material.uniforms.uOpacity.value = 0.98;
+      }
+    }
   }
+
   showToast("Render mode: " + mode.charAt(0).toUpperCase() + mode.slice(1));
 }
 
@@ -415,8 +488,97 @@ async function analyzeCurrentView() {
   }
 }
 
+// Surface mesh reconstructed from the Gaussian splat (see backend splat_mesh.py).
+// Modes: 0 = scan colours, 1 = studio (height-tinted clay), 2 = heat (height ramp).
+function createMeshMaterial(geometry) {
+  geometry.computeBoundingBox();
+  const bounds = geometry.boundingBox;
+  let modeVal = 0;
+  if (renderMode === "studio") {
+    modeVal = 1;
+  } else if (renderMode === "heat") {
+    modeVal = 2;
+  }
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uMode: { value: modeVal },
+      uOpacity: { value: 1.0 },
+      uMinY: { value: bounds.min.y },
+      uMaxY: { value: bounds.max.y },
+    },
+    vertexShader: `
+      attribute vec3 color;
+      uniform float uMinY;
+      uniform float uMaxY;
+      varying vec3 vColor;
+      varying vec3 vNormal;
+      varying float vHeight;
+      void main() {
+        vColor = color;
+        vNormal = normalize(mat3(modelMatrix) * normal);
+        vHeight = clamp((position.y - uMinY) / max(uMaxY - uMinY, 0.001), 0.0, 1.0);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform int uMode;
+      uniform float uOpacity;
+      varying vec3 vColor;
+      varying vec3 vNormal;
+      varying float vHeight;
+      vec3 heatColor(float v) {
+        vec3 a = vec3(0.04, 0.45, 0.95), b = vec3(0.12, 0.92, 0.55), c = vec3(0.98, 0.72, 0.08), d = vec3(0.95, 0.18, 0.06);
+        if (v < 0.33) return mix(a, b, v / 0.33);
+        if (v < 0.66) return mix(b, c, (v - 0.33) / 0.33);
+        return mix(c, d, (v - 0.66) / 0.34);
+      }
+      void main() {
+        vec3 n = normalize(vNormal);
+        if (!gl_FrontFacing) n = -n;
+        vec3 key = normalize(vec3(0.35, 0.85, 0.45));
+        vec3 fill = normalize(vec3(-0.6, 0.3, -0.5));
+        float light = 0.42 + 0.48 * max(dot(n, key), 0.0) + 0.18 * max(dot(n, fill), 0.0) + 0.08 * n.y;
+        vec3 base = vColor;
+        if (uMode == 1) {
+          base = mix(vec3(0.70, 0.74, 0.78), vec3(0.55, 0.80, 0.92), vHeight * 0.6);
+        } else if (uMode == 2) {
+          base = heatColor(vHeight);
+        }
+        gl_FragColor = vec4(base * light, uOpacity);
+      }
+    `,
+    side: THREE.DoubleSide,
+  });
+}
+
 function loadBoilerRoomPLY() {
-  showToast("Streaming Industrial Boiler Room PLY...");
+  showToast("Loading boiler room mesh...");
+  const loader = new THREE.PLYLoader();
+  loader.load(
+    "/api/scene/boiler-room-mesh.ply",
+    function (geometry) {
+      if (pointCloud) {
+        scene.remove(pointCloud);
+      }
+      geometry.computeVertexNormals();
+      pointCloud = new THREE.Mesh(geometry, createMeshMaterial(geometry));
+      scene.add(pointCloud);
+      applyRenderMode(renderMode);
+      const faces = geometry.index ? geometry.index.count / 3 : geometry.attributes.position.count / 3;
+      const pointCountEl = document.getElementById("engine-point-count");
+      if (pointCountEl) {
+        pointCountEl.innerText = "Boiler room mesh · " + Math.round(faces / 1000) + "k triangles";
+      }
+    },
+    undefined,
+    function (err) {
+      console.warn("Mesh unavailable, falling back to point cloud", err);
+      loadBoilerRoomPointCloud();
+    },
+  );
+}
+
+function loadBoilerRoomPointCloud() {
   const loader = new THREE.PLYLoader();
 
   loader.load(
@@ -426,19 +588,20 @@ function loadBoilerRoomPLY() {
         scene.remove(pointCloud);
       }
 
-      // Strip sparse floating noise, right-side up orientation, and build clean splat impostors
-      const geometry = cleanAndPreparePointGeometry(rawGeometry, 0.12, 5);
+      const geometry = cleanAndPreparePointGeometry(rawGeometry, 0.12, 4);
       const material = createPointMaterial(geometry);
 
       pointCloud = new THREE.Points(geometry, material);
       scene.add(pointCloud);
 
+      applyRenderMode(renderMode);
+
       const finalCount = geometry.attributes.position.count;
       const pointCountEl = document.getElementById("engine-point-count");
       if (pointCountEl) {
-        pointCountEl.innerText = finalCount.toLocaleString() + " filtered points";
+        pointCountEl.innerText = finalCount.toLocaleString() + " splats verified";
       }
-      showToast(`Boiler Room loaded (${finalCount.toLocaleString()} clean points)`);
+      showToast("Boiler Room loaded (" + finalCount.toLocaleString() + " splats)");
     },
     undefined,
     function (err) {
@@ -468,27 +631,31 @@ function generateProceduralPointcloud() {
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geo.computeBoundingBox();
-  const geometry = cleanAndPreparePointGeometry(geo, 0.12, 1);
-  const mat = createPointMaterial(geometry);
-  pointCloud = new THREE.Points(geometry, mat);
+  const mat = createPointMaterial(geo);
+  pointCloud = new THREE.Points(geo, mat);
   scene.add(pointCloud);
   applyRenderMode(renderMode);
 }
 
 async function fetchAssetsAndFrames() {
   try {
-    const [assetsRes, framesRes] = await Promise.all([
+    const [assetsRes, framesRes, summaryRes] = await Promise.all([
       fetch("/api/assets"),
       fetch("/api/scene/frames"),
+      fetch("/api/scene/summary"),
     ]);
     assetsData = await assetsRes.json();
     const frames = await framesRes.json();
+    const summary = await summaryRes.json();
+    currentSelectedAsset = summary.target_asset_id;
+    robotAvatar.position.set(summary.entry.x, ROBOT_GROUND_OFFSET, summary.entry.z);
 
     renderAssetList(assetsData);
     build3DBoundingBoxes(frames);
     const assetCountEl = document.getElementById("asset-count");
     if (assetCountEl) {
-      assetCountEl.innerText = frames.length + " Objects";
+      assetCountEl.innerText =
+        frames.length + " Objects · " + summary.mapped_asset_count + " Assets";
     }
     loadNavigationPath(currentSelectedAsset);
   } catch (e) {
@@ -551,27 +718,38 @@ function build3DBoundingBoxes(frames) {
     } else if (frame.state === "attention_required") {
       colorHex = 0xef4444;
       colorCss = "#ef4444";
-    } else if (frame.is_extracted) {
+    } else if (!frame.asset_id) {
       colorHex = 0x00d2ff;
       colorCss = "#00d2ff";
     }
 
     const isSelected = frame.id === currentSelectedAsset;
+    let boxLineWidth = 1;
+    let boxLineOpacity = 0.08;
+    let boxFillOpacity = 0.0;
+    let boxLabelOpacity = 0.0;
+    if (isSelected) {
+      boxLineWidth = 2;
+      boxLineOpacity = 0.95;
+      boxFillOpacity = 0.15;
+      boxLabelOpacity = 1.0;
+    }
+
     const boxGeo = new THREE.BoxGeometry(w, h, d);
     const edges = new THREE.EdgesGeometry(boxGeo);
     const lineMat = new THREE.LineBasicMaterial({
       color: colorHex,
-      linewidth: isSelected ? 2 : 1,
+      linewidth: boxLineWidth,
       transparent: true,
-      opacity: isSelected ? 0.95 : 0.08,
+      opacity: boxLineOpacity,
     });
     const boxMesh = new THREE.LineSegments(edges, lineMat);
-    boxMesh.position.set(x, y + h / 2, z);
+    boxMesh.position.set(x, y, z);
 
     const fillMat = new THREE.MeshBasicMaterial({
       color: colorHex,
       transparent: true,
-      opacity: isSelected ? 0.15 : 0.0,
+      opacity: boxFillOpacity,
       depthWrite: false,
     });
     const fillMesh = new THREE.Mesh(boxGeo, fillMat);
@@ -579,25 +757,28 @@ function build3DBoundingBoxes(frames) {
 
     const labelSprite = createFloatingLabelSprite(
       frame.tag || frame.id,
-      frame.state || "HEALTHY",
+      frame.state || frame.label.replace(/_/g, " "),
       colorCss,
     );
     labelSprite.position.set(0, h / 2 + 0.35, 0);
-    labelSprite.material.opacity = isSelected ? 1.0 : 0.0;
+    labelSprite.material.opacity = boxLabelOpacity;
     boxMesh.add(labelSprite);
 
     boxMesh.userData = {
       id: frame.id,
       tag: frame.tag,
-      state: frame.state || "healthy",
-      health: frame.health || 100,
+      state: frame.state,
+      health: frame.health,
+      label: frame.label,
+      assetClass: frame.class,
+      assetId: frame.asset_id,
       pos: [x, y, z],
       size: [w, h, d],
       lineMat: lineMat,
       fillMat: fillMat,
       labelSprite: labelSprite,
       baseColor: colorHex,
-      isExtracted: !!frame.is_extracted,
+      isMapped: !!frame.asset_id,
     };
 
     boundingFramesGroup.add(boxMesh);
@@ -611,6 +792,7 @@ async function loadNavigationPath(targetId) {
     );
     const data = await res.json();
     currentPath = data.waypoints;
+    pathLengths = cumulativeLengths(currentPath);
 
     document.getElementById("hud-target-name").innerText =
       "Target: " + data.target_tag;
@@ -620,6 +802,16 @@ async function loadNavigationPath(targetId) {
   } catch (err) {
     console.error("Path error", err);
   }
+}
+
+function cumulativeLengths(waypoints) {
+  const lengths = [0];
+  for (let i = 1; i < waypoints.length; i++) {
+    const dx = waypoints[i].x - waypoints[i - 1].x;
+    const dz = waypoints[i].z - waypoints[i - 1].z;
+    lengths.push(lengths[i - 1] + Math.hypot(dx, dz));
+  }
+  return lengths;
 }
 
 function renderPathRibbon(waypoints) {
@@ -654,14 +846,13 @@ function renderAssetList(assets) {
       cardClass = "asset-card active";
     }
     card.className = cardClass;
-    card.style.background =
-      a.asset_id === currentSelectedAsset
-        ? "rgba(0, 210, 255, 0.16)"
-        : "#0c1524";
-    card.style.border =
-      a.asset_id === currentSelectedAsset
-        ? "1px solid #00d2ff"
-        : "1px solid rgba(255,255,255,0.12)";
+    if (a.asset_id === currentSelectedAsset) {
+      card.style.background = "rgba(0, 210, 255, 0.16)";
+      card.style.border = "1px solid #00d2ff";
+    } else {
+      card.style.background = "#0c1524";
+      card.style.border = "1px solid rgba(255,255,255,0.12)";
+    }
     card.style.borderRadius = "6px";
     card.style.marginBottom = "4px";
 
@@ -684,6 +875,11 @@ function renderAssetList(assets) {
       healthColor = "#f59e0b";
     }
 
+    let assetClassLabel = "EQUIPMENT";
+    if (a.asset_class) {
+      assetClassLabel = a.asset_class.replace(/_/g, " ");
+    }
+
     const mainRow = document.createElement("div");
     mainRow.className = "asset-card-main";
     mainRow.style.cssText =
@@ -697,7 +893,7 @@ function renderAssetList(assets) {
       a.tag +
       "</span>" +
       '<span style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
-      (a.asset_class ? a.asset_class.replace(/_/g, " ") : "EQUIPMENT") +
+      assetClassLabel +
       "</span>" +
       "</div>" +
       '<span style="font-family:var(--font-mono);font-weight:700;font-size:12px;color:' +
@@ -755,14 +951,6 @@ function focusAssetIn3D(assetId) {
     }
   });
 
-  if (!targetPos) {
-    assetsData.forEach(function (a) {
-      if (a.asset_id === assetId && a.anchor) {
-        targetPos = [a.anchor.pos_x, a.anchor.pos_y, a.anchor.pos_z];
-      }
-    });
-  }
-
   if (targetPos) {
     if (cameraMode !== "orbit") {
       setCameraMode("orbit", document.getElementById("btn-cam-orbit"));
@@ -789,12 +977,22 @@ async function selectAsset(assetId) {
   boundingFramesGroup.children.forEach(function (c) {
     if (c.userData && c.userData.lineMat) {
       const isSel = c.userData.id === assetId;
-      c.userData.lineMat.opacity = isSel ? 1.0 : 0.08;
-      if (c.userData.fillMat) {
-        c.userData.fillMat.opacity = isSel ? 0.2 : 0.0;
-      }
-      if (c.userData.labelSprite) {
-        c.userData.labelSprite.material.opacity = isSel ? 1.0 : 0.0;
+      if (isSel) {
+        c.userData.lineMat.opacity = 1.0;
+        if (c.userData.fillMat) {
+          c.userData.fillMat.opacity = 0.2;
+        }
+        if (c.userData.labelSprite) {
+          c.userData.labelSprite.material.opacity = 1.0;
+        }
+      } else {
+        c.userData.lineMat.opacity = 0.08;
+        if (c.userData.fillMat) {
+          c.userData.fillMat.opacity = 0.0;
+        }
+        if (c.userData.labelSprite) {
+          c.userData.labelSprite.material.opacity = 0.0;
+        }
       }
     }
   });
@@ -818,14 +1016,18 @@ function openCopilotForAsset(assetId) {
   }
 }
 
-async function runCopilotDiagnosis(assetId) {
+async function runCopilotDiagnosis(assetId, question) {
+  const body = { asset_id: assetId };
+  if (question) {
+    body.query = question;
+  }
   try {
     const [assetRes, diagRes] = await Promise.all([
       fetch("/api/assets/" + encodeURIComponent(assetId)),
       fetch("/api/copilot/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asset_id: assetId }),
+        body: JSON.stringify(body),
       }),
     ]);
     const assetDossier = await assetRes.json();
@@ -910,24 +1112,36 @@ function updateCopilotDrawer(dossier, diag) {
   const rootCauseList = document.getElementById("root-cause-list");
   rootCauseList.innerHTML = "";
 
-  let rootCauses = [];
-  if (diag.multivariate_evidence && diag.multivariate_evidence.length > 0) {
-    rootCauses = diag.multivariate_evidence.slice(0, 2);
-  } else {
-    rootCauses = [
-      "Sensor reading deviation detected against nominal operating envelope",
-      "Urgency level flagged for inspection: " +
-        diag.condition_state.toUpperCase(),
-    ];
+  let rootCauses = diag.multivariate_evidence.slice(0, 4);
+  if (rootCauses.length === 0) {
+    rootCauses = ["No telemetry drift, alarms or similar cases found for this asset."];
   }
-
   rootCauses.forEach(function (cause) {
     const li = document.createElement("li");
     li.className = "root-cause-item";
-    li.innerHTML =
-      '<span class="root-cause-bullet">•</span><span>' + cause + "</span>";
+    const bullet = document.createElement("span");
+    bullet.className = "root-cause-bullet";
+    bullet.textContent = "•";
+    const text = document.createElement("span");
+    text.textContent = cause;
+    li.append(bullet, text);
     rootCauseList.appendChild(li);
   });
+
+  const actionList = document.getElementById("action-list");
+  actionList.innerHTML = "";
+  diag.recommended_actions.forEach(function (action) {
+    const li = document.createElement("li");
+    li.textContent = action;
+    actionList.appendChild(li);
+  });
+
+  document.getElementById("copilot-model-badge").innerText = diag.grounded_mode;
+  let answer = diag.diagnosis;
+  if (diag.answer) {
+    answer = diag.answer;
+  }
+  document.getElementById("copilot-answer").textContent = answer;
 
   const citBox = document.getElementById("evidence-citations-box");
   citBox.innerHTML = "";
@@ -1244,22 +1458,36 @@ function toggleDroneNavigation() {
 function animate() {
   requestAnimationFrame(animate);
 
+  const now = performance.now();
+  const frameSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
+  lastFrameTime = now;
+
   if (isNavigating && currentPath.length > 1) {
-    navProgress += 0.003 * navSpeed;
+    const totalLength = pathLengths[pathLengths.length - 1];
+    navProgress += (ROBOT_SPEED_M_S * navSpeed * frameSeconds) / totalLength;
     if (navProgress >= 1.0) {
       navProgress = 1.0;
       isNavigating = false;
       document.getElementById("nav-btn-text").innerHTML = "▶ Start Drone";
       document.getElementById("nav-badge").innerText = "Arrived";
       document.getElementById("nav-badge").style.color = "var(--green)";
-      showToast("Drone arrived at " + currentSelectedAsset);
+      showToast("Arrived at " + currentSelectedAsset + " — running AI diagnosis");
+      if (!copilotOpen) {
+        toggleCopilotDrawer();
+      }
       runCopilotDiagnosis(currentSelectedAsset);
     }
 
-    const totalSegments = currentPath.length - 1;
-    const segmentProgress = navProgress * totalSegments;
-    const segIdx = Math.min(Math.floor(segmentProgress), totalSegments - 1);
-    const subT = segmentProgress - segIdx;
+    const travelled = navProgress * totalLength;
+    let segIdx = 0;
+    while (segIdx < currentPath.length - 2 && pathLengths[segIdx + 1] < travelled) {
+      segIdx++;
+    }
+    const segLength = pathLengths[segIdx + 1] - pathLengths[segIdx];
+    let subT = 0;
+    if (segLength > 0) {
+      subT = (travelled - pathLengths[segIdx]) / segLength;
+    }
 
     const p1 = currentPath[segIdx];
     const p2 = currentPath[segIdx + 1];
@@ -1280,8 +1508,8 @@ function animate() {
     if (cameraMode === "drone") {
       camera.position.x = curX - Math.sin(heading) * 2.2;
       camera.position.z = curZ - Math.cos(heading) * 2.2;
-      camera.position.y = -0.15;
-      controls.target.set(curX, -0.6, curZ);
+      camera.position.y = 1.7;
+      controls.target.set(curX, 0.5, curZ);
     }
   }
 
@@ -1291,9 +1519,7 @@ function animate() {
 }
 
 function checkProximityEvents(rx, rz) {
-  const alertEl = document.getElementById("proximity-alert");
-  let foundNearby = null;
-  const PROXIMITY_RADIUS = 2.4;
+  const nearby = [];
 
   boundingFramesGroup.children.forEach(function (c) {
     if (c.userData && c.userData.pos) {
@@ -1310,39 +1536,78 @@ function checkProximityEvents(rx, rz) {
             c.userData.size[1] / 2 + 0.42 + Math.sin(Date.now() * 0.005) * 0.04;
         } else {
           const isSel = c.userData.id === currentSelectedAsset;
-          c.userData.lineMat.opacity = isSel ? 1.0 : 0.08;
-          c.userData.fillMat.opacity = isSel ? 0.2 : 0.0;
-          c.userData.labelSprite.material.opacity = isSel ? 1.0 : 0.0;
+          if (isSel) {
+            c.userData.lineMat.opacity = 1.0;
+            c.userData.fillMat.opacity = 0.2;
+            c.userData.labelSprite.material.opacity = 1.0;
+          } else {
+            c.userData.lineMat.opacity = 0.08;
+            c.userData.fillMat.opacity = 0.0;
+            c.userData.labelSprite.material.opacity = 0.0;
+          }
         }
       }
 
-      if (isNear && (!foundNearby || dist < foundNearby._dist)) {
-        foundNearby = Object.assign({}, c.userData, { _dist: dist });
+      if (isNear) {
+        nearby.push({ data: c.userData, dist: dist });
       }
     }
   });
 
-  if (foundNearby) {
-    alertEl.style.display = "flex";
-    document.getElementById("alert-tag").innerText =
-      (foundNearby.tag || foundNearby.id) + " Nearby (" + foundNearby.id + ")";
-    document.getElementById("alert-desc").innerText =
-      "Status: " +
-      (foundNearby.state ? foundNearby.state.toUpperCase() : "ACTIVE") +
-      " • Health: " +
-      (foundNearby.health || 98) +
-      "%";
+  renderNearbyAssets(nearby);
+}
 
-    let dotClass = foundNearby.state || "healthy";
-    if (foundNearby.state === "attention_required") {
+// Rebuilt only when the set of nearby frames changes, not every animation frame.
+let nearbyKey = "";
+
+function renderNearbyAssets(nearby) {
+  const alertEl = document.getElementById("proximity-alert");
+  const assets = nearby
+    .filter(function (n) {
+      return n.data.isMapped;
+    })
+    .sort(function (a, b) {
+      return a.dist - b.dist;
+    });
+  const key = assets
+    .map(function (n) {
+      return n.data.id;
+    })
+    .join("|") + "#" + nearby.length;
+  if (key === nearbyKey) {
+    return;
+  }
+  nearbyKey = key;
+
+  if (nearby.length === 0) {
+    alertEl.style.display = "none";
+    return;
+  }
+  alertEl.style.display = "flex";
+  document.getElementById("nearby-count").innerText =
+    assets.length + " assets · " + (nearby.length - assets.length) + " structures in " + PROXIMITY_RADIUS + " m";
+
+  const list = document.getElementById("nearby-list");
+  list.innerHTML = "";
+  assets.slice(0, 5).forEach(function (n) {
+    let dotClass = n.data.state;
+    if (dotClass === "attention_required") {
       dotClass = "attention";
     }
-    document.getElementById("alert-dot").className =
-      "status-dot status-" + dotClass;
-  } else {
-    alertEl.style.display = "none";
-  }
+    const li = document.createElement("li");
+    li.className = "nearby-item";
+    li.innerHTML =
+      '<span class="status-dot status-' + dotClass + '"></span>' +
+      "<b>" + n.data.tag + "</b>" +
+      "<span>" + n.data.assetClass + " · " + n.data.state + " · " + n.data.health + "%</span>" +
+      "<span>" + n.dist.toFixed(1) + " m</span>";
+    li.onclick = function () {
+      openCopilotForAsset(n.data.id);
+    };
+    list.appendChild(li);
+  });
 }
+window.appCheckProximityEvents = checkProximityEvents;
 
 function setupFreeCamera() {
   const canvas = renderer.domElement;
@@ -1472,11 +1737,11 @@ function setCameraMode(mode, targetBtn) {
   targetBtn.classList.add("active");
 
   if (mode === "top") {
-    camera.position.set(0, 7.5, -1.8);
-    controls.target.set(0, -0.85, -1.8);
+    camera.position.set(...TOP_VIEW.position);
+    controls.target.set(...TOP_VIEW.target);
   } else if (mode === "orbit") {
-    camera.position.set(-3.5, 1.2, 2.5);
-    controls.target.set(0, -0.4, -1.8);
+    camera.position.set(...ORBIT_VIEW.position);
+    controls.target.set(...ORBIT_VIEW.target);
   }
 }
 
@@ -1492,21 +1757,18 @@ if (btnSemanticExtract) {
         method: "POST",
       });
       const data = await res.json();
-      if (data.status === "success") {
+      if (res.ok) {
         build3DBoundingBoxes(data.all_frames);
         document.getElementById("asset-count").innerText =
-          data.all_frames.length +
-          " Objects (" +
-          data.extracted_count +
-          " Extracted)";
+          data.extracted_count + " Objects · " + data.mapped_asset_count + " Assets";
 
-        btnSemanticExtract.innerHTML = `<span>✔ ${data.extracted_count} Structural Assets Extracted</span>`;
+        btnSemanticExtract.innerHTML = `<span>✔ ${data.extracted_count} objects in ${data.processing_seconds}s</span>`;
         setTimeout(() => {
           btnSemanticExtract.disabled = false;
           btnSemanticExtract.innerHTML = origHtml;
         }, 3000);
       } else {
-        alert("Segmentation error: " + (data.message || "Unknown error"));
+        alert("Segmentation error: " + (data.detail || "Unknown error"));
         btnSemanticExtract.disabled = false;
         btnSemanticExtract.innerHTML = origHtml;
       }
@@ -1529,7 +1791,7 @@ document.getElementById("btn-reset-nav").onclick = function () {
   document.getElementById("nav-badge").style.color = "var(--green)";
   document.getElementById("hud-nav-fill").style.width = "0%";
   if (currentPath.length > 0) {
-    robotAvatar.position.set(currentPath[0].x, -0.82, currentPath[0].z);
+    robotAvatar.position.set(currentPath[0].x, ROBOT_GROUND_OFFSET, currentPath[0].z);
   }
 };
 
@@ -1557,6 +1819,22 @@ document
     };
   });
 document.getElementById("btn-vision-analyze").onclick = analyzeCurrentView;
+
+function askCopilot() {
+  const input = document.getElementById("copilot-question");
+  const question = input.value.trim();
+  if (!question) {
+    return;
+  }
+  document.getElementById("copilot-answer").textContent = "Thinking…";
+  runCopilotDiagnosis(currentSelectedAsset, question);
+}
+document.getElementById("btn-ask-copilot").onclick = askCopilot;
+document.getElementById("copilot-question").onkeydown = function (e) {
+  if (e.key === "Enter") {
+    askCopilot();
+  }
+};
 
 document.getElementById("btn-open-copilot").onclick = function () {
   if (!copilotOpen) {
@@ -1602,9 +1880,26 @@ function showToast(msg) {
 
 function onWindowResize() {
   const container = document.getElementById("canvas-container");
+  if (!container || container.clientHeight === 0) {
+    return;
+  }
   camera.aspect = container.clientWidth / container.clientHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(container.clientWidth, container.clientHeight);
+
+  if (
+    pointCloud &&
+    pointCloud.material &&
+    pointCloud.material.uniforms &&
+    pointCloud.material.uniforms.uScale
+  ) {
+    let fovHalfRad = THREE.MathUtils.degToRad(30.0);
+    if (camera && camera.fov) {
+      fovHalfRad = THREE.MathUtils.degToRad(camera.fov * 0.5);
+    }
+    pointCloud.material.uniforms.uScale.value =
+      container.clientHeight / (2.0 * Math.tan(fovHalfRad));
+  }
 }
 
 window.onload = function () {

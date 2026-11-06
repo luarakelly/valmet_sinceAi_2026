@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,14 +23,14 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ask_your_factory")
 
-from app.database import init_db, get_session
+from app.database import init_db
 from app.routes import router as api_router
+from app.metaverse.scene_processor import get_scene
 
 APP_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = APP_DIR.parent
 PROJECT_ROOT = BACKEND_DIR.parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
-DATA_DIR = PROJECT_ROOT / "data"
 
 
 @asynccontextmanager
@@ -42,6 +42,8 @@ async def lifespan(app: FastAPI):
         logger.info("Database initialized and verified.")
     except Exception as exc:
         logger.error(f"Error during init_db: {exc}", exc_info=True)
+
+    get_scene()  # Build frames, bindings and occupancy grid before the first request.
 
     yield
 
@@ -70,25 +72,6 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
-
-try:
-    from app.navigation import router as nav_router
-    app.include_router(nav_router, prefix="/api")
-except ImportError:
-    pass
-
-try:
-    from app.copilot import router as copilot_router
-    app.include_router(copilot_router, prefix="/api")
-except ImportError:
-    pass
-
-try:
-    from app.metaverse.routes import router as metaverse_router
-    app.include_router(metaverse_router, prefix="/api")
-    app.include_router(metaverse_router, prefix="/api/metaverse")
-except ImportError:
-    pass
 
 
 # Mount frontend assets
@@ -126,27 +109,6 @@ async def root_index():
   </ul>
 </body>
 </html>"""
-    )
-
-
-@app.get("/model/pointcloud.ply", include_in_schema=False)
-@app.get("/api/scene/boiler-room.ply", include_in_schema=False)
-async def get_pointcloud_ply():
-    """Serve the boiler room point cloud file to Three.js PLYLoader."""
-    candidates = [
-        DATA_DIR / "Industrial_Boiler_Room_standard.ply",
-        PROJECT_ROOT / "Industrial_Boiler_Room_standard.ply",
-        FRONTEND_DIR / "public" / "Industrial_Boiler_Room_standard.ply",
-        DATA_DIR / "Industrial Boiler Room.ply",
-        PROJECT_ROOT / "Industrial Boiler Room.ply",
-    ]
-    for p in candidates:
-        if p.exists():
-            return FileResponse(str(p), media_type="application/octet-stream", filename=p.name)
-
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Boiler room PLY model not found on server.",
     )
 
 

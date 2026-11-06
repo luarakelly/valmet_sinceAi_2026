@@ -1,36 +1,31 @@
-"""Ask Your Factory REST API Router.
+"""REST API (mounted at /api), following the builder pack's API_Contract plus scene endpoints.
 
-Implements official API Contract from valmet_builder_pack.xlsx & PROJECT.md:
-- GET  /api/assets              (List 30 assets with area, tag, criticality, condition_state, health_score, anchor)
-- GET  /api/assets/{id}         (Single asset detail joined with current_state, anchor, docs, data quality)
-- GET  /api/assets/{id}/telemetry (Time-series telemetry samples, optional query params limit, start_time, end_time)
-- GET  /api/assets/{id}/events    (Alarms and events, optional query params limit, severity, event_type, status)
-- GET  /api/assets/{id}/documents (Linked operating and safety guidelines from Knowledge_Docs & RAG index)
-- GET  /api/scene/anchors       (All 30 spatial anchors with coordinates x, y, z, dimensions, health score)
-- POST /api/work-orders/draft   (Create draft work order in Maintenance_History with DOC-FIELD-SAFETY guardrails)
-- GET  /api/metaverse/dashboard (Aggregate plant KPIs from Dashboard sheet)
-- POST /api/scene/proximity     (Euclidean distance query for avatar proximity detection)
+Assets & evidence: /assets, /assets/{id}, /assets/{id}/telemetry|events|documents|work-orders
+Scene:             /scene/frames, /scene/summary, /scene/anchors, /scene/proximity,
+                   /scene/extract-assets, /scene/boiler-room.ply, /navigation/path
+AI & workflow:     /copilot/query, /work-orders/draft (draft only, never a control action),
+                   /vision/analyze, /metaverse/dashboard
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-import uuid
+from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.database import get_session
+from app import crud
 from app.models import (
     AssetMaster as Asset,
-    SceneAnchor,
     CurrentState,
     TelemetrySample as Telemetry,
     AlarmEvent,
     MaintenanceHistory,
     KnowledgeDoc,
     DataQuality,
-    RAGCorpusIndex,
+    HistoricalServiceCase,
 )
 
 from app.schemas import (
@@ -48,10 +43,18 @@ from app.schemas import (
     ProximityQueryRequest,
     ProximityAssetResponse,
     DashboardSummaryResponse,
-    MetaverseDashboardResponse,
+    CopilotQueryRequest,
+    CopilotQueryResponse,
 )
+from app.metaverse.copilot import get_copilot
+from app.metaverse.scene_processor import RouteNotFound, get_scene, reset_scene
+from app.metaverse.vision import analyze_image
 
 router = APIRouter(tags=["Ask Your Factory"])
+
+FAULTY_STATES = ("degraded", "attention_required")
+COPILOT_GUIDANCE_DOCS = ("DOC-FIELD-SAFETY", "DOC-RAG-GUIDE", "DOC-3D-MAPPING")
+COPILOT_TELEMETRY_WINDOW = 144  # 3 days at 30-minute resolution
 
 
 
@@ -76,50 +79,33 @@ def get_asset_or_404(session: Session, identifier: str) -> Asset:
     return asset
 
 
-def transform_anchor_to_scene(
-    x: float, y: float, z: float,
-    bx: float, by: float, bz: float
-) -> Dict[str, float]:
-    """Affine transform mapping Excel [-0.32..30.39m, -0.39..15.49m, 0.47..2.15m] coordinates into
-    the Three.js boiler room point cloud envelope [-4.5..4.5m, -1.5..0.0m, -4.5..0.5m].
-    
-    Mapping:
-    - Excel X -> Three.js X
-    - Excel Y -> Three.js Z (depth)
-    - Excel Z -> Three.js Y (elevation / height)
-    """
-    x_min, x_max = -0.32, 30.39
-    y_min, y_max = -0.39, 15.49
-    z_min, z_max = 0.47, 2.15
-
-    if x_max > x_min:
-        u = (x - x_min) / (x_max - x_min)
-    else:
-        u = 0.5
-
-    if y_max > y_min:
-        v = (y - y_min) / (y_max - y_min)
-    else:
-        v = 0.5
-
-    if z_max > z_min:
-        w = (z - z_min) / (z_max - z_min)
-    else:
-        w = 0.5
-
-    x_3d = -4.5 + 9.0 * u
-    y_3d = -1.5 + 1.5 * w
-    z_3d = -4.5 + 5.0 * v
-
-    return {
-        "x_local_m": round(x_3d, 3),
-        "y_local_m": round(y_3d, 3),
-        "z_local_m": round(z_3d, 3),
-        "bbox_x_m": round(bx, 2),
-        "bbox_y_m": round(bz, 2),
-        "bbox_z_m": round(by, 2),
-    }
-
+def scene_anchor(asset_id: str, state: Optional[CurrentState] = None) -> Optional[SceneAnchorRead]:
+    """Anchor of the extracted scene object this asset is bound to (replaces Excel placeholders)."""
+    frame = get_scene().find_frame(asset_id)
+    if frame is None or frame.get("asset_id") != asset_id:
+        return None
+    x, y, z = frame["pos"]
+    width, height, depth = frame["size"]
+    anchor = SceneAnchorRead(
+        scene_anchor_id=frame["scene_id"],
+        asset_id=asset_id,
+        tag=frame["tag"],
+        area_id=frame["mapped_asset"]["area_id"],
+        x_local_m=x,
+        y_local_m=y,
+        z_local_m=z,
+        bbox_x_m=width,
+        bbox_y_m=height,
+        bbox_z_m=depth,
+        mapping_confidence=frame["mapping_confidence"],
+        mapping_status=f"bound_to_extracted_{frame['label'].lower()}",
+        scene_path=f"/BoilerRoom/{frame['scene_id']}",
+    )
+    if state:
+        anchor.health_score = state.health_score
+        anchor.condition_state = state.condition_state
+        anchor.issue_code = state.issue_code
+    return anchor
 
 
 @router.get("/assets", response_model=List[AssetRead])
@@ -152,19 +138,13 @@ def list_assets(
 
     asset_ids = [a.asset_id for a in assets]
     state_map: Dict[str, CurrentState] = {}
-    anchor_map: Dict[str, SceneAnchor] = {}
-
     if asset_ids:
         states = session.exec(select(CurrentState).where(CurrentState.asset_id.in_(asset_ids))).all()
         state_map = {s.asset_id: s for s in states}
 
-        anchors = session.exec(select(SceneAnchor).where(SceneAnchor.asset_id.in_(asset_ids))).all()
-        anchor_map = {a.asset_id: a for a in anchors}
-
     results: List[AssetRead] = []
     for a in assets:
         state_obj = state_map.get(a.asset_id)
-        anchor_obj = anchor_map.get(a.asset_id)
 
         if condition_state and state_obj:
             if state_obj.condition_state.lower() != condition_state.strip().lower():
@@ -174,16 +154,7 @@ def list_assets(
             c_read = CurrentStateRead.model_validate(state_obj)
         else:
             c_read = None
-
-        if anchor_obj:
-            a_read = SceneAnchorRead.model_validate(anchor_obj)
-        else:
-            a_read = None
-
-        if a_read and state_obj:
-            a_read.health_score = state_obj.health_score
-            a_read.condition_state = state_obj.condition_state
-            a_read.issue_code = state_obj.issue_code
+        a_read = scene_anchor(a.asset_id, state_obj)
 
         item = AssetRead(
             asset_id=a.asset_id,
@@ -218,7 +189,6 @@ def get_asset_detail(
     asset = get_asset_or_404(session, id)
 
     state = session.exec(select(CurrentState).where(CurrentState.asset_id == asset.asset_id)).first()
-    anchor = session.exec(select(SceneAnchor).where(SceneAnchor.asset_id == asset.asset_id)).first()
 
     doc_cond = (KnowledgeDoc.scope == asset.asset_class) | (KnowledgeDoc.scope == "ALL")
     if state and state.knowledge_doc_id:
@@ -260,15 +230,7 @@ def get_asset_detail(
     else:
         c_read = None
 
-    if anchor:
-        a_read = SceneAnchorRead.model_validate(anchor)
-    else:
-        a_read = None
-
-    if a_read and state:
-        a_read.health_score = state.health_score
-        a_read.condition_state = state.condition_state
-        a_read.issue_code = state.issue_code
+    a_read = scene_anchor(asset.asset_id, state)
 
     if k_reads:
         primary_doc = k_reads[0]
@@ -385,74 +347,14 @@ def get_asset_documents(
 
 
 @router.get("/scene/anchors", response_model=List[SceneAnchorRead])
-def get_scene_anchors(
-    normalized: bool = Query(
-        default=False,
-        description="If True, maps raw Excel coordinates into Three.js boiler room envelope [-4.5..4.5m, -1.5..0.0m, -4.5..0.5m]"
-    ),
-    session: Session = Depends(get_session),
-):
-    """Return all 30 3D spatial anchors with bounding box dimensions and live health state."""
-    anchors = session.exec(select(SceneAnchor).order_by(SceneAnchor.scene_anchor_id.asc())).all()
-    states = session.exec(select(CurrentState)).all()
-    state_map = {s.asset_id: s for s in states}
-
-    results: List[SceneAnchorRead] = []
-    for a in anchors:
-        st = state_map.get(a.asset_id)
-        
-        if st:
-            health_score_val = st.health_score
-            condition_state_val = st.condition_state
-            issue_code_val = st.issue_code
-        else:
-            health_score_val = 100.0
-            condition_state_val = "healthy"
-            issue_code_val = "NORMAL"
-
-        if normalized:
-            coords = transform_anchor_to_scene(
-                a.x_local_m, a.y_local_m, a.z_local_m,
-                a.bbox_x_m, a.bbox_y_m, a.bbox_z_m
-            )
-            item = SceneAnchorRead(
-                scene_anchor_id=a.scene_anchor_id,
-                asset_id=a.asset_id,
-                tag=a.tag,
-                area_id=a.area_id,
-                x_local_m=coords["x_local_m"],
-                y_local_m=coords["y_local_m"],
-                z_local_m=coords["z_local_m"],
-                bbox_x_m=coords["bbox_x_m"],
-                bbox_y_m=coords["bbox_y_m"],
-                bbox_z_m=coords["bbox_z_m"],
-                mapping_status=a.mapping_status,
-                mapping_confidence=a.mapping_confidence,
-                health_score=health_score_val,
-                condition_state=condition_state_val,
-                issue_code=issue_code_val,
-            )
-        else:
-            item = SceneAnchorRead(
-                scene_anchor_id=a.scene_anchor_id,
-                asset_id=a.asset_id,
-                tag=a.tag,
-                area_id=a.area_id,
-                x_local_m=a.x_local_m,
-                y_local_m=a.y_local_m,
-                z_local_m=a.z_local_m,
-                bbox_x_m=a.bbox_x_m,
-                bbox_y_m=a.bbox_y_m,
-                bbox_z_m=a.bbox_z_m,
-                mapping_status=a.mapping_status,
-                mapping_confidence=a.mapping_confidence,
-                health_score=health_score_val,
-                condition_state=condition_state_val,
-                issue_code=issue_code_val,
-            )
-        results.append(item)
-
-    return results
+def get_scene_anchors(session: Session = Depends(get_session)):
+    """Anchors of all assets bound to extracted scene objects, with live health state."""
+    state_map = {s.asset_id: s for s in session.exec(select(CurrentState)).all()}
+    anchors = []
+    for frame in get_scene().get_semantic_frames():
+        if frame["asset_id"]:
+            anchors.append(scene_anchor(frame["asset_id"], state_map.get(frame["asset_id"])))
+    return sorted(anchors, key=lambda a: a.asset_id)
 
 
 @router.post("/work-orders/draft", response_model=WorkOrderDraftResponse, status_code=status.HTTP_201_CREATED)
@@ -535,7 +437,7 @@ def create_draft_work_order(
 
 
 
-@router.get("/metaverse/dashboard", response_model=MetaverseDashboardResponse)
+@router.get("/metaverse/dashboard", response_model=DashboardSummaryResponse)
 def get_metaverse_dashboard(session: Session = Depends(get_session)):
     """Aggregate plant-wide health, operational condition counts, and data quality metrics."""
     total_assets = session.scalar(select(func.count(Asset.asset_id))) or 0
@@ -559,7 +461,7 @@ def get_metaverse_dashboard(session: Session = Depends(get_session)):
     total_wos = session.scalar(select(func.count(MaintenanceHistory.work_order_id))) or 0
     total_dq = session.scalar(select(func.count(DataQuality.issue_id))) or 0
 
-    return MetaverseDashboardResponse(
+    return DashboardSummaryResponse(
         total_assets=total_assets,
         average_health_score=round(avg_health, 1),
         condition_counts=condition_counts,
@@ -580,53 +482,157 @@ def query_proximity(
     payload: ProximityQueryRequest,
     session: Session = Depends(get_session),
 ):
-    """Calculate Euclidean distance from avatar position (x, y, z) to all asset anchors.
-    
-    Returns assets within radius_m, flagging faulty equipment (health < 70) for dynamic highlights.
-    """
-    anchors = session.exec(select(SceneAnchor)).all()
-    states = session.exec(select(CurrentState)).all()
-    state_map = {s.asset_id: s for s in states}
-
+    """Assets whose scene object lies within radius_m of the avatar on the floor plane, nearest first."""
+    state_map = {s.asset_id: s for s in session.exec(select(CurrentState)).all()}
     nearby: List[ProximityAssetResponse] = []
-    px, py, pz = payload.x, payload.y, payload.z
-    r = payload.radius_m
-
-    for a in anchors:
-        dx = a.x_local_m - px
-        dy = a.y_local_m - py
-        dz = a.z_local_m - pz
-        dist = (dx * dx + dy * dy + dz * dz) ** 0.5
-
-        if dist <= r:
-            st = state_map.get(a.asset_id)
-            if st:
-                health = st.health_score
-                cond = st.condition_state
-                issue = st.issue_code
-            else:
-                health = 100.0
-                cond = "healthy"
-                issue = "NORMAL"
-            is_faulty = (health < 70.0) or (cond in ("attention_required", "degraded"))
-
-            a_read = SceneAnchorRead.model_validate(a)
-            a_read.health_score = health
-            a_read.condition_state = cond
-            a_read.issue_code = issue
-
-            nearby.append(
-                ProximityAssetResponse(
-                    asset_id=a.asset_id,
-                    tag=a.tag,
-                    distance_m=round(dist, 2),
-                    health_score=health,
-                    condition_state=cond,
-                    issue_code=issue,
-                    is_faulty=is_faulty,
-                    anchor=a_read,
-                )
+    for frame in get_scene().nearby(payload.x, payload.z, payload.radius_m):
+        state = state_map.get(frame["asset_id"])
+        if state is None:
+            continue
+        nearby.append(
+            ProximityAssetResponse(
+                asset_id=frame["asset_id"],
+                tag=frame["tag"],
+                distance_m=frame["distance_m"],
+                health_score=state.health_score,
+                condition_state=state.condition_state,
+                issue_code=state.issue_code,
+                is_faulty=state.condition_state in FAULTY_STATES,
+                anchor=scene_anchor(frame["asset_id"], state),
             )
-
-    nearby.sort(key=lambda item: item.distance_m)
+        )
     return nearby
+
+
+@router.get("/assets/{id}/work-orders", response_model=List[MaintenanceHistoryRead])
+def get_asset_work_orders(
+    id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    session: Session = Depends(get_session),
+):
+    """Retrieve maintenance history and service records for an asset."""
+    asset = get_asset_or_404(session, id)
+    wos = crud.get_asset_work_orders(session, asset.asset_id, limit=limit)
+    return [MaintenanceHistoryRead.model_validate(w) for w in wos]
+
+
+@router.get("/scene/frames")
+def get_scene_frames():
+    """Every extracted object as a 3D frame (centre + size); bound assets carry their metadata."""
+    return get_scene().get_semantic_frames()
+
+
+@router.get("/scene/summary")
+def get_scene_summary():
+    """Extraction statistics: algorithm, point count, objects per label, room, entry and target."""
+    return get_scene().summary()
+
+
+@router.post("/scene/extract-assets")
+def extract_scene_assets():
+    """Re-run the extraction pipeline on the boiler-room point cloud and return all frames."""
+    scene = reset_scene()
+    return {**scene.summary(), "all_frames": scene.get_semantic_frames()}
+
+
+@router.get("/navigation/path")
+def get_navigation_path(
+    target_id: Optional[str] = Query(None, description="Asset ID, tag or object ID; defaults to the faulty target"),
+    start_x: Optional[float] = Query(None),
+    start_z: Optional[float] = Query(None),
+):
+    """Collision-free route from the entry (or start_x/start_z) to a standing spot beside the target."""
+    start = None
+    if start_x is not None and start_z is not None:
+        start = (start_x, start_z)
+    try:
+        return get_scene().get_navigation_path(target_id=target_id, start=start)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No scene object matches '{target_id}'.")
+    except RouteNotFound:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"No collision-free route to '{target_id}'.")
+
+
+@router.get("/scene/boiler-room.ply")
+def get_boiler_room_ply():
+    """Canonical (Y-up, floor at 0) point cloud for the Three.js PLYLoader."""
+    path = get_scene().get_ply_path()
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Boiler room PLY not found on server")
+    return FileResponse(path=str(path), media_type="application/octet-stream", filename=path.name)
+
+
+@router.get("/scene/boiler-room-mesh.ply")
+def get_boiler_room_mesh():
+    """Surface mesh reconstructed from the Gaussian splat (vertex colours + faces), same canonical frame."""
+    from app.metaverse.point_cloud import VIEWER_MESH_PATH, build_scene_mesh
+
+    try:
+        path = build_scene_mesh()
+    except FileNotFoundError:
+        path = VIEWER_MESH_PATH
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Boiler room mesh not found on server")
+    return FileResponse(path=str(path), media_type="application/octet-stream", filename=path.name)
+
+
+@router.post("/vision/analyze")
+async def analyze_viewport_view(
+    file: UploadFile = File(...),
+    classes: str = Form(default=""),
+    confidence: float = Form(default=0.15, ge=0.01, le=0.95),
+):
+    """Run open-vocabulary YOLO-World object detection on viewport snapshot."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Image upload required.",
+        )
+    image_bytes = await file.read()
+    requested_classes = [c.strip() for c in classes.split(",") if c.strip()]
+    try:
+        return analyze_image(image_bytes, requested_classes, confidence)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"YOLO-World analysis unavailable: {exc}",
+        )
+
+
+@router.post("/copilot/query", response_model=CopilotQueryResponse)
+def copilot_query(
+    request: CopilotQueryRequest,
+    session: Session = Depends(get_session),
+):
+    """Evidence-grounded diagnosis: telemetry drift, alarms, similar cases, docs and data quality."""
+    asset = get_asset_or_404(session, request.asset_id)
+    state = crud.get_asset_state(session, asset.asset_id)
+    if state is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No current state for {asset.asset_id}.")
+
+    doc_ids = [state.knowledge_doc_id, *COPILOT_GUIDANCE_DOCS]
+    docs = session.exec(select(KnowledgeDoc).where(KnowledgeDoc.doc_id.in_(doc_ids))).all()
+    cases = session.exec(select(HistoricalServiceCase).where(HistoricalServiceCase.asset_class == asset.asset_class)).all()
+    dq_issues = session.exec(select(DataQuality).where(DataQuality.asset_id == asset.asset_id)).all()
+    frame = get_scene().find_frame(asset.asset_id)
+    mapping_confidence = None
+    if frame is not None:
+        mapping_confidence = frame["mapping_confidence"]
+
+    return get_copilot().diagnose_asset(
+        asset=asset.model_dump(),
+        state=state.model_dump(),
+        telemetry=[t.model_dump() for t in crud.get_asset_telemetry(session, asset.asset_id, limit=COPILOT_TELEMETRY_WINDOW)],
+        events=[e.model_dump() for e in crud.get_asset_events(session, asset.asset_id, limit=50)],
+        work_orders=[w.model_dump() for w in crud.get_asset_work_orders(session, asset.asset_id, limit=20)],
+        docs=[d.model_dump() for d in docs],
+        cases=[c.model_dump() for c in cases],
+        dq_issues=[q.model_dump() for q in dq_issues],
+        mapping_confidence=mapping_confidence,
+        question=request.prompt or request.query,
+    )

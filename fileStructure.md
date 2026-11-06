@@ -5,39 +5,41 @@ valmet_sinceAi_2026/
 ├── backend/                               # Python FastAPI backend service
 │   ├── app/
 │   │   ├── main.py                        # FastAPI entry point, lifecycle, routing & static mounts
-│   │   ├── routes.py                      # Core CRUD endpoints (assets, telemetry, work orders, health)
-│   │   ├── models.py                      # SQLModel relational schema (Asset, Telemetry, WorkOrder, etc.)
+│   │   ├── routes.py                      # REST API router mounted at /api
+│   │   ├── models.py                      # SQLModel relational schema (AssetMaster, Telemetry, WorkOrder, etc.)
 │   │   ├── schemas.py                     # Pydantic request/response validation schemas
 │   │   ├── crud.py                        # Database access & query routines
 │   │   ├── database.py                    # Engine configuration, session generators & initial data seed
-│   │   ├── db.py                          # Database session helper re-exports
-│   │   ├── db_create.py                   # Schema creation & bootstrap CLI utility
-│   │   ├── gemini.py                      # Google Gemini client wrapper
-│   │   ├── system_prompt.txt              # Diagnostic prompt instructions for AI Field Copilot
 │   │   └── metaverse/                     # Digital Twin spatial & AI reasoning package
-│   │       ├── routes.py                  # Digital twin endpoints (/api/scene/*, /api/navigation/*)
-│   │       ├── dataset.py                 # Valmet Builder Pack Excel reader & parser
-│   │       ├── scene_processor.py         # 3D spatial voxel density & A* navigation solver
+│   │       ├── dataset.py                 # Builder pack loader (JSON cache or Excel)
+│   │       ├── point_cloud.py             # Raw splat → canonical Y-up cloud + viewer PLY export
+│   │       ├── segmentation.py            # Voxel segmentation, splitting & geometric labelling
+│   │       ├── navigation.py              # Occupancy grid, A*, measured clearance
+│   │       ├── asset_mapping.py           # Builder-pack assets → extracted objects (+confidence)
+│   │       ├── scene_processor.py         # Orchestrates the scene pipeline, serves frames/routes
 │   │       ├── vision.py                  # Open-vocabulary YOLO-World visual detector
-│   │       └── copilot.py                 # Multi-modal telemetry & diagnostic copilot logic
+│   │       └── copilot.py                 # Evidence engine + citation-verified Gemini layer
 │   ├── database.db                        # SQLite local runtime database
 │   ├── requirements.txt                   # Backend Python package specifications
-│   ├── test_routes.py                     # API unit tests
-│   └── test_acceptance.py                # End-to-end integration acceptance tests
+│   ├── conftest.py                        # Tests run on a fresh temporary database
+│   ├── test_routes.py                     # API contract tests
+│   ├── test_scene.py                      # Extraction density, canonical frame, navigation guarantees
+│   ├── test_copilot.py                    # Drift detection, citation grounding, confidence
+│   └── test_acceptance.py                 # End-to-end demo flow
 │
 ├── frontend/                              # Frontend single-page application
 │   ├── index.html                         # Primary HTML5 shell & viewport layout
 │   ├── public/                            # Static public assets served at /public
 │   └── src/
 │       ├── js/
-│       │   └── app.js                     # Three.js 3D viewport, point cloud splatting, HUD & UI logic
+│       │   └── app.js                     # Three.js 3D viewport, Gaussian splat shader, HUD & UI logic
 │       └── styles/
 │           └── app.css                    # Industrial dark theme design system & UI stylesheets
 │
 ├── data/                                  # Spatial models, challenge documents & data packs
-│   ├── Industrial Boiler Room.ply         # Raw 3D Gaussian Splat scan (~355 MB)
-│   ├── Industrial_Boiler_Room_standard.ply# Cleaned binary PLY point cloud for Three.js
-│   ├── metaverse_cache.json               # Precomputed spatial scene cache
+│   ├── Industrial Boiler Room.ply         # Raw 3D Gaussian Splat scan (~339 MB)
+│   ├── Industrial_Boiler_Room_standard.ply# Canonical (Y-up, floor 0) viewer cloud, generated from the raw splat
+│   ├── metaverse_cache.json               # Precomputed industrial data cache
 │   ├── valmet_builder_pack.xlsx           # Industrial asset, telemetry & drawing metadata
 │   └── Valmet_x_SinceAI_2026_Challenge_Brief_FINAL_updated (1).docx # Challenge specification
 │
@@ -50,12 +52,13 @@ valmet_sinceAi_2026/
 ## Module Boundaries & Runtime Path
 
 1. **Backend Service (`backend/`)**:
-   - `backend/app/main.py` launches the FastAPI application, mounts static frontend assets (`/js`, `/styles`, `/public`), and includes API routers under `/api`.
-   - `backend/app/metaverse/` encapsulates all 3D spatial computing, point-cloud parsing, pathfinding, and vision processing away from standard CRUD routes.
+   - `backend/app/main.py`: Launches FastAPI, mounts static frontend assets (`/js`, `/styles`, `/public`), and seeds database on startup.
+   - `backend/app/routes.py`: API contract endpoints plus scene, navigation and copilot routes under `/api`.
+   - `backend/app/metaverse/`: Scene pipeline (144 framed objects, 30 bound assets), obstacle-aware A* with measured clearance, and evidence-grounded AI copilot.
 
 2. **Frontend Application (`frontend/`)**:
-   - Cleanly partitioned into markup (`index.html`), scripts (`src/js/`), and stylesheets (`src/styles/`).
-   - Single point of entry for client-side logic in `app.js`, eliminating dual-maintenance or inline script drift.
+   - Modularized into `index.html`, `src/js/app.js`, and `src/styles/app.css`.
+   - Three.js WebGL viewport with smooth Gaussian splat shader blending, dynamic bounding box frames, inspection robot avatar, and interactive omnibar.
 
 3. **Data & Artifacts (`data/`)**:
-   - Houses heavy binary datasets (point clouds, excel datasets, and raw models) separated from application code.
+   - Cleanly separated from application source code.

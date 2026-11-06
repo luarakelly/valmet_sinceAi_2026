@@ -14,7 +14,6 @@ Parses all sheets from valmet_builder_pack.xlsx or reads pre-parsed JSON cache:
 - API_Contract & Dashboard
 """
 
-import os
 import json
 import logging
 from pathlib import Path
@@ -23,21 +22,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("ask_your_factory_dataset")
 
 
-def find_data_dir() -> Path:
-    """Dynamically resolves the data directory containing the Excel file or cache."""
-    candidates = [
-        Path(__file__).resolve().parent.parent.parent.parent / "data",
-        Path(__file__).resolve().parent.parent.parent / "data",
-        Path.cwd() / "data",
-        Path("/home/veiston/Documents/github/valmet_sinceAi_2026/data"),
-    ]
-    for c in candidates:
-        if (c / "valmet_builder_pack.xlsx").exists() or (c / "metaverse_cache.json").exists():
-            return c
-    return candidates[0]
-
-
-DATA_DIR = find_data_dir()
+DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 EXCEL_PATH = DATA_DIR / "valmet_builder_pack.xlsx"
 CACHE_PATH = DATA_DIR / "metaverse_cache.json"
 
@@ -135,164 +120,6 @@ class MetaverseDataset:
                 item["anchor"] = anchors[aid]
             combined.append(item)
         return combined
-
-    def get_asset(self, identifier: str) -> Optional[Dict[str, Any]]:
-        """Finds an asset by asset_id (e.g. ASSET-017) or tag (e.g. P-005), case-insensitively."""
-        clean = identifier.strip().lower()
-        for a in self.get_assets():
-            if str(a.get("asset_id", "")).strip().lower() == clean or str(a.get("tag", "")).strip().lower() == clean:
-                return a
-        return None
-
-    def get_scene_anchors(self, normalized: bool = False) -> List[Dict[str, Any]]:
-        """Returns spatial anchor definitions, optionally normalized to Three.js 3D boiler room space."""
-        anchors = self.data.get("Scene_Anchors", [])
-        states = {s["asset_id"]: s for s in self.data.get("Current_State", []) if "asset_id" in s}
-
-        result = []
-        for a in anchors:
-            item = dict(a)
-            aid = a.get("asset_id")
-            if aid in states:
-                st = states[aid]
-                item["health_score"] = st.get("health_score")
-                item["condition_state"] = st.get("condition_state")
-                item["issue_code"] = st.get("issue_code")
-
-            if normalized:
-                raw_x = float(item.get("x_local_m", 0.0))
-                raw_y = float(item.get("y_local_m", 0.0))
-                raw_z = float(item.get("z_local_m", 0.0))
-
-                u = (raw_x - (-0.32)) / (30.39 - (-0.32) + 1e-6)
-                v = (raw_y - (-0.39)) / (15.49 - (-0.39) + 1e-6)
-                w = (raw_z - 0.47) / (2.15 - 0.47 + 1e-6)
-
-                item["x_3d"] = round(-5.0 + u * 10.0, 3)
-                item["y_3d"] = round(-1.5 + w * 2.0, 3)  # Y is up in Three.js
-                item["z_3d"] = round(-5.0 + v * 5.5, 3)  # Z is depth in Three.js
-
-            result.append(item)
-        return result
-
-    def get_telemetry(self, identifier: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Returns chronological telemetry samples for an asset."""
-        clean = identifier.strip().lower()
-        telemetry = self.data.get("Telemetry_Sample_3d", [])
-        records = [
-            r for r in telemetry
-            if str(r.get("asset_id", "")).strip().lower() == clean
-            or str(r.get("tag", "")).strip().lower() == clean
-        ]
-        if limit > 0:
-            return records[-limit:]
-        return records
-
-    def get_events(self, identifier: Optional[str] = None, limit: int = 50, severity: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Returns recent alarms and events."""
-        events = self.data.get("Alarms_Events", [])
-        if identifier:
-            clean = identifier.strip().lower()
-            events = [
-                e for e in events
-                if str(e.get("asset_id", "")).strip().lower() == clean
-                or str(e.get("tag", "")).strip().lower() == clean
-            ]
-        if severity:
-            events = [e for e in events if str(e.get("severity", "")).lower() == severity.strip().lower()]
-        if limit > 0:
-            return events[:limit]
-        return events
-
-    def get_work_orders(self, identifier: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
-        """Returns past maintenance work orders."""
-        wos = self.data.get("Maintenance_History", [])
-        if identifier:
-            clean = identifier.strip().lower()
-            wos = [
-                w for w in wos
-                if str(w.get("asset_id", "")).strip().lower() == clean
-                or str(w.get("tag", "")).strip().lower() == clean
-            ]
-        if limit > 0:
-            return wos[:limit]
-        return wos
-
-    def get_documents(self) -> List[Dict[str, Any]]:
-        """Returns knowledge documents."""
-        return self.data.get("Knowledge_Docs", [])
-
-    def get_document(self, doc_id: str) -> Optional[Dict[str, Any]]:
-        """Finds knowledge document by doc_id."""
-        clean = doc_id.strip().lower()
-        for d in self.get_documents():
-            if str(d.get("doc_id", "")).strip().lower() == clean:
-                return d
-        return None
-
-    def get_data_quality(self, identifier: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Returns data quality anomalies for an asset."""
-        dqs = self.data.get("Data_Quality", [])
-        if identifier:
-            clean = identifier.strip().lower()
-            dqs = [
-                q for q in dqs
-                if str(q.get("asset_id", "")).strip().lower() == clean
-                or str(q.get("tag", "")).strip().lower() == clean
-            ]
-        return dqs
-
-    def get_historical_cases(self, asset_class: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Returns historical reference service cases."""
-        cases = self.data.get("Historical_Service_Cases", [])
-        if asset_class:
-            clean = asset_class.strip().lower()
-            cases = [c for c in cases if str(c.get("asset_class", "")).strip().lower() == clean]
-        return cases
-
-    def get_rag_corpus(self, identifier: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Returns markdown corpus indices."""
-        corpus = self.data.get("RAG_Corpus_Index", [])
-        if identifier:
-            clean = identifier.strip().lower()
-            corpus = [
-                c for c in corpus
-                if str(c.get("asset_id", "")).strip().lower() == clean
-                or str(c.get("tag", "")).strip().lower() == clean
-            ]
-        return corpus
-
-    def get_dashboard_summary(self) -> Dict[str, Any]:
-        """Calculates aggregated plant-level KPIs from Current_State and Alarms."""
-        states = self.data.get("Current_State", [])
-        events = self.data.get("Alarms_Events", [])
-
-        total_assets = len(states)
-        if total_assets == 0:
-            return {"total_assets": 0}
-
-        health_scores = [float(s.get("health_score", 100)) for s in states]
-        avg_health = round(sum(health_scores) / total_assets, 1)
-
-        condition_counts: Dict[str, int] = {}
-        for s in states:
-            c = s.get("condition_state", "unknown")
-            condition_counts[c] = condition_counts.get(c, 0) + 1
-
-        active_alarms = sum(1 for e in events if e.get("status") in ("open", "acknowledged"))
-        high_severity_alarms = sum(1 for e in events if e.get("severity") == "high")
-
-        return {
-            "total_assets": total_assets,
-            "average_health_score": avg_health,
-            "condition_distribution": condition_counts,
-            "healthy_assets": condition_counts.get("healthy", 0),
-            "watch_assets": condition_counts.get("watch", 0),
-            "degraded_assets": condition_counts.get("degraded", 0),
-            "attention_required_assets": condition_counts.get("attention_required", 0),
-            "active_alarms": active_alarms,
-            "high_severity_alarms": high_severity_alarms,
-        }
 
 
 _dataset_instance: Optional[MetaverseDataset] = None

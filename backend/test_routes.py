@@ -61,20 +61,15 @@ def test_asset_telemetry_and_events():
 
 
 def test_scene_anchors():
-    """Verify 3D spatial anchor bounds and coordinate normalization."""
-    raw_res = client.get("/api/scene/anchors?normalized=false")
-    assert raw_res.status_code == 200, f"Raw anchors fetch failed: {raw_res.text}"
-    raw_anchors = raw_res.json()
-    assert len(raw_anchors) == 30, f"Expected 30 raw anchors, got {len(raw_anchors)}"
-
-    norm_res = client.get("/api/scene/anchors?normalized=true")
-    assert norm_res.status_code == 200, f"Normalized anchors fetch failed: {norm_res.text}"
-    norm_anchors = norm_res.json()
-    assert len(norm_anchors) == 30, f"Expected 30 normalized anchors, got {len(norm_anchors)}"
-
-    first_anchor = norm_anchors[0]
-    for dim in ["x_local_m", "y_local_m", "z_local_m", "bbox_x_m", "bbox_y_m", "bbox_z_m"]:
-        assert dim in first_anchor, f"Missing dimension key '{dim}' in scene anchor"
+    """Every builder-pack asset is anchored to an extracted scene object with a real box."""
+    res = client.get("/api/scene/anchors")
+    assert res.status_code == 200, f"Anchors fetch failed: {res.text}"
+    anchors = res.json()
+    assert len(anchors) == 30, f"Expected 30 anchors, got {len(anchors)}"
+    for anchor in anchors:
+        assert anchor["mapping_status"].startswith("bound_to_extracted_")
+        assert 0.0 < anchor["mapping_confidence"] <= 1.0
+        assert min(anchor["bbox_x_m"], anchor["bbox_y_m"], anchor["bbox_z_m"]) > 0.0
     print("PASS: 3D Spatial Anchors & Bounding Box Coordinates")
 
 
@@ -119,25 +114,26 @@ def test_metaverse_dashboard():
 
 
 def test_avatar_proximity_query():
-    """Verify Euclidean spatial proximity calculation and fault highlighting."""
+    """Standing at the faulty target returns it first and flags it as faulty."""
+    target = client.get("/api/scene/anchors").json()
+    faulty = next(a for a in target if a["asset_id"] == "ASSET-017")
     res = client.post(
         "/api/scene/proximity",
-        json={"x": 5.0, "y": 0.0, "z": 5.0, "radius_m": 15.0},
+        json={"x": faulty["x_local_m"], "y": 0.0, "z": faulty["z_local_m"], "radius_m": 1.5},
     )
     assert res.status_code == 200, f"Proximity query failed: {res.text}"
     nearby = res.json()
-    assert isinstance(nearby, list)
-    if len(nearby) > 0:
-        first = nearby[0]
-        assert "distance_m" in first
-        assert "is_faulty" in first
+    assert nearby[0]["asset_id"] == "ASSET-017"
+    assert nearby[0]["distance_m"] == 0.0
+    assert nearby[0]["is_faulty"] is True
+    assert [n["distance_m"] for n in nearby] == sorted(n["distance_m"] for n in nearby)
     print(f"PASS: Spatial Proximity Detection ({len(nearby)} assets within radius)")
 
 
 def test_copilot_diagnostics():
     """Verify AI field diagnostics copilot returns grounded citations and safety guardrails."""
     res = client.post(
-        "/api/metaverse/copilot/query",
+        "/api/copilot/query",
         json={
             "asset_id": "ASSET-001",
             "prompt": "Evaluate equipment health and recent anomalies",

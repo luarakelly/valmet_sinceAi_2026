@@ -40,7 +40,8 @@ def test_industrial_metaverse_acceptance_flow():
     route_data = route.json()
     assert route_data["target_id"] == asset_id
     assert len(route_data["waypoints"]) >= 2
-    assert route_data["collision_status"] == "zero_collision_verified"
+    assert route_data["collision_free"] is True
+    assert route_data["min_clearance_m"] >= route_data["robot_radius_m"] - 0.04
 
     diagnosis = client.post(
         "/api/copilot/query",
