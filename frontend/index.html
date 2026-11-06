@@ -15,7 +15,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
     <link rel="stylesheet" href="/styles/app.css" />
   </head>
   <body>
@@ -117,6 +116,11 @@
         <div id="canvas-container"></div>
 
         <div class="floating-top-bar">
+          <div class="hud-status-pill" id="hud-status-pill">
+            <span class="pulse-dot"></span>
+            <span id="engine-point-count">Boiler Room 250k Splats</span>
+          </div>
+
           <div class="hud-nav-pill" id="hud-nav-pill">
             <span id="hud-target-name">Target: P-005</span>
             <div class="mini-bar">
@@ -146,15 +150,18 @@
             <button class="tool-btn" id="btn-cam-free" title="Free Camera">
               ⌖ Free <span style="opacity: 0.6">Shift+F</span>
             </button>
+            <button class="tool-btn" id="btn-semantic-extract" title="Extract 3D semantic asset frames from point cloud">
+              ⚡ 3D Extract
+            </button>
           </div>
-          <div class="render-mode-toolbar" aria-label="PLY render modes">
+          <div class="render-mode-toolbar" aria-label="Gaussian splat render modes">
             <span class="render-mode-label">Render</span>
             <button
               class="render-mode-btn active"
-              data-render-mode="mesh"
+              data-render-mode="splat"
               aria-pressed="true"
             >
-              Mesh
+              Splat
             </button>
             <button
               class="render-mode-btn"
@@ -187,21 +194,12 @@
         </div>
 
         <div class="proximity-alert" id="proximity-alert">
-          <div class="status-dot status-attention" id="alert-dot"></div>
-          <div>
-            <b id="alert-tag" style="color: var(--accent)">P-005 Approached</b>
-            &bull;
-            <span id="alert-desc" style="color: #cbd5e1"
-              >FOULING signature detected (Health: 44%)</span
-            >
+          <div class="nearby-header">
+            <b>Nearby assets</b>
+            <span id="nearby-count"></span>
+            <button class="btn" id="btn-open-copilot">Copilot Dossier →</button>
           </div>
-          <button
-            class="btn"
-            id="btn-open-copilot"
-            style="padding: 4px 10px; font-size: 11px"
-          >
-            Copilot Dossier →
-          </button>
+          <ul class="nearby-list" id="nearby-list"></ul>
         </div>
 
         <div class="omnibar-container" id="omnibar-container">
@@ -240,7 +238,7 @@
               <span style="color: var(--accent)">🤖</span>
               <span>ASK YOUR FACTORY COPILOT</span>
             </div>
-            <span class="badge" id="copilot-model-badge">GEMINI + RAG</span>
+            <span class="badge" id="copilot-model-badge">EVIDENCE ENGINE</span>
           </div>
 
           <div class="copilot-body" id="copilot-content">
@@ -259,20 +257,15 @@
                     font-weight: 700;
                     color: var(--accent);
                   "
-                  >ASSET: P-005</span
+                  >Select an asset</span
                 >
-                <span
-                  class="badge"
-                  id="card-health-badge"
-                  style="color: var(--red); border-color: var(--red)"
-                  >44% CRITICAL</span
-                >
+                <span class="badge" id="card-health-badge">—</span>
               </div>
               <div style="font-size: 11px; color: var(--muted)">
                 Class:
-                <b id="card-asset-class" style="color: #fff">PROCESS_PUMP</b>
+                <b id="card-asset-class" style="color: #fff">—</b>
                 &bull; Area:
-                <b id="card-asset-area" style="color: #fff">Utility Island</b>
+                <b id="card-asset-area" style="color: #fff">—</b>
               </div>
 
               <div style="margin-top: 2px">
@@ -286,8 +279,8 @@
                     margin-bottom: 2px;
                   "
                 >
-                  <span>14-Day Pressure / Flow Trend</span>
-                  <span style="color: #38bdf8">Live OPC UA</span>
+                  <span>Recent pressure / flow trend</span>
+                  <span style="color: #38bdf8">Builder pack telemetry</span>
                 </div>
                 <canvas id="telem-canvas"></canvas>
               </div>
@@ -299,14 +292,14 @@
                 <span
                   id="diag-conf"
                   style="color: var(--green); font-family: var(--font-mono)"
-                  >Conf: 0.91</span
+                  >Conf: —</span
                 >
               </div>
 
               <div class="primary-finding-box" id="finding-box">
-                <span class="finding-icon" id="finding-icon">⚠️</span>
+                <span class="finding-icon" id="finding-icon">🔍</span>
                 <span class="finding-text" id="primary-finding-text"
-                  >Impeller Fouling Detected (44% Health)</span
+                  >Run the robot to the faulty device or pick an asset.</span
                 >
               </div>
 
@@ -320,24 +313,14 @@
                     margin-bottom: 4px;
                   "
                 >
-                  Root Cause Indicators
+                  Evidence (observations)
                 </div>
-                <ul class="root-cause-list" id="root-cause-list">
-                  <li class="root-cause-item">
-                    <span class="root-cause-bullet">•</span>
-                    <span
-                      >Discharge pressure drop of 1.4 bar below nominal
-                      profile</span
-                    >
-                  </li>
-                  <li class="root-cause-item">
-                    <span class="root-cause-bullet">•</span>
-                    <span
-                      >Stiction index elevated at 8.7% indicating hydraulic
-                      fouling</span
-                    >
-                  </li>
-                </ul>
+                <ul class="root-cause-list" id="root-cause-list"></ul>
+              </div>
+
+              <div>
+                <div class="copilot-section-title">Recommended next steps</div>
+                <ol class="action-list" id="action-list"></ol>
               </div>
 
               <div>
@@ -373,9 +356,22 @@
                 <span>Field Safety Protocol (DOC-FIELD-SAFETY):</span>
               </div>
               <div id="safety-text" style="line-height: 1.4">
-                Ensure pneumatic & electrical LOTO and 0.0 bar depressurization
-                verification before physical inspection.
+                The assistant recommends verification only; follow site
+                procedures, lockout/tagout and permits.
               </div>
+            </div>
+
+            <div class="diag-card">
+              <div class="copilot-section-title">Ask the copilot</div>
+              <div class="copilot-ask">
+                <input
+                  type="text"
+                  id="copilot-question"
+                  placeholder="e.g. What should I inspect first?"
+                />
+                <button class="btn" id="btn-ask-copilot">Ask</button>
+              </div>
+              <div class="copilot-answer" id="copilot-answer"></div>
             </div>
 
             <button
@@ -390,6 +386,14 @@
       </div>
     </div>
 
+    <script>
+      // Global hook for 3D proximity event checking and acceptance testing
+      window.checkProximityEvents = function (rx, rz) {
+        if (typeof window.appCheckProximityEvents === "function") {
+          window.appCheckProximityEvents(rx, rz);
+        }
+      };
+    </script>
     <script src="/js/app.js"></script>
   </body>
 </html>

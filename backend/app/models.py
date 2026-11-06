@@ -4,20 +4,18 @@ Defines the 10 core entity models representing the Valmet industrial plant:
 1. KnowledgeDoc (knowledge_docs): 8 engineering and safety guidelines
 2. AssetMaster / Asset (assets): 30 physical equipment records
 3. SceneAnchor (scene_anchors): 30 3D spatial anchor bounding boxes
-4. CurrentState / AssetState (current_states): 30 equipment operational health states
+4. CurrentState (current_states): 30 equipment operational health states
 5. TelemetrySample / Telemetry (telemetry_samples): 4,320 multivariate sensor readings
 6. AlarmEvent (alarms_events): 1,000 industrial alarms and inspection events
-7. MaintenanceHistory / MaintenanceWorkOrder (maintenance_history): 300 past work orders
+7. MaintenanceHistory (maintenance_history): 300 past work orders
 8. HistoricalServiceCase (historical_service_cases): 50 diagnostic reference cases
-9. DataQuality / DataQualityIssue (data_quality_issues): 120 sensor and data pipeline anomaly records
+9. DataQuality (data_quality_issues): 120 sensor and data pipeline anomaly records
 10. RAGCorpusIndex (rag_corpus_index): 38 markdown documents linking asset cards
 """
 
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
-import uuid
+from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import JSON, Column
 
 
 
@@ -239,84 +237,3 @@ class RAGCorpusIndex(SQLModel, table=True):
     mime_type: str = Field(default="text/markdown")
     document_role: str = Field(default="asset_card", description="Role (asset_card, reference_doc)")
     synthetic_record: bool = Field(default=True)
-
-
-
-class Users(SQLModel, table=True):
-    __tablename__ = "users"
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    name: str
-    email: str = Field(unique=True, index=True)
-    password_hash: str
-    date_of_birth: Optional[datetime] = None
-    gender: Optional[str] = None
-    height: Optional[float] = None
-    weight: Optional[float] = None
-    app_settings: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
-    goals: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class Catalog(SQLModel, table=True):
-    __tablename__ = "catalog"
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    type: str
-    name: str = Field(index=True)
-    brand: Optional[str] = None
-    calories: float = Field(default=0.0)
-    protein: float = Field(default=0.0)
-    carbs: float = Field(default=0.0)
-    fat: float = Field(default=0.0)
-    contents_json: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
-    meta_json: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class Journal(SQLModel, table=True):
-    __tablename__ = "journal"
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    user_id: uuid.UUID = Field(foreign_key="users.id", index=True)
-    catalog_id: Optional[uuid.UUID] = Field(default=None, foreign_key="catalog.id")
-    type: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    amount: float = 0.0
-    unit: Optional[str] = None
-    meta_json: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class Interactions(SQLModel, table=True):
-    __tablename__ = "interactions"
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    name: str
-    description: Optional[str] = None
-    severity: str
-    effect: Optional[str] = None
-    rules_json: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class OfflineQueue(SQLModel, table=True):
-    __tablename__ = "offline_queue"
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    user_id: uuid.UUID = Field(foreign_key="users.id")
-    operation: str
-    table_name: str
-    record_id: uuid.UUID
-    payload: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
-    status: str = "pending"
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    processed_at: Optional[datetime] = None
-
-
-
-Asset = AssetMaster
-AssetState = CurrentState
-Telemetry = TelemetrySample
-TelemetryRecord = TelemetrySample
-MaintenanceWorkOrder = MaintenanceHistory
-DataQualityIssue = DataQuality

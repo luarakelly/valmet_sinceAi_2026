@@ -7,11 +7,25 @@
 
 ## Run:
 
-1. Copy `.env.example` to `.env` and add `GEMINI_API_KEY`.
+1. Copy `.env.example` to `.env`; optionally add `GEMINI_API_KEY` (without it the deterministic evidence engine answers).
 2. Install [uv](https://docs.astral.sh/uv/).
 3. Initialize once, then run:
 	- **Linux:** `./initialize.sh`, then `./run.sh`
 	- **Windows:** `initialize.bat`, then `run.bat`
+4. Open `http://localhost:8000`, press **Start**: the robot walks to the faulty pump and the copilot diagnoses it.
+5. Tests: `cd backend && .venv/bin/python -m pytest -q`
+
+## Results on `Industrial Boiler Room.ply`
+
+| Challenge requirement | What the pipeline does | Measured |
+|---|---|---|
+| Extract & 3D-frame assets | Splat → canonical Y-up cloud → voxel components split at thin links / sparse planes → geometric + colour labels | **144 framed objects** (pipe runs, fittings, valves, floor machines, instruments) from 207 k splats in **0.55 s** |
+| Map Excel metadata | Pack assets bound to compatible, reachable objects with `mapping_confidence` | **30 / 30 assets** bound; target = lowest health (**P-005**, fouling, 44/100) |
+| Collision-free navigation | Obstacle grid (ankle → robot height), robot-radius inflation, A* + line-of-sight smoothing; clearance re-measured on the final route | **6.4 m** route, min clearance **0.226 m** ≥ robot radius 0.22 m; every asset route tested collision-free |
+| Proximity display | Frames within 1.5 m light up; live list of nearby assets with state, health and distance | updates every frame |
+| AI diagnostics | Telemetry drift (Welch t-score vs own baseline), matching alarms, similar service cases, docs, data-quality confidence penalty; optional Gemini answer accepted only if every cited ID exists | P-005: flow −8.7 % (t = −4.8), 3 fouling alarms, 2 matching cases, confidence 0.91 → 0.61 from 9 data-quality issues |
+
+Pipeline details: [`stack.md`](stack.md). Code map: [`fileStructure.md`](fileStructure.md).
 
 Ask Your Factory is an AI-powered conversational spatial intelligence system that enables industrial field-service personnel to interact with complex industrial environments through natural language.
 

@@ -13,7 +13,6 @@ Provides serialization, response DTOs, and request input validation for:
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-import uuid
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -241,9 +240,10 @@ class CopilotQueryResponse(BaseModel):
     )
     model_confidence: float = Field(default=0.85, description="Calculated AI diagnostic confidence (0.0 to 1.0)")
     grounded_mode: str = Field(
-        default="gemini-2.5-flash",
-        description="AI generation model or deterministic fallback mode"
+        default="deterministic-evidence-engine",
+        description="Engine that produced the answer; LLM answers are accepted only with verified citations"
     )
+    answer: Optional[str] = Field(default=None, description="LLM answer to the technician's question, when enabled")
     suggested_work_order: Optional[Dict[str, Any]] = None
 
     asset_class: Optional[str] = None
@@ -341,75 +341,3 @@ class DashboardSummaryResponse(BaseModel):
     open_work_orders_count: int = 42
     total_data_quality_issues: int = 120
     data_quality_issues_count: int = 120
-
-
-MetaverseDashboardResponse = DashboardSummaryResponse
-
-
-
-class UserCreate(BaseModel):
-    name: str
-    email: str
-    password: str
-
-
-class UserDelete(BaseModel):
-    name: str
-    password: str
-
-
-class UserRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    name: str
-    email: str
-    created_at: datetime
-    updated_at: datetime
-
-
-class CatalogBase(BaseModel):
-    type: str
-    name: str
-    brand: Optional[str] = None
-    calories: float = 0.0
-    protein: float = 0.0
-    carbs: float = 0.0
-    fat: float = 0.0
-    contents_json: List[Dict[str, Any]] = []
-    meta_json: Dict[str, Any] = {}
-
-
-class CatalogCreate(CatalogBase):
-    pass
-
-
-class CatalogRead(CatalogBase):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    created_at: datetime
-    updated_at: datetime
-
-
-class JournalBase(BaseModel):
-    user_id: uuid.UUID
-    catalog_id: Optional[uuid.UUID] = None
-    type: str
-    timestamp: datetime
-    amount: float = 0.0
-    unit: Optional[str] = None
-    meta_json: Dict[str, Any] = {}
-
-
-class JournalCreate(JournalBase):
-    pass
-
-
-class JournalRead(JournalBase):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    created_at: datetime
-    updated_at: datetime
-
-
-AssetStateRead = CurrentStateRead
-WorkOrderRead = MaintenanceHistoryRead

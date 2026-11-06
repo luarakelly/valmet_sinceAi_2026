@@ -5,7 +5,7 @@ and robust, idempotent ingestion of all 10 entities from the Ask Your Factory da
 1. KnowledgeDoc (8 documents)
 2. AssetMaster / Asset (30 equipment master records)
 3. SceneAnchor (30 spatial 3D bounding anchors)
-4. CurrentState / AssetState (30 health and condition states)
+4. CurrentState (30 health and condition states)
 5. HistoricalServiceCase (50 reference diagnostic cases)
 6. MaintenanceHistory (300 past work orders)
 7. AlarmEvent (1,000 synthetic events and alerts)
@@ -19,7 +19,7 @@ import sys
 import logging
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Generator
+from typing import Any, Dict, Optional, Generator
 from contextlib import contextmanager
 
 from sqlalchemy import event, text, select, func, delete
