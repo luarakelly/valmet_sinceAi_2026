@@ -53,7 +53,7 @@ htmlcov/
 logs/
 tmp/
 .cache/
-
+.db*
 # IDE and OS files
 .idea/
 .vscode/*
@@ -66,7 +66,7 @@ tmp/
 *~
 .DS_Store
 Thumbs.db
-
+.json
 # Build and coverage output
 coverage/
 out/
@@ -80,3 +80,5 @@ Valmet challenge data/
 
 # Large binary point cloud / splat capture (>100MB exceeds GitHub push limit)
 Industrial Boiler Room.ply
+backend/database.db-shm
+backend/database.db-wal

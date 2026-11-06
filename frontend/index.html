@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      Ask Your Factory — 3D Spatial Digital Twin & Field-Service Copilot
+    </title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    <link rel="stylesheet" href="/styles/app.css" />
+  </head>
+  <body>
+    <div id="toast" class="toast"></div>
+    <header>
+      <div class="brand">
+        <span class="ask-your-factory-logo">ASK YOUR FACTORY</span>
+      </div>
+      <div class="header-right">
+        <div class="nav-tabs">
+          <a
+            href="/docs"
+            target="_blank"
+            style="
+              color: var(--muted);
+              font-size: 12px;
+              text-decoration: none;
+              display: flex;
+              align-items: center;
+              margin-left: 4px;
+            "
+            >API Specs</a
+          >
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <div class="sidebar-container" id="left-sidebar-container">
+        <aside class="sidebar" id="sidebar-metaverse">
+          <div class="panel-box" style="flex: 1; min-height: 0">
+            <div class="heading">
+              <span>Equipment Directory</span>
+              <span
+                style="color: var(--accent); font-family: var(--font-mono)"
+                id="asset-count"
+                >30 Mapped</span
+              >
+            </div>
+            <input
+              type="text"
+              id="asset-search"
+              placeholder="Search tag, class, or area (e.g. P-005, CV, Boiler)..."
+              style="font-size: 11px; padding: 6px 8px"
+            />
+            <div class="asset-list" id="asset-list-container"></div>
+          </div>
+
+          <div class="panel-box" style="flex-shrink: 0">
+            <div class="heading">
+              <span>Drone Nav Controller</span>
+              <span id="nav-badge" style="color: var(--green)">Ready</span>
+            </div>
+            <div style="display: flex; gap: 6px">
+              <button class="btn" id="btn-start-nav" style="flex: 1">
+                <span id="nav-btn-text">▶ Start Drone</span>
+              </button>
+              <button class="btn-secondary" id="btn-reset-nav" style="flex: 1">
+                ↺ Reset Start
+              </button>
+            </div>
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 10px;
+                margin-top: 2px;
+              "
+            >
+              <span style="color: var(--muted)">Flight Speed:</span>
+              <span
+                id="speed-val"
+                style="color: var(--accent); font-family: var(--font-mono)"
+                >1.5x</span
+              >
+            </div>
+            <input
+              type="range"
+              id="speed-slider"
+              min="0.5"
+              max="4.0"
+              step="0.5"
+              value="1.5"
+            />
+          </div>
+        </aside>
+
+        <button
+          class="sidebar-toggle-pill"
+          id="btn-toggle-left-sidebar"
+          title="Toggle Equipment Panel"
+        >
+          ◀
+        </button>
+      </div>
+
+      <main class="viewport">
+        <div id="canvas-container"></div>
+
+        <div class="floating-top-bar">
+          <div class="hud-nav-pill" id="hud-nav-pill">
+            <span id="hud-target-name">Target: P-005</span>
+            <div class="mini-bar">
+              <div class="mini-fill" id="hud-nav-fill"></div>
+            </div>
+            <span id="hud-dist" style="color: #fff">11.8m</span>
+          </div>
+
+          <div class="view-toolbar">
+            <button class="tool-btn" id="btn-cam-drone" title="Follow Drone">
+              📷 Drone
+            </button>
+            <button
+              class="tool-btn active"
+              id="btn-cam-orbit"
+              title="Orbit Controls"
+            >
+              🌐 Orbit
+            </button>
+            <button
+              class="tool-btn"
+              id="btn-cam-top"
+              title="Top-down 2D NavMesh"
+            >
+              🗺 2D
+            </button>
+            <button class="tool-btn" id="btn-cam-free" title="Free Camera">
+              ⌖ Free <span style="opacity: 0.6">Shift+F</span>
+            </button>
+          </div>
+          <div class="render-mode-toolbar" aria-label="PLY render modes">
+            <span class="render-mode-label">Render</span>
+            <button
+              class="render-mode-btn active"
+              data-render-mode="mesh"
+              aria-pressed="true"
+            >
+              Mesh
+            </button>
+            <button
+              class="render-mode-btn"
+              data-render-mode="studio"
+              aria-pressed="false"
+            >
+              Studio
+            </button>
+            <button
+              class="render-mode-btn"
+              data-render-mode="heat"
+              aria-pressed="false"
+            >
+              Heat
+            </button>
+            <button
+              class="render-mode-btn"
+              id="btn-vision-analyze"
+              title="Analyze the current 3D view with YOLO-World"
+            >
+              AI Scan
+            </button>
+          </div>
+        </div>
+
+        <div id="vision-overlay" aria-live="polite"></div>
+
+        <div class="freecam-hud" id="freecam-hud">
+          FREE CAM &nbsp; WASD + mouse &nbsp; Shift+F to exit
+        </div>
+
+        <div class="proximity-alert" id="proximity-alert">
+          <div class="status-dot status-attention" id="alert-dot"></div>
+          <div>
+            <b id="alert-tag" style="color: var(--accent)">P-005 Approached</b>
+            &bull;
+            <span id="alert-desc" style="color: #cbd5e1"
+              >FOULING signature detected (Health: 44%)</span
+            >
+          </div>
+          <button
+            class="btn"
+            id="btn-open-copilot"
+            style="padding: 4px 10px; font-size: 11px"
+          >
+            Copilot Dossier →
+          </button>
+        </div>
+
+        <div class="omnibar-container" id="omnibar-container">
+          <div class="omnibar-suggestions" id="omnibar-suggestions"></div>
+          <div class="omnibar">
+            <span class="omnibar-icon">🔍</span>
+            <input
+              type="text"
+              class="omnibar-input"
+              id="omnibar-input"
+              placeholder="Ask anything about equipment, alarms, or routes... (e.g., 'Find degraded pumps')"
+            />
+            <button
+              class="omnibar-btn"
+              id="omnibar-submit"
+              title="Execute Query"
+            >
+              ↵
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <div class="copilot-container" id="right-copilot-container">
+        <button
+          class="copilot-toggle-pill"
+          id="btn-toggle-copilot"
+          title="Toggle AI Copilot"
+        >
+          ▶
+        </button>
+
+        <aside class="copilot-drawer" id="copilot-drawer">
+          <div class="copilot-header">
+            <div class="copilot-title">
+              <span style="color: var(--accent)">🤖</span>
+              <span>ASK YOUR FACTORY COPILOT</span>
+            </div>
+            <span class="badge" id="copilot-model-badge">GEMINI + RAG</span>
+          </div>
+
+          <div class="copilot-body" id="copilot-content">
+            <div class="diag-card">
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                "
+              >
+                <span
+                  id="card-asset-tag"
+                  style="
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: var(--accent);
+                  "
+                  >ASSET: P-005</span
+                >
+                <span
+                  class="badge"
+                  id="card-health-badge"
+                  style="color: var(--red); border-color: var(--red)"
+                  >44% CRITICAL</span
+                >
+              </div>
+              <div style="font-size: 11px; color: var(--muted)">
+                Class:
+                <b id="card-asset-class" style="color: #fff">PROCESS_PUMP</b>
+                &bull; Area:
+                <b id="card-asset-area" style="color: #fff">Utility Island</b>
+              </div>
+
+              <div style="margin-top: 2px">
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 10px;
+                    font-family: var(--font-mono);
+                    color: var(--muted);
+                    margin-bottom: 2px;
+                  "
+                >
+                  <span>14-Day Pressure / Flow Trend</span>
+                  <span style="color: #38bdf8">Live OPC UA</span>
+                </div>
+                <canvas id="telem-canvas"></canvas>
+              </div>
+            </div>
+
+            <div class="diag-card">
+              <div class="heading">
+                <span>Diagnostic Assessment</span>
+                <span
+                  id="diag-conf"
+                  style="color: var(--green); font-family: var(--font-mono)"
+                  >Conf: 0.91</span
+                >
+              </div>
+
+              <div class="primary-finding-box" id="finding-box">
+                <span class="finding-icon" id="finding-icon">⚠️</span>
+                <span class="finding-text" id="primary-finding-text"
+                  >Impeller Fouling Detected (44% Health)</span
+                >
+              </div>
+
+              <div>
+                <div
+                  style="
+                    font-size: 10px;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    color: var(--muted);
+                    margin-bottom: 4px;
+                  "
+                >
+                  Root Cause Indicators
+                </div>
+                <ul class="root-cause-list" id="root-cause-list">
+                  <li class="root-cause-item">
+                    <span class="root-cause-bullet">•</span>
+                    <span
+                      >Discharge pressure drop of 1.4 bar below nominal
+                      profile</span
+                    >
+                  </li>
+                  <li class="root-cause-item">
+                    <span class="root-cause-bullet">•</span>
+                    <span
+                      >Stiction index elevated at 8.7% indicating hydraulic
+                      fouling</span
+                    >
+                  </li>
+                </ul>
+              </div>
+
+              <div>
+                <div
+                  style="
+                    font-size: 10px;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    color: var(--muted);
+                    margin-bottom: 4px;
+                  "
+                >
+                  Corroborating Evidence
+                </div>
+                <div
+                  class="evidence-chips-wrapper"
+                  id="evidence-citations-box"
+                ></div>
+              </div>
+            </div>
+
+            <div class="safety-card" id="safety-alert-box">
+              <div
+                style="
+                  font-weight: 700;
+                  display: flex;
+                  align-items: center;
+                  gap: 4px;
+                  margin-bottom: 3px;
+                "
+              >
+                <span>⚠️</span>
+                <span>Field Safety Protocol (DOC-FIELD-SAFETY):</span>
+              </div>
+              <div id="safety-text" style="line-height: 1.4">
+                Ensure pneumatic & electrical LOTO and 0.0 bar depressurization
+                verification before physical inspection.
+              </div>
+            </div>
+
+            <button
+              class="btn"
+              id="btn-submit-wo"
+              style="padding: 10px; font-size: 13px"
+            >
+              <span>📝 Draft Field Work Order</span>
+            </button>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+  </body>
+</html>

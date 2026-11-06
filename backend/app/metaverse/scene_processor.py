@@ -34,8 +34,11 @@ class BoilerRoomScene:
         self.clean_path = CLEAN_PLY_PATH
         self._ensure_standard_ply()
         self.extracted_frames: List[Dict[str, Any]] = []
-
         self._grid_cache: Optional[Dict[str, Any]] = None
+        try:
+            self.run_algorithmic_extraction()
+        except Exception:
+            pass
 
     def _ensure_standard_ply(self) -> None:
         """Generates standard binary Three.js PLY file (x,y,z,red,green,blue) if missing."""
@@ -107,7 +110,10 @@ end_header
 
     def _load_ply_points(self) -> np.ndarray:
         """Reads xyz coordinates from the PLY point cloud."""
-        target_ply = self.clean_path if self.clean_path.exists() else self.raw_path
+        if self.clean_path.exists():
+            target_ply = self.clean_path
+        else:
+            target_ply = self.raw_path
         if not target_ply.exists():
             return np.empty((0, 3), dtype=np.float32)
 
@@ -223,7 +229,7 @@ end_header
         try:
             mins = np.array([-5.2, -0.65, -5.2])
             maxs = np.array([5.2, 1.9, 1.0])
-            grid_res = 0.35
+            grid_res = 0.28
             grid_shape = np.ceil((maxs - mins) / grid_res).astype(int)
 
             valid = (
@@ -243,7 +249,7 @@ end_header
             density_grid[unique_v[:, 0], unique_v[:, 1], unique_v[:, 2]] = counts
 
             footprint = np.ones((3, 3, 3), dtype=bool)
-            local_max = (maximum_filter(density_grid, footprint=footprint) == density_grid) & (density_grid >= 25)
+            local_max = (maximum_filter(density_grid, footprint=footprint) == density_grid) & (density_grid >= 18)
             max_indices = np.argwhere(local_max)
 
             known_frames = self.get_semantic_frames()
@@ -252,19 +258,24 @@ end_header
             new_clusters = []
             for idx in max_indices:
                 world_pos = mins + (idx + 0.5) * grid_res
-                pts_in_sphere = eq_pts[np.linalg.norm(eq_pts - world_pos, axis=1) <= 0.6]
-                if len(pts_in_sphere) < 25:
+                pts_in_sphere = eq_pts[np.linalg.norm(eq_pts - world_pos, axis=1) <= 0.45]
+                if len(pts_in_sphere) < 18:
                     continue
 
                 p_min = pts_in_sphere.min(axis=0)
                 p_max = pts_in_sphere.max(axis=0)
                 center = (p_min + p_max) / 2
-                size = np.maximum(p_max - p_min, [0.45, 0.45, 0.45])
+                size = np.maximum(p_max - p_min, [0.40, 0.40, 0.40])
 
                 dists = [np.linalg.norm(center - a) for a in known_anchors]
-                min_d = min(dists) if dists else 999.0
+                if dists:
+                    min_d = min(dists)
+                else:
+                    min_d = 999.0
 
-                if min_d > 0.80:
+                if min_d > 0.65:
+                    if any(np.linalg.norm(center - np.array(c["pos"][:3])) < 0.55 for c in new_clusters):
+                        continue
                     cy = float(center[1])
                     if cy > 0.70:
                         aclass = "STRUCTURAL_PIPE"
