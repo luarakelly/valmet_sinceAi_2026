@@ -488,8 +488,97 @@ async function analyzeCurrentView() {
   }
 }
 
+// Surface mesh reconstructed from the Gaussian splat (see backend splat_mesh.py).
+// Modes: 0 = scan colours, 1 = studio (height-tinted clay), 2 = heat (height ramp).
+function createMeshMaterial(geometry) {
+  geometry.computeBoundingBox();
+  const bounds = geometry.boundingBox;
+  let modeVal = 0;
+  if (renderMode === "studio") {
+    modeVal = 1;
+  } else if (renderMode === "heat") {
+    modeVal = 2;
+  }
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uMode: { value: modeVal },
+      uOpacity: { value: 1.0 },
+      uMinY: { value: bounds.min.y },
+      uMaxY: { value: bounds.max.y },
+    },
+    vertexShader: `
+      attribute vec3 color;
+      uniform float uMinY;
+      uniform float uMaxY;
+      varying vec3 vColor;
+      varying vec3 vNormal;
+      varying float vHeight;
+      void main() {
+        vColor = color;
+        vNormal = normalize(mat3(modelMatrix) * normal);
+        vHeight = clamp((position.y - uMinY) / max(uMaxY - uMinY, 0.001), 0.0, 1.0);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform int uMode;
+      uniform float uOpacity;
+      varying vec3 vColor;
+      varying vec3 vNormal;
+      varying float vHeight;
+      vec3 heatColor(float v) {
+        vec3 a = vec3(0.04, 0.45, 0.95), b = vec3(0.12, 0.92, 0.55), c = vec3(0.98, 0.72, 0.08), d = vec3(0.95, 0.18, 0.06);
+        if (v < 0.33) return mix(a, b, v / 0.33);
+        if (v < 0.66) return mix(b, c, (v - 0.33) / 0.33);
+        return mix(c, d, (v - 0.66) / 0.34);
+      }
+      void main() {
+        vec3 n = normalize(vNormal);
+        if (!gl_FrontFacing) n = -n;
+        vec3 key = normalize(vec3(0.35, 0.85, 0.45));
+        vec3 fill = normalize(vec3(-0.6, 0.3, -0.5));
+        float light = 0.42 + 0.48 * max(dot(n, key), 0.0) + 0.18 * max(dot(n, fill), 0.0) + 0.08 * n.y;
+        vec3 base = vColor;
+        if (uMode == 1) {
+          base = mix(vec3(0.70, 0.74, 0.78), vec3(0.55, 0.80, 0.92), vHeight * 0.6);
+        } else if (uMode == 2) {
+          base = heatColor(vHeight);
+        }
+        gl_FragColor = vec4(base * light, uOpacity);
+      }
+    `,
+    side: THREE.DoubleSide,
+  });
+}
+
 function loadBoilerRoomPLY() {
-  showToast("Streaming Industrial Boiler Room PLY...");
+  showToast("Loading boiler room mesh...");
+  const loader = new THREE.PLYLoader();
+  loader.load(
+    "/api/scene/boiler-room-mesh.ply",
+    function (geometry) {
+      if (pointCloud) {
+        scene.remove(pointCloud);
+      }
+      geometry.computeVertexNormals();
+      pointCloud = new THREE.Mesh(geometry, createMeshMaterial(geometry));
+      scene.add(pointCloud);
+      applyRenderMode(renderMode);
+      const faces = geometry.index ? geometry.index.count / 3 : geometry.attributes.position.count / 3;
+      const pointCountEl = document.getElementById("engine-point-count");
+      if (pointCountEl) {
+        pointCountEl.innerText = "Boiler room mesh · " + Math.round(faces / 1000) + "k triangles";
+      }
+    },
+    undefined,
+    function (err) {
+      console.warn("Mesh unavailable, falling back to point cloud", err);
+      loadBoilerRoomPointCloud();
+    },
+  );
+}
+
+function loadBoilerRoomPointCloud() {
   const loader = new THREE.PLYLoader();
 
   loader.load(

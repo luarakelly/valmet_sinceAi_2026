@@ -562,6 +562,20 @@ def get_boiler_room_ply():
     return FileResponse(path=str(path), media_type="application/octet-stream", filename=path.name)
 
 
+@router.get("/scene/boiler-room-mesh.ply")
+def get_boiler_room_mesh():
+    """Surface mesh reconstructed from the Gaussian splat (vertex colours + faces), same canonical frame."""
+    from app.metaverse.point_cloud import VIEWER_MESH_PATH, build_scene_mesh
+
+    try:
+        path = build_scene_mesh()
+    except FileNotFoundError:
+        path = VIEWER_MESH_PATH
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Boiler room mesh not found on server")
+    return FileResponse(path=str(path), media_type="application/octet-stream", filename=path.name)
+
+
 @router.post("/vision/analyze")
 async def analyze_viewport_view(
     file: UploadFile = File(...),
