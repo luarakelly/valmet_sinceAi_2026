@@ -10,8 +10,7 @@ let isNavigating = false;
 let navSpeed = 1.5;
 let cameraMode = "orbit";
 let currentSelectedAsset = "ASSET-017";
-let pointSize = 0.032;
-let renderMode = "studio";
+let renderMode = "mesh";
 let sidebarOpen = true;
 let copilotOpen = true;
 
@@ -204,23 +203,66 @@ function createRobotAvatar() {
   scene.add(robotAvatar);
 }
 
-function createPointMaterial(geometry) {
-  if (!geometry.hasAttribute("color")) {
-    const color = new Float32Array(geometry.attributes.position.count * 3);
-    for (let i = 0; i < color.length; i += 3) {
-      color[i] = 0.45;
-      color[i + 1] = 0.78;
-      color[i + 2] = 0.92;
-    }
-    geometry.setAttribute("color", new THREE.BufferAttribute(color, 3));
+/**
+ * Filters out sparse floating outlier noise using a fast 3D spatial hash grid
+ * and normalizes colors if missing or dark.
+ */
+function cleanAndPreparePointGeometry(rawGeometry, gridCellSize = 0.12, minNeighbors = 4) {
+  const posAttr = rawGeometry.attributes.position;
+  const count = posAttr.count;
+  const hasColor = rawGeometry.hasAttribute("color");
+  const colAttr = hasColor ? rawGeometry.attributes.color : null;
+
+  // 1. Spatial density pass to strip floating outlier noise
+  const gridCounts = new Map();
+  const cellKeys = new Array(count);
+
+  for (let i = 0; i < count; i++) {
+    const gx = Math.floor(posAttr.getX(i) / gridCellSize);
+    const gy = Math.floor(posAttr.getY(i) / gridCellSize);
+    const gz = Math.floor(posAttr.getZ(i) / gridCellSize);
+    const key = `${gx},${gy},${gz}`;
+    cellKeys[i] = key;
+    gridCounts.set(key, (gridCounts.get(key) || 0) + 1);
   }
 
+  const cleanPositions = [];
+  const cleanColors = [];
+
+  for (let i = 0; i < count; i++) {
+    if (gridCounts.get(cellKeys[i]) < minNeighbors) continue; // Drop floating noise
+
+    const x = posAttr.getX(i);
+    const y = posAttr.getY(i);
+    const z = posAttr.getZ(i);
+    cleanPositions.push(x, y, z);
+
+    if (colAttr) {
+      cleanColors.push(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i));
+    } else {
+      cleanColors.push(0.45, 0.78, 0.92);
+    }
+  }
+
+  const cleanGeo = new THREE.BufferGeometry();
+  cleanGeo.setAttribute("position", new THREE.Float32BufferAttribute(cleanPositions, 3));
+  cleanGeo.setAttribute("color", new THREE.Float32BufferAttribute(cleanColors, 3));
+
+  // Rotate 180° around Z to right-side up the Gaussian Splat scan into Three.js coordinates
+  cleanGeo.rotateZ(Math.PI);
+
+  cleanGeo.computeBoundingBox();
+  cleanGeo.computeBoundingSphere();
+  return cleanGeo;
+}
+
+function createPointMaterial(geometry) {
   geometry.computeBoundingBox();
   const bounds = geometry.boundingBox;
+
   return new THREE.ShaderMaterial({
     uniforms: {
-      uPointSize: { value: pointSize },
-      uOpacity: { value: 0.96 },
+      uPointSize: { value: 0.055 },
       uMode: {
         value: renderMode === "studio" ? 1 : renderMode === "heat" ? 2 : 0,
       },
@@ -228,51 +270,74 @@ function createPointMaterial(geometry) {
       uMaxY: { value: bounds ? bounds.max.y : 1 },
     },
     vertexShader: `
-            attribute vec3 color;
-            uniform float uPointSize;
-            uniform float uMinY;
-            uniform float uMaxY;
-            varying vec3 vColor;
-            varying float vHeight;
-            void main() {
-              vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
-              float heightRange = max(uMaxY - uMinY, 0.001);
-              vHeight = clamp((position.y - uMinY) / heightRange, 0.0, 1.0);
-              vColor = color;
-              gl_PointSize = clamp(uPointSize * (420.0 / max(-viewPosition.z, 0.1)), 2.0, 48.0);
-              gl_Position = projectionMatrix * viewPosition;
-            }
-          `,
+      attribute vec3 color;
+      uniform float uPointSize;
+      uniform float uMinY;
+      uniform float uMaxY;
+      varying vec3 vColor;
+      varying float vHeight;
+      varying float vDepth;
+
+      void main() {
+        vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+        float heightRange = max(uMaxY - uMinY, 0.001);
+        vHeight = clamp((position.y - uMinY) / heightRange, 0.0, 1.0);
+        vColor = color;
+        vDepth = -viewPosition.z;
+
+        // Perspective-scaled splat size
+        gl_PointSize = clamp(uPointSize * (340.0 / max(-viewPosition.z, 0.1)), 2.0, 28.0);
+        gl_Position = projectionMatrix * viewPosition;
+      }
+    `,
     fragmentShader: `
-            uniform float uOpacity;
-            uniform int uMode;
-            varying vec3 vColor;
-            varying float vHeight;
-            vec3 heatColor(float value) {
-              vec3 cool = vec3(0.02, 0.55, 0.95);
-              vec3 warm = vec3(1.0, 0.25, 0.08);
-              return mix(cool, warm, smoothstep(0.2, 0.85, value));
-            }
-            void main() {
-              float distanceToCenter = length(gl_PointCoord - vec2(0.5));
-              float edge = exp(-distanceToCenter * distanceToCenter * 5.5);
-              if (distanceToCenter > 0.98) discard;
-              vec3 outputColor = vColor;
-              if (uMode == 0) {
-                outputColor = pow(vColor, vec3(0.92)) * (0.85 + edge * 0.35);
-              } else if (uMode == 1) {
-                outputColor = mix(vec3(0.03, 0.18, 0.28), vec3(0.04, 0.85, 0.92), vHeight);
-                outputColor *= 0.82 + edge * 0.28;
-              } else if (uMode == 2) {
-                outputColor = heatColor(vHeight);
-              }
-              gl_FragColor = vec4(outputColor, edge * uOpacity);
-            }
-          `,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.NormalBlending,
+      uniform int uMode;
+      varying vec3 vColor;
+      varying float vHeight;
+
+      vec3 heatColor(float value) {
+        vec3 cool = vec3(0.02, 0.55, 0.95);
+        vec3 warm = vec3(1.0, 0.25, 0.08);
+        return mix(cool, warm, smoothstep(0.15, 0.85, value));
+      }
+
+      void main() {
+        // Circular disc with pseudo-3D normal shading
+        vec2 uv = gl_PointCoord * 2.0 - 1.0;
+        float r2 = dot(uv, uv);
+        if (r2 > 1.0) discard; // Hard alpha cutout so depthWrite works cleanly!
+
+        float z = sqrt(1.0 - r2);
+        vec3 normal = normalize(vec3(uv.x, -uv.y, z));
+        vec3 lightDir = normalize(vec3(0.4, 0.8, 0.6));
+        float diff = max(dot(normal, lightDir), 0.0);
+        float shade = 0.65 + 0.35 * diff;
+
+        vec3 outputColor = vColor;
+        if (uMode == 0) {
+          // Boost contrast & apply spherical impostor shading
+          outputColor = pow(vColor, vec3(0.85)) * shade;
+        } else if (uMode == 1) {
+          outputColor = mix(vec3(0.06, 0.22, 0.35), vec3(0.15, 0.88, 0.96), vHeight) * shade;
+        } else if (uMode == 2) {
+          outputColor = heatColor(vHeight) * shade;
+        }
+
+        gl_FragColor = vec4(outputColor, 1.0);
+      }
+    `,
+    transparent: false,
+    depthWrite: true,
+    depthTest: true,
   });
+}
+
+function createMeshMaterial(geometry) {
+  return createPointMaterial(geometry);
+}
+
+function createVoxelMesh(pointGeometry) {
+  return cleanAndPreparePointGeometry(pointGeometry, 0.12, 4);
 }
 
 function applyRenderMode(mode) {
@@ -283,11 +348,10 @@ function applyRenderMode(mode) {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", active ? "true" : "false");
   });
-  if (pointCloud && pointCloud.material.uniforms) {
-    pointCloud.material.uniforms.uMode.value = modeIndex;
-    pointCloud.material.uniforms.uPointSize.value =
-      mode === "splat" ? pointSize * 1.55 : pointSize;
-    pointCloud.material.uniforms.uOpacity.value = mode === "heat" ? 0.92 : 0.96;
+  if (pointCloud && pointCloud.material && pointCloud.material.uniforms) {
+    if (pointCloud.material.uniforms.uMode) {
+      pointCloud.material.uniforms.uMode.value = modeIndex;
+    }
   }
   showToast("Render mode: " + mode.charAt(0).toUpperCase() + mode.slice(1));
 }
@@ -352,30 +416,35 @@ async function analyzeCurrentView() {
 }
 
 function loadBoilerRoomPLY() {
-  showToast("Streaming Industrial Boiler Room PLY point cloud...");
+  showToast("Streaming Industrial Boiler Room PLY...");
   const loader = new THREE.PLYLoader();
 
   loader.load(
     "/api/scene/boiler-room.ply",
-    function (geometry) {
+    function (rawGeometry) {
       if (pointCloud) {
         scene.remove(pointCloud);
       }
 
-      geometry.computeBoundingSphere();
+      // Strip sparse floating noise, right-side up orientation, and build clean splat impostors
+      const geometry = cleanAndPreparePointGeometry(rawGeometry, 0.12, 5);
       const material = createPointMaterial(geometry);
 
       pointCloud = new THREE.Points(geometry, material);
       scene.add(pointCloud);
-      document.getElementById("engine-point-count").innerText =
-        "317,826 verified points";
-      showToast("Boiler Room 3D model loaded! (317,826 points)");
+
+      const finalCount = geometry.attributes.position.count;
+      const pointCountEl = document.getElementById("engine-point-count");
+      if (pointCountEl) {
+        pointCountEl.innerText = finalCount.toLocaleString() + " filtered points";
+      }
+      showToast(`Boiler Room loaded (${finalCount.toLocaleString()} clean points)`);
     },
     undefined,
     function (err) {
       console.warn("Falling back to procedural cloud", err);
       generateProceduralPointcloud();
-    },
+    }
   );
 }
 
@@ -398,8 +467,10 @@ function generateProceduralPointcloud() {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  const mat = createPointMaterial(geo);
-  pointCloud = new THREE.Points(geo, mat);
+  geo.computeBoundingBox();
+  const geometry = cleanAndPreparePointGeometry(geo, 0.12, 1);
+  const mat = createPointMaterial(geometry);
+  pointCloud = new THREE.Points(geometry, mat);
   scene.add(pointCloud);
   applyRenderMode(renderMode);
 }
