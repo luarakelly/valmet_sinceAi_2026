@@ -29,7 +29,7 @@ from app.routes import router as api_router
 APP_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = APP_DIR.parent
 PROJECT_ROOT = BACKEND_DIR.parent
-STATIC_DIR = APP_DIR / "three_d" / "static"
+FRONTEND_DIR = PROJECT_ROOT / "frontend"
 DATA_DIR = PROJECT_ROOT / "data"
 
 
@@ -86,21 +86,29 @@ except ImportError:
 try:
     from app.metaverse.routes import router as metaverse_router
     app.include_router(metaverse_router, prefix="/api")
+    app.include_router(metaverse_router, prefix="/api/metaverse")
 except ImportError:
     pass
 
 
-if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Mount frontend assets
+styles_dir = FRONTEND_DIR / "src" / "styles"
+if styles_dir.exists():
+    app.mount("/styles", StaticFiles(directory=str(styles_dir)), name="styles")
+
+js_dir = FRONTEND_DIR / "src" / "js"
+if js_dir.exists():
+    app.mount("/js", StaticFiles(directory=str(js_dir)), name="js")
+
+public_dir = FRONTEND_DIR / "public"
+if public_dir.exists():
+    app.mount("/public", StaticFiles(directory=str(public_dir)), name="public")
 
 
 @app.get("/", include_in_schema=False)
 async def root_index():
     """Serve the interactive Three.js 3D digital twin dashboard."""
-    index_path = STATIC_DIR / "index.html"
-    if not index_path.exists():
-        index_path = APP_DIR / "three_d" / "static" / "index.html"
-
+    index_path = FRONTEND_DIR / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path))
 
@@ -128,7 +136,7 @@ async def get_pointcloud_ply():
     candidates = [
         DATA_DIR / "Industrial_Boiler_Room_standard.ply",
         PROJECT_ROOT / "Industrial_Boiler_Room_standard.ply",
-        STATIC_DIR / "Industrial_Boiler_Room_standard.ply",
+        FRONTEND_DIR / "public" / "Industrial_Boiler_Room_standard.ply",
         DATA_DIR / "Industrial Boiler Room.ply",
         PROJECT_ROOT / "Industrial Boiler Room.ply",
     ]
