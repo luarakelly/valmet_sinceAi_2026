@@ -54,9 +54,6 @@ from app.schemas import (
 router = APIRouter(tags=["Ask Your Factory"])
 
 
-# ---------------------------------------------------------------------------
-# Helper Functions
-# ---------------------------------------------------------------------------
 
 def get_asset_or_404(session: Session, identifier: str) -> Asset:
     """Resolve an asset by asset_id (e.g. ASSET-017) or tag (e.g. P-005), case-insensitively.
@@ -124,9 +121,6 @@ def transform_anchor_to_scene(
     }
 
 
-# ---------------------------------------------------------------------------
-# Official Contract Routes
-# ---------------------------------------------------------------------------
 
 @router.get("/assets", response_model=List[AssetRead])
 def list_assets(
@@ -156,7 +150,6 @@ def list_assets(
 
     assets = session.exec(stmt.order_by(Asset.asset_id.asc())).all()
 
-    # Pre-fetch CurrentStates and SceneAnchors for joined composition
     asset_ids = [a.asset_id for a in assets]
     state_map: Dict[str, CurrentState] = {}
     anchor_map: Dict[str, SceneAnchor] = {}
@@ -173,7 +166,6 @@ def list_assets(
         state_obj = state_map.get(a.asset_id)
         anchor_obj = anchor_map.get(a.asset_id)
 
-        # Apply condition_state filter if requested
         if condition_state and state_obj:
             if state_obj.condition_state.lower() != condition_state.strip().lower():
                 continue
@@ -188,7 +180,6 @@ def list_assets(
         else:
             a_read = None
 
-        # Embed health state into anchor if present
         if a_read and state_obj:
             a_read.health_score = state_obj.health_score
             a_read.condition_state = state_obj.condition_state
@@ -226,24 +217,20 @@ def get_asset_detail(
     """Retrieve full 360-degree asset details by asset_id (e.g. ASSET-017) or tag (e.g. P-005)."""
     asset = get_asset_or_404(session, id)
 
-    # Joined components
     state = session.exec(select(CurrentState).where(CurrentState.asset_id == asset.asset_id)).first()
     anchor = session.exec(select(SceneAnchor).where(SceneAnchor.asset_id == asset.asset_id)).first()
 
-    # Linked Knowledge Docs (specific + global guides)
     doc_cond = (KnowledgeDoc.scope == asset.asset_class) | (KnowledgeDoc.scope == "ALL")
     if state and state.knowledge_doc_id:
         doc_cond = doc_cond | (KnowledgeDoc.doc_id == state.knowledge_doc_id)
     docs = session.exec(select(KnowledgeDoc).where(doc_cond)).all()
     k_reads = [KnowledgeDocRead.model_validate(d) for d in docs]
 
-    # Data Quality Issues
     dq_issues = session.exec(
         select(DataQuality).where(DataQuality.asset_id == asset.asset_id)
     ).all()
     dq_reads = [DataQualityRead.model_validate(q) for q in dq_issues]
 
-    # Recent Telemetry (10 most recent samples, ascending order)
     telemetry_samples = session.exec(
         select(Telemetry)
         .where(Telemetry.asset_id == asset.asset_id)
@@ -252,7 +239,6 @@ def get_asset_detail(
     ).all()
     t_reads = [TelemetryRead.model_validate(s) for s in reversed(telemetry_samples)]
 
-    # Recent Events (10 most recent)
     events = session.exec(
         select(AlarmEvent)
         .where(AlarmEvent.asset_id == asset.asset_id)
@@ -261,7 +247,6 @@ def get_asset_detail(
     ).all()
     e_reads = [AlarmEventRead.model_validate(e) for e in events]
 
-    # Maintenance History (5 most recent)
     wos = session.exec(
         select(MaintenanceHistory)
         .where(MaintenanceHistory.asset_id == asset.asset_id)
@@ -335,7 +320,6 @@ def get_asset_telemetry(
     if end_time:
         stmt = stmt.where(Telemetry.timestamp <= end_time)
 
-    # Order ascending for direct timeseries charting in Three.js HUD
     samples = session.exec(stmt.order_by(Telemetry.timestamp.asc()).limit(limit)).all()
     return [TelemetryRead.model_validate(s) for s in samples]
 
@@ -372,19 +356,16 @@ def get_asset_documents(
     """Retrieve RAG-ready engineering docs and safety guardrails applicable to an asset."""
     asset = get_asset_or_404(session, id)
 
-    # 1. Asset specific doc
     state = session.exec(select(CurrentState).where(CurrentState.asset_id == asset.asset_id)).first()
     doc_ids = []
     if state and state.knowledge_doc_id:
         doc_ids.append(state.knowledge_doc_id)
 
-    # 2. Mandatory safety & AI grounding guides (DOC-FIELD-SAFETY, DOC-RAG-GUIDE, DOC-3D-MAPPING)
     mandatory_docs = ["DOC-FIELD-SAFETY", "DOC-RAG-GUIDE", "DOC-3D-MAPPING"]
     for m in mandatory_docs:
         if m not in doc_ids:
             doc_ids.append(m)
 
-    # Query docs
     docs = session.exec(
         select(KnowledgeDoc).where(
             (KnowledgeDoc.doc_id.in_(doc_ids))
@@ -393,7 +374,6 @@ def get_asset_documents(
         )
     ).all()
 
-    # Deduplicate while preserving order
     seen = set()
     unique_docs: List[KnowledgeDocRead] = []
     for d in docs:
@@ -492,11 +472,9 @@ def create_draft_work_order(
             detail="Mandatory safety verification required: You must acknowledge DOC-FIELD-SAFETY guidelines before drafting work orders.",
         )
 
-    # Generate sequential or timestamped draft work order ID
     stamp = int(datetime.now(timezone.utc).timestamp()) % 100000
     draft_id = f"WO-DRAFT-{stamp:05d}"
 
-    # Current state lookup for doc linkage
     state = session.exec(select(CurrentState).where(CurrentState.asset_id == asset.asset_id)).first()
     if state:
         doc_id = state.knowledge_doc_id
@@ -511,7 +489,6 @@ def create_draft_work_order(
     else:
         action_text = fallback_action
 
-    # Persist in maintenance history
     wo = MaintenanceHistory(
         work_order_id=draft_id,
         asset_id=asset.asset_id,
@@ -532,7 +509,6 @@ def create_draft_work_order(
     session.commit()
     session.refresh(wo)
 
-    # Mandatory safety checklist derived from DOC-FIELD-SAFETY
     checklist = [
         f"PPE Required: Standard personal protective equipment for {asset.area_name} (Hard Hat, Eye Protection, Safety Boots).",
         f"Lockout/Tagout (LOTO): Perform electrical and mechanical power isolation on {asset.tag} before touching casing or wiring.",
@@ -558,9 +534,6 @@ def create_draft_work_order(
     )
 
 
-# ---------------------------------------------------------------------------
-# Auxiliary Endpoints (Metaverse Dashboard & Proximity Detection)
-# ---------------------------------------------------------------------------
 
 @router.get("/metaverse/dashboard", response_model=MetaverseDashboardResponse)
 def get_metaverse_dashboard(session: Session = Depends(get_session)):

@@ -20,9 +20,6 @@ from sqlmodel import SQLModel, Field, Relationship
 from sqlalchemy import JSON, Column
 
 
-# =====================================================================
-# 1. Knowledge Documentation & Standards
-# =====================================================================
 
 class KnowledgeDoc(SQLModel, table=True):
     """Authoritative engineering, diagnostic, and safety guidelines."""
@@ -34,13 +31,9 @@ class KnowledgeDoc(SQLModel, table=True):
     content: str = Field(description="Full text markdown of guidelines and requirements")
     synthetic_record: bool = Field(default=True, description="Synthetic data flag")
 
-    # Relationships
     service_cases: List["HistoricalServiceCase"] = Relationship(back_populates="knowledge_doc")
 
 
-# =====================================================================
-# 2. Asset Master Record
-# =====================================================================
 
 class AssetMaster(SQLModel, table=True):
     """Master asset hierarchy containing the 30 industrial equipment units."""
@@ -63,7 +56,6 @@ class AssetMaster(SQLModel, table=True):
     data_classification: Optional[str] = Field(default="SYNTHETIC", description="Data governance classification")
     synthetic_record: bool = Field(default=True, description="Synthetic record flag")
 
-    # Relationships
     anchor: Optional["SceneAnchor"] = Relationship(back_populates="asset")
     current_state: Optional["CurrentState"] = Relationship(back_populates="asset")
     telemetry: List["TelemetrySample"] = Relationship(back_populates="asset")
@@ -72,9 +64,6 @@ class AssetMaster(SQLModel, table=True):
     data_quality_issues: List["DataQuality"] = Relationship(back_populates="asset")
 
 
-# =====================================================================
-# 3. 3D Spatial Anchors
-# =====================================================================
 
 class SceneAnchor(SQLModel, table=True):
     """3D spatial anchor defining local coordinates and bounding box dimensions in the scene."""
@@ -97,13 +86,9 @@ class SceneAnchor(SQLModel, table=True):
     remap_instruction: Optional[str] = Field(default=None, description="Remapping notes")
     synthetic_record: bool = Field(default=True)
 
-    # Relationships
     asset: Optional[AssetMaster] = Relationship(back_populates="anchor")
 
 
-# =====================================================================
-# 4. Operational Health & Condition State
-# =====================================================================
 
 class CurrentState(SQLModel, table=True):
     """Operational health condition, diagnostic state, and AI model confidence for each asset."""
@@ -125,14 +110,10 @@ class CurrentState(SQLModel, table=True):
     knowledge_doc_id: Optional[str] = Field(default=None, foreign_key="knowledge_docs.doc_id", description="Linked reference doc")
     synthetic_record: bool = Field(default=True)
 
-    # Relationships
     asset: Optional[AssetMaster] = Relationship(back_populates="current_state")
     knowledge_doc: Optional[KnowledgeDoc] = Relationship()
 
 
-# =====================================================================
-# 5. Multivariate Telemetry Time-Series Samples
-# =====================================================================
 
 class TelemetrySample(SQLModel, table=True):
     """Multivariate time-series telemetry samples (30-minute intervals over 3 days)."""
@@ -145,7 +126,6 @@ class TelemetrySample(SQLModel, table=True):
     asset_class: str = Field(description="Equipment category")
     area_id: str = Field(description="Plant area identifier")
 
-    # Sparse multivariate sensor channels (null where metric does not apply to asset class)
     process_pressure_bar: Optional[float] = Field(default=None, description="Process line pressure in bar")
     process_flow_pct: Optional[float] = Field(default=None, description="Process flow rate percentage")
     position_setpoint_pct: Optional[float] = Field(default=None, description="Valve setpoint position (0-100%)")
@@ -162,13 +142,9 @@ class TelemetrySample(SQLModel, table=True):
     source_profile: Optional[str] = Field(default="simulated_30min_stream")
     synthetic_record: bool = Field(default=True)
 
-    # Relationships
     asset: Optional[AssetMaster] = Relationship(back_populates="telemetry")
 
 
-# =====================================================================
-# 6. Alarms & Inspection Events
-# =====================================================================
 
 class AlarmEvent(SQLModel, table=True):
     """Alarm, condition change, inspection note, or maintenance notification event."""
@@ -187,13 +163,9 @@ class AlarmEvent(SQLModel, table=True):
     status: str = Field(default="open", description="Event state (open, acknowledged, closed)")
     synthetic_record: bool = Field(default=True)
 
-    # Relationships
     asset: Optional[AssetMaster] = Relationship(back_populates="alarms")
 
 
-# =====================================================================
-# 7. Maintenance Work Order History
-# =====================================================================
 
 class MaintenanceHistory(SQLModel, table=True):
     """Historical maintenance work orders with duration, downtime, outcome, and personnel role."""
@@ -214,14 +186,10 @@ class MaintenanceHistory(SQLModel, table=True):
     knowledge_doc_id: Optional[str] = Field(default=None, foreign_key="knowledge_docs.doc_id", description="Linked doc")
     synthetic_record: bool = Field(default=True)
 
-    # Relationships
     asset: Optional[AssetMaster] = Relationship(back_populates="maintenance_records")
     knowledge_doc: Optional[KnowledgeDoc] = Relationship()
 
 
-# =====================================================================
-# 8. Historical Diagnostic Reference Cases
-# =====================================================================
 
 class HistoricalServiceCase(SQLModel, table=True):
     """Historical diagnostic reference cases for evidence-grounded AI copilot reasoning."""
@@ -238,13 +206,9 @@ class HistoricalServiceCase(SQLModel, table=True):
     fairness_note: Optional[str] = Field(default=None, description="Synthetic case benchmark disclaimer")
     synthetic_record: bool = Field(default=True)
 
-    # Relationships
     knowledge_doc: Optional[KnowledgeDoc] = Relationship(back_populates="service_cases")
 
 
-# =====================================================================
-# 9. Synthetic Data Quality Logs
-# =====================================================================
 
 class DataQuality(SQLModel, table=True):
     """Synthetic data quality anomalies injected to verify trustworthy copilot degradation."""
@@ -259,13 +223,9 @@ class DataQuality(SQLModel, table=True):
     recommended_handling: str = Field(description="Recommended mitigation (flag_for_review, reduce_model_confidence)")
     synthetic_record: bool = Field(default=True)
 
-    # Relationships
     asset: Optional[AssetMaster] = Relationship(back_populates="data_quality_issues")
 
 
-# =====================================================================
-# 10. RAG Corpus Index
-# =====================================================================
 
 class RAGCorpusIndex(SQLModel, table=True):
     """Metadata catalog indexing markdown asset cards and engineering knowledge documents."""
@@ -281,9 +241,6 @@ class RAGCorpusIndex(SQLModel, table=True):
     synthetic_record: bool = Field(default=True)
 
 
-# =====================================================================
-# Legacy Nutrition Models (Retained for Backwards Compatibility)
-# =====================================================================
 
 class Users(SQLModel, table=True):
     __tablename__ = "users"
@@ -356,9 +313,6 @@ class OfflineQueue(SQLModel, table=True):
     processed_at: Optional[datetime] = None
 
 
-# =====================================================================
-# Aliases for Multi-Module Interoperability
-# =====================================================================
 
 Asset = AssetMaster
 AssetState = CurrentState

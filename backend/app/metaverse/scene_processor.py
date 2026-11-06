@@ -35,7 +35,6 @@ class BoilerRoomScene:
         self._ensure_standard_ply()
         self.extracted_frames: List[Dict[str, Any]] = []
 
-        # Cached occupancy grid & floor slice data
         self._grid_cache: Optional[Dict[str, Any]] = None
 
     def _ensure_standard_ply(self) -> None:
@@ -53,11 +52,17 @@ class BoilerRoomScene:
                 header_len = len(header)
                 data = np.memmap(f, dtype=np.float32, mode="r", offset=header_len, shape=(1506136, 59))
 
+                axis_artifact = (
+                    ((np.abs(data[:, 1]) < 0.08) & (np.abs(data[:, 2]) < 0.08)) |
+                    ((np.abs(data[:, 0]) < 0.08) & (np.abs(data[:, 2]) < 0.08)) |
+                    ((np.abs(data[:, 0]) < 0.08) & (np.abs(data[:, 1]) < 0.08))
+                )
                 mask = (
                     np.isfinite(data[:, 0]) & np.isfinite(data[:, 1]) & np.isfinite(data[:, 2]) &
                     (data[:, 0] > -6.0) & (data[:, 0] < 6.0) &
                     (data[:, 1] > -2.5) & (data[:, 1] < 2.5) &
-                    (data[:, 2] > -5.5) & (data[:, 2] < 1.5)
+                    (data[:, 2] > -5.5) & (data[:, 2] < 1.5) &
+                    (~axis_artifact)
                 )
                 indices = np.where(mask)[0][::2]  # ~317k points
                 n_pts = len(indices)
@@ -119,7 +124,6 @@ end_header
     def get_semantic_frames(self) -> List[Dict[str, Any]]:
         """Returns 3D bounding box frames for all 30 assets + architectural structures + any extracted objects."""
         base_positions = [
-            # Zone 1: Feed pumps & motors on floor pad (Y ~ -0.85m)
             {"id": "ASSET-013", "tag": "P-001", "class": "PROCESS_PUMP", "pos": [-2.2, -0.85, -2.8], "size": [1.4, 0.9, 1.1], "health": 69, "state": "degraded"},
             {"id": "ASSET-014", "tag": "P-002", "class": "PROCESS_PUMP", "pos": [-1.1, -0.85, -2.8], "size": [1.4, 0.9, 1.1], "health": 45, "state": "attention_required"},
             {"id": "ASSET-015", "tag": "P-003", "class": "PROCESS_PUMP", "pos": [0.1, -0.85, -2.8], "size": [1.4, 0.9, 1.1], "health": 96, "state": "healthy"},
@@ -127,7 +131,6 @@ end_header
             {"id": "ASSET-017", "tag": "P-005", "class": "PROCESS_PUMP", "pos": [2.4, -0.85, -2.8], "size": [1.5, 1.0, 1.2], "health": 44, "state": "attention_required"},
             {"id": "ASSET-018", "tag": "P-006", "class": "PROCESS_PUMP", "pos": [3.4, -0.85, -2.8], "size": [1.4, 0.9, 1.1], "health": 96, "state": "healthy"},
 
-            # Drive motors connected directly adjacent to pumps
             {"id": "ASSET-019", "tag": "M-001", "class": "ELECTRIC_MOTOR", "pos": [-2.2, -0.75, -2.0], "size": [0.9, 0.8, 0.8], "health": 77, "state": "watch"},
             {"id": "ASSET-020", "tag": "M-002", "class": "ELECTRIC_MOTOR", "pos": [-1.1, -0.75, -2.0], "size": [0.9, 0.8, 0.8], "health": 96, "state": "healthy"},
             {"id": "ASSET-021", "tag": "M-003", "class": "ELECTRIC_MOTOR", "pos": [0.1, -0.75, -2.0], "size": [0.9, 0.8, 0.8], "health": 81, "state": "watch"},
@@ -135,12 +138,10 @@ end_header
             {"id": "ASSET-023", "tag": "M-005", "class": "ELECTRIC_MOTOR", "pos": [2.4, -0.75, -2.0], "size": [0.9, 0.8, 0.8], "health": 61, "state": "degraded"},
             {"id": "ASSET-024", "tag": "M-006", "class": "ELECTRIC_MOTOR", "pos": [3.4, -0.75, -2.0], "size": [0.9, 0.8, 0.8], "health": 45, "state": "attention_required"},
 
-            # Vibration sensors mounted on motor and pump bearings
             {"id": "ASSET-028", "tag": "VS-001", "class": "VIBRATION_SENSOR", "pos": [-2.2, -0.45, -2.2], "size": [0.3, 0.3, 0.3], "health": 96, "state": "healthy"},
             {"id": "ASSET-029", "tag": "VS-002", "class": "VIBRATION_SENSOR", "pos": [-1.1, -0.45, -2.2], "size": [0.3, 0.3, 0.3], "health": 58, "state": "degraded"},
             {"id": "ASSET-030", "tag": "VS-003", "class": "VIBRATION_SENSOR", "pos": [2.4, -0.45, -2.2], "size": [0.3, 0.3, 0.3], "health": 96, "state": "healthy"},
 
-            # Elevated Control Valves along the steam header piping (Y ~ 0.2 to 0.7m)
             {"id": "ASSET-001", "tag": "CV-001", "class": "CONTROL_VALVE", "pos": [-3.1, 0.45, -1.2], "size": [0.8, 1.0, 0.8], "health": 96, "state": "healthy"},
             {"id": "ASSET-002", "tag": "CV-002", "class": "CONTROL_VALVE", "pos": [-2.1, 0.45, -1.2], "size": [0.8, 1.0, 0.8], "health": 96, "state": "healthy"},
             {"id": "ASSET-003", "tag": "CV-003", "class": "CONTROL_VALVE", "pos": [-1.0, 0.55, -1.2], "size": [0.8, 1.0, 0.8], "health": 52, "state": "degraded"},
@@ -154,12 +155,10 @@ end_header
             {"id": "ASSET-011", "tag": "CV-011", "class": "CONTROL_VALVE", "pos": [1.4, 0.65, 0.5], "size": [0.8, 1.0, 0.8], "health": 96, "state": "healthy"},
             {"id": "ASSET-012", "tag": "CV-012", "class": "CONTROL_VALVE", "pos": [2.8, 0.65, 0.5], "size": [0.8, 1.0, 0.8], "health": 96, "state": "healthy"},
 
-            # Pressure Transmitters on pipe manifolds
             {"id": "ASSET-025", "tag": "PT-001", "class": "PRESSURE_TRANSMITTER", "pos": [-2.7, 0.2, -1.1], "size": [0.4, 0.5, 0.4], "health": 96, "state": "healthy"},
             {"id": "ASSET-026", "tag": "PT-002", "class": "PRESSURE_TRANSMITTER", "pos": [0.6, 0.2, -1.1], "size": [0.4, 0.5, 0.4], "health": 96, "state": "healthy"},
             {"id": "ASSET-027", "tag": "PT-003", "class": "PRESSURE_TRANSMITTER", "pos": [2.8, 0.2, -1.1], "size": [0.4, 0.5, 0.4], "health": 96, "state": "healthy"},
 
-            # Extra surrounding industrial structural equipment frames
             {"id": "STRUCT-001", "tag": "BOILER-ALPHA", "class": "PRIMARY_VESSEL", "pos": [-1.5, 0.0, -4.0], "size": [2.6, 2.2, 2.2], "health": 98, "state": "healthy"},
             {"id": "STRUCT-002", "tag": "BOILER-BETA", "class": "PRIMARY_VESSEL", "pos": [1.8, 0.0, -4.0], "size": [2.6, 2.2, 2.2], "health": 97, "state": "healthy"},
             {"id": "STRUCT-003", "tag": "FEED-TANK-01", "class": "STORAGE_VESSEL", "pos": [-3.8, 0.1, -3.2], "size": [1.8, 2.0, 1.6], "health": 95, "state": "healthy"},
@@ -222,7 +221,6 @@ end_header
             return {"status": "error", "message": "PLY point cloud not found"}
 
         try:
-            # Filter equipment points between -0.65m (above floor) and 1.9m (below ceiling)
             mins = np.array([-5.2, -0.65, -5.2])
             maxs = np.array([5.2, 1.9, 1.0])
             grid_res = 0.35
@@ -244,19 +242,16 @@ end_header
             density_grid = np.zeros(grid_shape, dtype=int)
             density_grid[unique_v[:, 0], unique_v[:, 1], unique_v[:, 2]] = counts
 
-            # Detect 3D local density peaks
             footprint = np.ones((3, 3, 3), dtype=bool)
             local_max = (maximum_filter(density_grid, footprint=footprint) == density_grid) & (density_grid >= 25)
             max_indices = np.argwhere(local_max)
 
-            # Known mapped assets to avoid duplicate framing
             known_frames = self.get_semantic_frames()
             known_anchors = [np.array(f["pos"][:3]) for f in known_frames if not f.get("is_extracted")]
 
             new_clusters = []
             for idx in max_indices:
                 world_pos = mins + (idx + 0.5) * grid_res
-                # Gather points within sphere radius 0.6m
                 pts_in_sphere = eq_pts[np.linalg.norm(eq_pts - world_pos, axis=1) <= 0.6]
                 if len(pts_in_sphere) < 25:
                     continue
@@ -266,7 +261,6 @@ end_header
                 center = (p_min + p_max) / 2
                 size = np.maximum(p_max - p_min, [0.45, 0.45, 0.45])
 
-                # Check clearance to known equipment
                 dists = [np.linalg.norm(center - a) for a in known_anchors]
                 min_d = min(dists) if dists else 999.0
 
@@ -334,13 +328,11 @@ end_header
         nx = int(np.ceil((x_max - x_min) / cell_size))
         nz = int(np.ceil((z_max - z_min) / cell_size))
 
-        # Floor slice: Y in [-0.95, -0.65]
         floor_mask = (
             (pts[:, 1] >= -0.95) & (pts[:, 1] <= -0.65) &
             (pts[:, 0] >= x_min) & (pts[:, 0] <= x_max) &
             (pts[:, 2] >= z_min) & (pts[:, 2] <= z_max)
         )
-        # Obstacle slice: Y in [-0.65, 0.80]
         obs_mask = (
             (pts[:, 1] > -0.65) & (pts[:, 1] <= 0.80) &
             (pts[:, 0] >= x_min) & (pts[:, 0] <= x_max) &
@@ -357,7 +349,6 @@ end_header
         obs_grid = np.zeros((nx, nz), dtype=int)
         np.add.at(obs_grid, (obs_ix, obs_iz), 1)
 
-        # Walkable cells have floor presence and no dense obstacles
         is_obs = obs_grid > 50
         has_floor = binary_closing(floor_grid >= 2, structure=np.ones((3, 3)))
         walkable = has_floor & (~is_obs)
@@ -391,7 +382,6 @@ end_header
         nx, nz = grid_data["nx"], grid_data["nz"]
         walkable = grid_data["walkable"]
 
-        # Resolve target
         frames = {f["id"]: f for f in self.get_semantic_frames()}
         target = frames.get(target_id)
         if not target:
@@ -399,7 +389,6 @@ end_header
 
         tx, ty, tz = target["pos"]
 
-        # Default start entryway near service entrance
         if start_coord is not None:
             sx, sy, sz = start_coord
         else:
@@ -430,7 +419,6 @@ end_header
         s_grid = find_nearest_walkable(*to_grid(sx, sz))
         t_grid = find_nearest_walkable(*to_grid(tx, tz))
 
-        # A* Search
         import heapq
         heap = [(0.0, s_grid)]
         g_score = {s_grid: 0.0}
@@ -460,7 +448,6 @@ end_header
                         h = math.sqrt((ni - t_grid[0]) ** 2 + (nj - t_grid[1]) ** 2)
                         heapq.heappush(heap, (tentative + h, (ni, nj)))
 
-        # Fallback if disconnected
         if not raw_path or len(raw_path) < 2:
             waypoints = [
                 {"x": sx, "y": -0.85, "z": sz},
@@ -469,7 +456,6 @@ end_header
                 {"x": tx, "y": -0.85, "z": tz + 1.0},
             ]
         else:
-            # Line-of-sight smoothing over the occupancy grid
             smoothed = [raw_path[0]]
             curr_idx = 0
             while curr_idx < len(raw_path) - 1:
@@ -498,14 +484,12 @@ end_header
                 wx, wz = to_world(ix, iz)
                 waypoints.append({"x": wx, "y": -0.85, "z": wz})
 
-            # Ensure final standoff waypoint connects directly in front of target
             if len(waypoints) > 0:
                 last_w = waypoints[-1]
                 standoff_dist = math.sqrt((last_w["x"] - tx) ** 2 + (last_w["z"] - tz) ** 2)
                 if standoff_dist > 1.2:
                     waypoints.append({"x": round(tx, 3), "y": -0.85, "z": round(tz + 0.9, 3)})
 
-        # Compute accurate 3D distance
         total_len = 0.0
         for i in range(len(waypoints) - 1):
             p1 = waypoints[i]

@@ -6,7 +6,7 @@
     <title>
       Ask Your Factory — 3D Spatial Digital Twin & Field-Service Copilot
     </title>
-    <!-- Three.js and Loaders -->
+    
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -58,7 +58,7 @@
         user-select: none;
       }
 
-      /* Header */
+      
       header {
         height: 50px;
         background: var(--panel-solid);
@@ -140,7 +140,7 @@
         background: var(--card);
       }
 
-      /* Settings Modal */
+      
       .modal-backdrop {
         position: fixed;
         inset: 0;
@@ -172,7 +172,7 @@
         color: #fff;
       }
 
-      /* Layout */
+      
       .layout {
         display: flex;
         flex: 1;
@@ -181,7 +181,7 @@
         overflow: hidden;
       }
 
-      /* Collapsible Left Sidebar */
+      
       .sidebar-container {
         position: relative;
         display: flex;
@@ -266,7 +266,7 @@
         transform: scale(1.05);
       }
 
-      /* Collapsible Right Copilot Drawer */
+      
       .copilot-container {
         position: relative;
         display: flex;
@@ -326,7 +326,7 @@
         z-index: 22;
       }
 
-      /* Panel Boxes */
+      
       .heading {
         font-size: 11px;
         font-weight: 700;
@@ -347,7 +347,7 @@
         gap: 8px;
       }
 
-      /* Buttons & Inputs */
+      
       .btn {
         background: var(--accent);
         color: #051626;
@@ -403,7 +403,7 @@
         border-color: var(--accent);
       }
 
-      /* Unified Asset List */
+      
       .asset-list {
         display: flex;
         flex-direction: column;
@@ -506,7 +506,7 @@
         background: rgba(0, 210, 255, 0.15);
       }
 
-      /* 3D Viewport */
+      
       .viewport {
         flex: 1;
         height: 100%;
@@ -519,7 +519,7 @@
         height: 100%;
       }
 
-      /* Consolidated Sleek Viewport Toolbar */
+      
       .floating-top-bar {
         position: absolute;
         top: 14px;
@@ -663,7 +663,7 @@
         z-index: 15;
       }
 
-      /* Conversational Omnibar Front and Center */
+      
       .omnibar-container {
         position: absolute;
         bottom: 24px;
@@ -766,7 +766,7 @@
         transform: scale(1.05);
       }
 
-      /* Proximity Alert Toast in Viewport */
+      
       .proximity-alert {
         position: absolute;
         bottom: 84px;
@@ -796,7 +796,7 @@
         }
       }
 
-      /* Copilot Header & Content */
+      
       .copilot-header {
         padding: 12px 14px;
         border-bottom: 1px solid var(--border);
@@ -823,7 +823,7 @@
         font-size: 12px;
       }
 
-      /* Chunked Diagnosis Cards */
+      
       .diag-card {
         background: var(--card);
         border: 1px solid var(--border);
@@ -906,7 +906,7 @@
         border-radius: 4px;
       }
 
-      /* Toast */
+      
       .toast {
         position: fixed;
         top: 60px;
@@ -1004,7 +1004,7 @@
   <body>
     <div id="toast" class="toast"></div>
 
-    <!-- Engine Settings Modal (Moved from Section 1 for Clean KISS UI) -->
+    
     <div class="modal-backdrop" id="settings-modal">
       <div class="modal-box">
         <div class="modal-header">
@@ -1040,8 +1040,7 @@
       </div>
     </div>
 
-    <!-- Main Header -->
-    <header>
+        <header>
       <div class="brand">
         <span class="ask-your-factory-logo">ASK YOUR FACTORY</span>
         <span class="badge">SINCE AI 2026 DIGITAL TWIN</span>
@@ -1073,7 +1072,7 @@
     </header>
 
     <div class="layout">
-      <!-- Left Collapsible Sidebar -->
+      
       <div class="sidebar-container" id="left-sidebar-container">
         <aside class="sidebar" id="sidebar-metaverse">
           <div class="panel-box" style="flex: 1; min-height: 0">
@@ -1115,11 +1114,10 @@
               style="font-size: 11px; padding: 6px 8px"
             />
             <div class="asset-list" id="asset-list-container">
-              <!-- Rendered dynamically -->
-            </div>
+                          </div>
           </div>
 
-          <!-- Drone Quick Controls Footer -->
+          
           <div class="panel-box" style="flex-shrink: 0">
             <div class="heading">
               <span>Drone Nav Controller</span>
@@ -1160,7 +1158,7 @@
           </div>
         </aside>
 
-        <!-- Sidebar Collapse Toggle Pill -->
+        
         <button
           class="sidebar-toggle-pill"
           id="btn-toggle-left-sidebar"
@@ -1169,7 +1167,7 @@
           ◀
         </button>
 
-        <!-- Compact Floating Icons when Collapsed -->
+        
         <div
           class="collapsed-icons-bar"
           id="left-collapsed-bar"
@@ -1192,11 +1190,10 @@
         </div>
       </div>
 
-      <!-- Center 3D Viewport -->
-      <main class="viewport">
+            <main class="viewport">
         <div id="canvas-container"></div>
 
-        <!-- Sleek Consolidated Top Right Floating Toolbar -->
+        
         <div class="floating-top-bar">
           <div class="hud-nav-pill" id="hud-nav-pill">
             <span id="hud-target-name">Target: P-005</span>
@@ -1267,7 +1264,7 @@
           FREE CAM &nbsp; WASD + mouse &nbsp; Shift+F to exit
         </div>
 
-        <!-- Proximity Alert Banner -->
+        
         <div class="proximity-alert" id="proximity-alert">
           <div class="status-dot status-attention" id="alert-dot"></div>
           <div>
@@ -1286,7 +1283,7 @@
           </button>
         </div>
 
-        <!-- Conversational Omnibar Front and Center -->
+        
         <div class="omnibar-container" id="omnibar-container">
           <div class="omnibar-suggestions" id="omnibar-suggestions"></div>
           <div class="omnibar">
@@ -1308,9 +1305,9 @@
         </div>
       </main>
 
-      <!-- Right Collapsible Copilot Drawer -->
+      
       <div class="copilot-container" id="right-copilot-container">
-        <!-- Copilot Collapse Toggle Pill -->
+        
         <button
           class="copilot-toggle-pill"
           id="btn-toggle-copilot"
@@ -1319,7 +1316,7 @@
           ▶
         </button>
 
-        <!-- Compact Floating Icon when Collapsed -->
+        
         <div
           class="right-collapsed-bar"
           id="right-collapsed-bar"
@@ -1344,7 +1341,7 @@
           </div>
 
           <div class="copilot-body" id="copilot-content">
-            <!-- Asset Quick Overview Card -->
+            
             <div class="diag-card">
               <div
                 style="
@@ -1376,8 +1373,7 @@
                 <b id="card-asset-area" style="color: #fff">Utility Island</b>
               </div>
 
-              <!-- Sparkline Telemetry -->
-              <div style="margin-top: 2px">
+                            <div style="margin-top: 2px">
                 <div
                   style="
                     display: flex;
@@ -1395,7 +1391,7 @@
               </div>
             </div>
 
-            <!-- Chunked Scannable Diagnosis Box -->
+            
             <div class="diag-card">
               <div class="heading">
                 <span>Diagnostic Assessment</span>
@@ -1406,16 +1402,14 @@
                 >
               </div>
 
-              <!-- 1. Primary Finding First -->
-              <div class="primary-finding-box" id="finding-box">
+                            <div class="primary-finding-box" id="finding-box">
                 <span class="finding-icon" id="finding-icon">⚠️</span>
                 <span class="finding-text" id="primary-finding-text"
                   >Impeller Fouling Detected (44% Health)</span
                 >
               </div>
 
-              <!-- 2. Root Cause 2 concise bullets -->
-              <div>
+                            <div>
                 <div
                   style="
                     font-size: 10px;
@@ -1445,8 +1439,7 @@
                 </ul>
               </div>
 
-              <!-- 3. Clickable Evidence Chips -->
-              <div>
+                            <div>
                 <div
                   style="
                     font-size: 10px;
@@ -1459,13 +1452,11 @@
                   Corroborating Evidence
                 </div>
                 <div class="evidence-chips-wrapper" id="evidence-citations-box">
-                  <!-- Dynamically rendered badges -->
-                </div>
+                                  </div>
               </div>
             </div>
 
-            <!-- 4. Field Safety Protocol -->
-            <div class="safety-card" id="safety-alert-box">
+                        <div class="safety-card" id="safety-alert-box">
               <div
                 style="
                   font-weight: 700;
@@ -1484,8 +1475,7 @@
               </div>
             </div>
 
-            <!-- Single Primary Action Button -->
-            <button
+                        <button
               class="btn"
               id="btn-submit-wo"
               style="padding: 10px; font-size: 13px"
@@ -1498,7 +1488,6 @@
     </div>
 
     <script>
-      // Global State
       let scene, camera, renderer, controls;
       let pointCloud = null;
       let boundingFramesGroup = new THREE.Group();
@@ -1511,7 +1500,7 @@
       let navSpeed = 1.5;
       let cameraMode = "orbit";
       let currentSelectedAsset = "ASSET-017";
-      let pointSize = 0.038;
+      let pointSize = 0.042;
       let renderMode = "splat";
       let sidebarOpen = true;
       let copilotOpen = true;
@@ -1525,7 +1514,6 @@
         lastTime: 0,
       };
 
-      // Initialize 3D Environment
       function init3D() {
         const container = document.getElementById("canvas-container");
         scene = new THREE.Scene();
@@ -1556,14 +1544,12 @@
         controls.dampingFactor = 0.05;
         controls.target.set(0, -0.4, -1.8);
 
-        // Ambient & Directional Lighting
         const ambLight = new THREE.AmbientLight(0xffffff, 0.9);
         scene.add(ambLight);
         const dirLight = new THREE.DirectionalLight(0x00d2ff, 0.65);
         dirLight.position.set(5, 10, 5);
         scene.add(dirLight);
 
-        // Floor grid for industrial spatial depth
         const grid = new THREE.GridHelper(16, 16, 0x183040, 0x0b1722);
         grid.position.y = -0.92;
         grid.material.transparent = true;
@@ -1591,7 +1577,6 @@
         animate();
       }
 
-      // Interactive 3D Raycasting to click any equipment in the 3D scene
       function setupViewportRaycaster() {
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
@@ -1604,7 +1589,6 @@
         });
 
         renderer.domElement.addEventListener("mouseup", (e) => {
-          // If dragged, do not trigger click
           const dt = Date.now() - mouseDownTime;
           const dx = Math.abs(e.clientX - mouseDownPos.x);
           const dy = Math.abs(e.clientY - mouseDownPos.y);
@@ -1639,7 +1623,6 @@
         });
       }
 
-      // Create 3D Autonomous Inspection Drone / Robot Avatar
       function createRobotAvatar() {
         robotAvatar = new THREE.Group();
 
@@ -1728,7 +1711,7 @@
               float heightRange = max(uMaxY - uMinY, 0.001);
               vHeight = clamp((position.y - uMinY) / heightRange, 0.0, 1.0);
               vColor = color;
-              gl_PointSize = clamp(uPointSize * (260.0 / max(-viewPosition.z, 0.1)), 1.5, 28.0);
+              gl_PointSize = clamp(uPointSize * (280.0 / max(-viewPosition.z, 0.1)), 1.5, 32.0);
               gl_Position = projectionMatrix * viewPosition;
             }
           `,
@@ -1748,7 +1731,6 @@
               if (edge < 0.01) discard;
               vec3 outputColor = vColor;
               if (uMode == 0) {
-                // High-fidelity Photorealistic Splat Mesh blending
                 outputColor = pow(vColor, vec3(0.92)) * (0.85 + edge * 0.35);
               } else if (uMode == 1) {
                 outputColor = mix(vec3(0.03, 0.18, 0.28), vec3(0.04, 0.85, 0.92), vHeight);
@@ -1851,7 +1833,6 @@
         }
       }
 
-      // Load Industrial Boiler Room PLY with switchable volumetric presentation modes
       function loadBoilerRoomPLY() {
         showToast("Streaming Industrial Boiler Room PLY point cloud...");
         const loader = new THREE.PLYLoader();
@@ -1880,7 +1861,6 @@
         );
       }
 
-      // Fallback procedural points if PLY is building
       function generateProceduralPointcloud() {
         const pCount = 80000;
         const positions = new Float32Array(pCount * 3);
@@ -1906,7 +1886,6 @@
         applyRenderMode(renderMode);
       }
 
-      // Fetch Assets and Build 3D Bounding Boxes
       async function fetchAssetsAndFrames() {
         try {
           const [assetsRes, framesRes] = await Promise.all([
@@ -1924,14 +1903,12 @@
         }
       }
 
-      // Helper to generate floating 3D text sprites
       function createFloatingLabelSprite(tag, stateText, colorHex) {
         const canvas = document.createElement("canvas");
         canvas.width = 256;
         canvas.height = 72;
         const ctx = canvas.getContext("2d");
 
-        // Background pill
         ctx.fillStyle = "rgba(10, 18, 30, 0.88)";
         ctx.strokeStyle = colorHex;
         ctx.lineWidth = 4;
@@ -1940,13 +1917,11 @@
         ctx.fill();
         ctx.stroke();
 
-        // Tag label
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 26px sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(tag, 128, 34);
 
-        // Status subtitle
         ctx.fillStyle = colorHex;
         ctx.font = "bold 18px monospace";
         ctx.fillText(stateText.toUpperCase(), 128, 58);
@@ -1963,7 +1938,6 @@
         return sprite;
       }
 
-      // Build 3D Bounding Boxes with Floating Labels and Dynamic Illumination support
       function build3DBoundingBoxes(frames) {
         while (boundingFramesGroup.children.length > 0) {
           boundingFramesGroup.remove(boundingFramesGroup.children[0]);
@@ -1989,34 +1963,34 @@
             colorCss = "#00d2ff";
           }
 
+          const isSelected = frame.id === currentSelectedAsset;
           const boxGeo = new THREE.BoxGeometry(w, h, d);
           const edges = new THREE.EdgesGeometry(boxGeo);
           const lineMat = new THREE.LineBasicMaterial({
             color: colorHex,
-            linewidth: 2,
+            linewidth: isSelected ? 2 : 1,
             transparent: true,
-            opacity: 0.45,
+            opacity: isSelected ? 0.95 : 0.08,
           });
           const boxMesh = new THREE.LineSegments(edges, lineMat);
           boxMesh.position.set(x, y + h / 2, z);
 
-          // Subtle semi-transparent volumetric fill
           const fillMat = new THREE.MeshBasicMaterial({
             color: colorHex,
             transparent: true,
-            opacity: 0.0,
+            opacity: isSelected ? 0.15 : 0.0,
             depthWrite: false,
           });
           const fillMesh = new THREE.Mesh(boxGeo, fillMat);
           boxMesh.add(fillMesh);
 
-          // Floating 3D label above bounding box
           const labelSprite = createFloatingLabelSprite(
             frame.tag || frame.id,
             frame.state || "HEALTHY",
             colorCss,
           );
           labelSprite.position.set(0, h / 2 + 0.35, 0);
+          labelSprite.material.opacity = isSelected ? 1.0 : 0.0;
           boxMesh.add(labelSprite);
 
           boxMesh.userData = {
@@ -2033,20 +2007,10 @@
             isExtracted: !!frame.is_extracted,
           };
 
-          const cornerMat = new THREE.MeshBasicMaterial({ color: colorHex });
-          const cGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
-          const c1 = new THREE.Mesh(cGeo, cornerMat);
-          c1.position.set(x - w / 2, y + h, z - d / 2);
-          const c2 = new THREE.Mesh(cGeo, cornerMat);
-          c2.position.set(x + w / 2, y + h, z + d / 2);
-          boundingFramesGroup.add(c1);
-          boundingFramesGroup.add(c2);
-
           boundingFramesGroup.add(boxMesh);
         });
       }
 
-      // Load Navigation Path
       async function loadNavigationPath(targetId) {
         try {
           const res = await fetch(
@@ -2066,7 +2030,6 @@
         }
       }
 
-      // Render Collision-Free Path Ribbon
       function renderPathRibbon(waypoints) {
         if (pathLineMesh) {
           scene.remove(pathLineMesh);
@@ -2086,7 +2049,6 @@
         scene.add(pathLineMesh);
       }
 
-      // Render Unified Sidebar Asset List with Inline Actions
       function renderAssetList(assets) {
         const listEl = document.getElementById("asset-list-container");
         listEl.innerHTML = "";
@@ -2100,6 +2062,10 @@
             cardClass = "asset-card active";
           }
           card.className = cardClass;
+          card.style.background = a.asset_id === currentSelectedAsset ? "rgba(0, 210, 255, 0.16)" : "#0c1524";
+          card.style.border = a.asset_id === currentSelectedAsset ? "1px solid #00d2ff" : "1px solid rgba(255,255,255,0.12)";
+          card.style.borderRadius = "6px";
+          card.style.marginBottom = "4px";
 
           let stateClass = "healthy";
           let health = 100;
@@ -2123,21 +2089,21 @@
           const mainRow = document.createElement("div");
           mainRow.className = "asset-card-main";
           mainRow.innerHTML =
-            '<div style="display:flex; align-items:center;">' +
+            '<div style="display:flex; align-items:center; min-width:0; overflow:hidden;">' +
             '<span class="status-dot status-' +
             dotClass +
             '"></span>' +
-            '<span style="font-weight:700; color:#fff;">' +
+            '<span style="font-weight:700; color:#f8fafc; font-size:12px; letter-spacing:0.3px;">' +
             a.tag +
             "</span>" +
-            '<span style="font-size:10px; color:var(--muted); margin-left:6px;">' +
-            a.asset_class.replace("_", " ") +
+            '<span style="font-size:10.5px; color:#94a3b8; margin-left:7px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' +
+            (a.asset_class ? a.asset_class.replace(/_/g, " ") : "EQUIPMENT") +
             "</span>" +
             "</div>" +
-            '<span style="font-family:var(--font-mono); font-weight:700; color:' +
+            '<span style="font-family:var(--font-mono); font-weight:700; font-size:11.5px; color:' +
             healthColor +
-            ';">' +
-            health +
+            '; margin-left:8px; flex-shrink:0;">' +
+            Math.round(health) +
             "%</span>";
 
           mainRow.onclick = function () {
@@ -2181,7 +2147,6 @@
         });
       }
 
-      // Smooth camera transition to focus asset in 3D
       function focusAssetIn3D(assetId) {
         let targetPos = null;
         boundingFramesGroup.children.forEach(function (child) {
@@ -2214,7 +2179,6 @@
         }
       }
 
-      // Select asset
       async function selectAsset(assetId) {
         currentSelectedAsset = assetId;
 
@@ -2225,6 +2189,19 @@
         if (currentCard) {
           currentCard.classList.add("active");
         }
+
+        boundingFramesGroup.children.forEach(function (c) {
+          if (c.userData && c.userData.lineMat) {
+            const isSel = c.userData.id === assetId;
+            c.userData.lineMat.opacity = isSel ? 1.0 : 0.08;
+            if (c.userData.fillMat) {
+              c.userData.fillMat.opacity = isSel ? 0.2 : 0.0;
+            }
+            if (c.userData.labelSprite) {
+              c.userData.labelSprite.material.opacity = isSel ? 1.0 : 0.0;
+            }
+          }
+        });
 
         await loadNavigationPath(assetId);
         runCopilotDiagnosis(assetId);
@@ -2245,7 +2222,6 @@
         }
       }
 
-      // Trigger Grounded AI Copilot Diagnosis
       async function runCopilotDiagnosis(assetId) {
         try {
           const [assetRes, diagRes] = await Promise.all([
@@ -2265,7 +2241,6 @@
         }
       }
 
-      // Update Chunked Copilot UI Drawer
       function updateCopilotDrawer(dossier, diag) {
         document.getElementById("card-asset-tag").innerText =
           "ASSET: " + diag.tag + " (" + diag.asset_id + ")";
@@ -2295,7 +2270,6 @@
         document.getElementById("diag-conf").innerText =
           "Conf: " + diag.confidence_score;
 
-        // 1. Primary Finding
         let findingIcon = "⚠️";
         let findingColor = "#fca5a5";
         let findingBg = "rgba(239, 68, 68, 0.12)";
@@ -2338,7 +2312,6 @@
         findingEl.innerText = findingTitle;
         findingEl.style.color = findingColor;
 
-        // 2. Root Cause 2 Concise Bullet Points
         const rootCauseList = document.getElementById("root-cause-list");
         rootCauseList.innerHTML = "";
 
@@ -2366,7 +2339,6 @@
           rootCauseList.appendChild(li);
         });
 
-        // 3. Evidence Chips
         const citBox = document.getElementById("evidence-citations-box");
         citBox.innerHTML = "";
         let chipSources = [];
@@ -2395,13 +2367,11 @@
           citBox.appendChild(chip);
         });
 
-        // 4. Safety Guardrails
         if (diag.safety_guardrails && diag.safety_guardrails.length > 0) {
           document.getElementById("safety-text").innerText =
             diag.safety_guardrails[0];
         }
 
-        // 5. Draw Telemetry Sparkline
         let telemRecords = [];
         if (dossier.recent_telemetry) {
           telemRecords = dossier.recent_telemetry;
@@ -2409,7 +2379,6 @@
         drawTelemetryTrend(telemRecords);
       }
 
-      // Draw Telemetry Trend Canvas
       function drawTelemetryTrend(records) {
         const canvas = document.getElementById("telem-canvas");
         const ctx = canvas.getContext("2d");
@@ -2458,7 +2427,6 @@
         ctx.stroke();
       }
 
-      // Conversational Omnibar
       function setupOmnibar() {
         const input = document.getElementById("omnibar-input");
         const suggestionsBox = document.getElementById("omnibar-suggestions");
@@ -2472,7 +2440,6 @@
 
           let matched = null;
 
-          // Natural language matching rules
           if (
             q.includes("degraded") ||
             q.includes("foul") ||
@@ -2618,7 +2585,6 @@
         };
       }
 
-      // Collapsible Sidebar & Copilot
       function setupPanelCollapses() {
         const sidebar = document.getElementById("sidebar-metaverse");
         const leftToggle = document.getElementById("btn-toggle-left-sidebar");
@@ -2709,7 +2675,6 @@
         setTimeout(onWindowResize, 310);
       }
 
-      // Base 3D Engine Settings Modal
       function setupSettingsModal() {
         const modal = document.getElementById("settings-modal");
         document.getElementById("btn-open-settings").onclick = function () {
@@ -2739,7 +2704,6 @@
         };
       }
 
-      // Drone Navigation & Animation Loop
       function toggleDroneNavigation() {
         if (navProgress >= 1.0) {
           navProgress = 0;
@@ -2812,7 +2776,6 @@
         renderer.render(scene, camera);
       }
 
-      // Check proximity events & dynamically illuminate bounding frames and reveal floating 3D labels
       function checkProximityEvents(rx, rz) {
         const alertEl = document.getElementById("proximity-alert");
         let foundNearby = null;
@@ -2824,14 +2787,12 @@
             const dist = Math.sqrt((rx - ax) ** 2 + (rz - az) ** 2);
             const isNear = dist < PROXIMITY_RADIUS;
 
-            // Dynamic Proximity Revelation: illuminate bounding frame & reveal 3D floating tag
             if (
               c.userData.lineMat &&
               c.userData.fillMat &&
               c.userData.labelSprite
             ) {
               if (isNear) {
-                // Bright high-intensity illumination
                 c.userData.lineMat.opacity = 1.0;
                 c.userData.fillMat.opacity = 0.22;
                 c.userData.labelSprite.material.opacity = 1.0;
@@ -2840,10 +2801,10 @@
                   0.42 +
                   Math.sin(Date.now() * 0.005) * 0.04;
               } else {
-                // Dim resting state
-                c.userData.lineMat.opacity = 0.45;
-                c.userData.fillMat.opacity = 0.0;
-                c.userData.labelSprite.material.opacity = 0.0;
+                const isSel = c.userData.id === currentSelectedAsset;
+                c.userData.lineMat.opacity = isSel ? 1.0 : 0.08;
+                c.userData.fillMat.opacity = isSel ? 0.2 : 0.0;
+                c.userData.labelSprite.material.opacity = isSel ? 1.0 : 0.0;
               }
             }
 
@@ -2878,7 +2839,6 @@
         }
       }
 
-      // Setup Camera Modes & Freecam
       function setupFreeCamera() {
         const canvas = renderer.domElement;
         canvas.addEventListener("click", function () {
@@ -3020,7 +2980,6 @@
         }
       }
 
-      // UI Events Wiring
       const btnSemanticExtract = document.getElementById(
         "btn-semantic-extract",
       );
@@ -3037,7 +2996,6 @@
             });
             const data = await res.json();
             if (data.status === "success") {
-              // Rebuild 3D bounding boxes with newly extracted structural assets
               build3DBoundingBoxes(data.all_frames);
               document.getElementById("asset-count").innerText =
                 data.all_frames.length +
@@ -3045,7 +3003,6 @@
                 data.extracted_count +
                 " Extracted)";
 
-              // Show success toast / badge
               btnSemanticExtract.innerHTML = `<span>✔ ${data.extracted_count} Structural Assets Extracted</span>`;
               setTimeout(() => {
                 btnSemanticExtract.disabled = false;

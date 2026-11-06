@@ -43,7 +43,6 @@ def test_asset_detail_and_404():
     assert "tag" in dossier
     assert "state" in dossier
 
-    # Non-existent asset ID must return 404
     missing_res = client.get("/api/assets/NON_EXISTENT_999")
     assert missing_res.status_code == 404, "Expected 404 for missing asset"
     print("PASS: Asset Dossier Lookup & 404 Not Found Handling")
@@ -73,7 +72,6 @@ def test_scene_anchors():
     norm_anchors = norm_res.json()
     assert len(norm_anchors) == 30, f"Expected 30 normalized anchors, got {len(norm_anchors)}"
 
-    # Check bounding box presence
     first_anchor = norm_anchors[0]
     for dim in ["x_local_m", "y_local_m", "z_local_m", "bbox_x_m", "bbox_y_m", "bbox_z_m"]:
         assert dim in first_anchor, f"Missing dimension key '{dim}' in scene anchor"
@@ -82,7 +80,6 @@ def test_scene_anchors():
 
 def test_work_order_drafting_with_safety_guardrails():
     """Verify safety verification requirement and successful work order generation."""
-    # Attempting to draft without safety acknowledgement must fail (400)
     unsafe_res = client.post(
         "/api/work-orders/draft",
         json={
@@ -93,7 +90,6 @@ def test_work_order_drafting_with_safety_guardrails():
     )
     assert unsafe_res.status_code == 400, "Expected 400 when safety is not acknowledged"
 
-    # Acknowledging safety guidelines must create draft
     valid_res = client.post(
         "/api/work-orders/draft",
         json={

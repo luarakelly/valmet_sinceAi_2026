@@ -118,9 +118,6 @@ class MetaverseDataset:
             except Exception as e:
                 logger.warning(f"Failed to write cache to {self.cache_path}: {e}")
 
-    # =========================================================================
-    # High-Level Query Accessors
-    # =========================================================================
 
     def get_assets(self) -> List[Dict[str, Any]]:
         """Returns 30 assets joined with their current state and scene anchor."""
@@ -163,8 +160,6 @@ class MetaverseDataset:
                 item["issue_code"] = st.get("issue_code")
 
             if normalized:
-                # Map from raw Excel coords [X: -0.32..30.39, Y: -0.39..15.49, Z: 0.47..2.15]
-                # into Three.js PLY space [X: -5.0..5.0, Y: -1.5..0.5 (elevation), Z: -5.0..0.5 (depth)]
                 raw_x = float(item.get("x_local_m", 0.0))
                 raw_y = float(item.get("y_local_m", 0.0))
                 raw_z = float(item.get("z_local_m", 0.0))
@@ -300,7 +295,6 @@ class MetaverseDataset:
         }
 
 
-# Singleton accessor
 _dataset_instance: Optional[MetaverseDataset] = None
 
 

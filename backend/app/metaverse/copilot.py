@@ -42,7 +42,6 @@ class FieldServiceCopilot:
         recommended_next = state.get("recommended_next_check", "monitor")
         base_confidence = float(state.get("model_confidence", 0.90))
 
-        # Apply Data Quality penalty if applicable (DOC-RAG-GUIDE)
         dq_penalty = 0.0
         if dq_issues:
             high_sev = sum(1 for q in dq_issues if q.get("severity") == "high")
@@ -50,7 +49,6 @@ class FieldServiceCopilot:
             dq_penalty = min(0.25, (high_sev * 0.10) + (med_sev * 0.04))
         final_confidence = round(max(0.40, base_confidence - dq_penalty), 2)
 
-        # Analyze multivariate telemetry trend
         evidence_points: List[str] = []
         citations: List[Dict[str, Any]] = []
 
@@ -61,7 +59,6 @@ class FieldServiceCopilot:
             else:
                 earlier = recent
 
-            # Pressure
             p_rec = recent.get("process_pressure_bar")
             if p_rec is not None:
                 evidence_points.append(f"Recent Process Pressure: {p_rec:.2f} bar (signal quality: {recent.get('signal_quality_pct', 99.5):.1f}%)")
@@ -72,7 +69,6 @@ class FieldServiceCopilot:
                     "confidence": 0.95,
                 })
 
-            # Vibration
             vib = recent.get("vibration_mm_s")
             if vib is not None:
                 evidence_points.append(f"Vibration Level: {vib:.2f} mm/s")
@@ -85,7 +81,6 @@ class FieldServiceCopilot:
                     "confidence": 0.92,
                 })
 
-            # Flow & Stiction
             flow = recent.get("process_flow_pct")
             stiction = recent.get("stiction_index")
             if flow is not None:
@@ -93,7 +88,6 @@ class FieldServiceCopilot:
             if stiction is not None and stiction > 5.0:
                 evidence_points.append(f"Stiction Index: {stiction:.1f}% indicates mechanical valve resistance")
 
-            # Bearing Temp & Motor Current
             temp = recent.get("bearing_temp_c")
             curr = recent.get("motor_current_a")
             if temp is not None:
@@ -101,7 +95,6 @@ class FieldServiceCopilot:
             if curr is not None:
                 evidence_points.append(f"Motor Phase Current: {curr:.1f}A")
 
-        # Corroborating Event IDs
         if events:
             top_events = events[:3]
             for ev in top_events:
@@ -117,7 +110,6 @@ class FieldServiceCopilot:
                     "confidence": 0.90,
                 })
 
-        # Past Work Order Precedents
         if work_orders:
             past_wo = work_orders[0]
             wo_id = past_wo.get("work_order_id")
@@ -131,7 +123,6 @@ class FieldServiceCopilot:
                 "confidence": 0.88,
             })
 
-        # Knowledge Doc Citation
         doc_content = ""
         if doc:
             doc_id = doc.get("doc_id", "DOC-CORE")
@@ -144,14 +135,12 @@ class FieldServiceCopilot:
                 "confidence": 0.98,
             })
 
-        # Assemble safety guardrails (DOC-FIELD-SAFETY)
         safety_guardrails = [
             "Lockout/Tagout (LOTO): Verify pneumatic and electrical isolation prior to physical casing removal.",
             "De-pressurization Protocol: Verify line pressure is 0.0 bar before loosening flanges or fittings.",
             "Assistant Boundary: This diagnostic is an advisory verification recommendation and does not replace plant safety permits.",
         ]
 
-        # Formulate grounded diagnosis text
         diagnosis_text = (
             f"Asset {tag} ({aid}, {aclass}) is evaluated as '{condition.upper()}' with a health index of {health}/100. "
             f"Primary detected signature: [{issue_code}] - {issue_summary}. "

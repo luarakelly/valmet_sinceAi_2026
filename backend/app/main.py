@@ -19,20 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-# Load environment variables (.env)
 load_dotenv()
-
-# Logger setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ask_your_factory")
 
-# Database imports
 from app.database import init_db, get_session
-
-# Import API routes
 from app.routes import router as api_router
 
-# Path constants
 APP_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = APP_DIR.parent
 PROJECT_ROOT = BACKEND_DIR.parent
@@ -42,7 +35,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan event handler executing automated schema creation and data seeding."""
+    """Lifespan handler initializing database schema and seeding data."""
     logger.info("Initializing Ask Your Factory database schema...")
     try:
         init_db(populate=True)
@@ -54,10 +47,6 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down Ask Your Factory backend.")
 
-
-# ---------------------------------------------------------------------------
-# FastAPI Application Declaration
-# ---------------------------------------------------------------------------
 
 app = FastAPI(
     title="Ask Your Factory API",
@@ -72,11 +61,6 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-
-# ---------------------------------------------------------------------------
-# CORS Middleware Configuration
-# ---------------------------------------------------------------------------
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -85,15 +69,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ---------------------------------------------------------------------------
-# Router Inclusions
-# ---------------------------------------------------------------------------
-
-# Mount official contract routes at /api
 app.include_router(api_router, prefix="/api")
 
-# Optional / Future router mount points for navigation, copilot, and 3D FEA
 try:
     from app.navigation import router as nav_router
     app.include_router(nav_router, prefix="/api")
@@ -112,10 +89,6 @@ try:
 except ImportError:
     pass
 
-
-# ---------------------------------------------------------------------------
-# Static File & 3D Model Serving
-# ---------------------------------------------------------------------------
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -168,10 +141,6 @@ async def get_pointcloud_ply():
         detail="Boiler room PLY model not found on server.",
     )
 
-
-# ---------------------------------------------------------------------------
-# Health & Status Endpoint
-# ---------------------------------------------------------------------------
 
 @app.get("/health", tags=["System"])
 @app.get("/api/health", tags=["System"])

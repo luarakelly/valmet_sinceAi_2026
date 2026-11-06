@@ -1,7 +1,5 @@
 """Configuration parameters and domain presets for stress calculation."""
 
-# Material presets with Young's Modulus (Pa), Poisson's ratio, density (g/cm^3),
-# cost (€/kg), and yield strength (MPa)
 MATERIALS = {
     "PLA": {
         "E": 3.5e9,
@@ -40,7 +38,6 @@ MATERIALS = {
     },
 }
 
-# Unit conversions and physical scaling
 PA_PER_MPA = 1_000_000.0
 MM3_PER_CM3 = 1_000.0
 SECONDS_PER_HOUR = 3_600.0
@@ -50,7 +47,6 @@ G_PER_KG = 1_000.0
 MM_PER_M = 1_000.0
 PERCENTAGE_FACTOR = 100.0
 
-# 3D Hexahedral finite element dimensions
 NUM_NODES_PER_HEX8 = 8
 DOFS_PER_NODE = 3
 DOFS_PER_HEX8 = 24
@@ -58,13 +54,11 @@ STRESS_TENSOR_COMPONENTS = 6
 GAUSS_WEIGHT_FACTOR = 0.125
 DEFAULT_UNCONSTRAINED_FOS = 999.0
 
-# Load and kinematic degrees of freedom
 FILAMENT_DIAMETER_MM = 1.75
 DEFAULT_LOAD_DIRECTION = "-Y"
 VALID_LOAD_DIRECTIONS = ["-Y", "+Y", "-Z", "+Z", "+X", "-X"]
 DOF_AXIS_MAP = {"X": 0, "Y": 1, "Z": 2}
 
-# SIMP solver parameters
 DEFAULT_PENALTY = 3.0
 DEFAULT_MIN_STIFFNESS = 1e-4
 DEFAULT_MIN_DENSITY = 0.001
@@ -74,7 +68,6 @@ DEFAULT_MAX_ITERATIONS = 30
 DEFAULT_VOLUME_FRACTION = 0.4
 DEFAULT_CONVERGENCE_TOL = 0.01
 
-# Additive manufacturing and non-design constraints
 DEFAULT_PRESERVE_MARGIN = 1
 DEFAULT_ENABLE_OVERHANG = False
 DEFAULT_MIN_SAFETY_FACTOR = 1.5
@@ -87,14 +80,12 @@ VALID_SUPPORT_MODES = ["cantilever", "simply_supported", "clamped_both_ends"]
 DEFAULT_GYROID_CELL_SIZE_MM = 10.0
 DEFAULT_ENABLE_GYROID = False
 
-# Delamination risk categories
 DELAMINATION_RISK_LOW = "low"
 DELAMINATION_RISK_MODERATE = "moderate"
 DELAMINATION_RISK_HIGH = "high"
 SAFETY_FACTOR_CRITICAL_THRESHOLD = 1.0
 SAFETY_FACTOR_TARGET_THRESHOLD = 1.5
 
-# Non-design preserved functional zones
 ZONE_TYPE_KEEP_IN = "keep_in"
 ZONE_TYPE_KEEP_OUT = "keep_out"
 ZONE_SHAPE_CYLINDER = "cylinder"
@@ -113,12 +104,10 @@ FORMAT_MEDIA_TYPES = {
     "off": "text/plain",
 }
 
-# Bisection optimization limits
 DEFAULT_BISECTION_TOL = 1e-3
 DEFAULT_BISECTION_UPPER = 1e9
 DEFAULT_EPSILON = 1e-9
 
-# Physics and mesh parameters
 DEFAULT_BEAM_EXTENTS = (60.0, 20.0, 20.0)
 DEFAULT_LOAD_MAGNITUDE = 100.0
 DEFAULT_RESOLUTION = 30
@@ -129,7 +118,6 @@ ACTIVE_SOLID_THRESHOLD = 0.5
 DEFAULT_CYLINDER_RADIUS_MM = 5.0
 DEFAULT_SPHERE_RADIUS_MM = 5.0
 
-# Gyroid infill synthesis parameters
 GYROID_CLIP_AMPLITUDE = 1.1
 GYROID_DENSITY_LOWER_THRESHOLD = 0.2
 GYROID_DENSITY_UPPER_THRESHOLD = 0.8
@@ -137,7 +125,6 @@ GYROID_MIN_RELATIVE_DENSITY = 0.2
 GYROID_SCALE_FACTOR = 1.5
 VOXEL_CENTER_OFFSET = 0.5
 
-# Colormap rendering parameters
 COLORMAP_BAND_QUARTER = 0.25
 COLORMAP_BAND_HALF = 0.50
 COLORMAP_BAND_THREE_QUARTERS = 0.75
@@ -145,11 +132,9 @@ COLORMAP_MAX_COLOR_VALUE = 255
 COLORMAP_TINT_WEIGHT = 0.70
 PADDING_WIDTH_MARCHING_CUBES = 1
 
-# Reporting defaults
 DEFAULT_REPORT_JOB_ID = "Job-001"
 DEFAULT_REPORT_MATERIAL = "PLA"
 
-# Web server parameters
 DEFAULT_SERVER_HOST = "0.0.0.0"
 DEFAULT_SERVER_PORT = 8000
 JOB_STATUS_RUNNING = "running"

@@ -17,9 +17,6 @@ import uuid
 from pydantic import BaseModel, Field, ConfigDict
 
 
-# ==========================================
-# 1. Spatial Scene Anchor Schemas
-# ==========================================
 
 class SceneAnchorRead(BaseModel):
     """3D anchor position, bounding box, and embedded health state for Three.js rendering."""
@@ -39,15 +36,11 @@ class SceneAnchorRead(BaseModel):
     mapping_status: Optional[str] = None
     scene_path: Optional[str] = None
 
-    # Overlaid health attributes from CurrentState
     health_score: Optional[float] = None
     condition_state: Optional[str] = None
     issue_code: Optional[str] = None
 
 
-# ==========================================
-# 2. Operational State & Knowledge Schemas
-# ==========================================
 
 class CurrentStateRead(BaseModel):
     """Operational health condition, diagnostic state, and model confidence."""
@@ -79,9 +72,6 @@ class KnowledgeDocRead(BaseModel):
     content: str
 
 
-# ==========================================
-# 3. Asset Hierarchy & Composite Schemas
-# ==========================================
 
 class AssetRead(BaseModel):
     """Asset master record with joined current state and scene anchor."""
@@ -102,7 +92,6 @@ class AssetRead(BaseModel):
     qr_id: Optional[str] = None
     nfc_id: Optional[str] = None
 
-    # Joined components
     current_state: Optional[CurrentStateRead] = None
     state: Optional[CurrentStateRead] = None
     anchor: Optional[SceneAnchorRead] = None
@@ -208,9 +197,6 @@ class AssetDetailRead(AssetRead):
     data_quality_issues: List[DataQualityRead] = []
 
 
-# ==========================================
-# 4. AI Diagnostics Copilot Schemas (R4 / F16 / F17)
-# ==========================================
 
 class EvidenceCitation(BaseModel):
     source_type: str = "doc"
@@ -260,7 +246,6 @@ class CopilotQueryResponse(BaseModel):
     )
     suggested_work_order: Optional[Dict[str, Any]] = None
 
-    # Compatibility aliases
     asset_class: Optional[str] = None
     diagnosis_summary: Optional[str] = None
     multivariate_evidence: List[str] = []
@@ -271,9 +256,6 @@ class CopilotQueryResponse(BaseModel):
     work_order_draft_ready: bool = True
 
 
-# ==========================================
-# 5. Work Order Draft Schemas (R2 / F06)
-# ==========================================
 
 class WorkOrderDraftRequest(BaseModel):
     """Draft work order submission (human review only; no live field actuation)."""
@@ -300,16 +282,12 @@ class WorkOrderDraftResponse(BaseModel):
     role: str = "field_technician"
     safety_checklist: List[str] = []
 
-    # Compatibility aliases
     area_name: Optional[str] = None
     recommended_role: Optional[str] = None
     estimated_duration_h: Optional[float] = 1.0
     safety_instructions: List[str] = []
 
 
-# ==========================================
-# 6. Autonomous Navigation Schemas (R3 / F11)
-# ==========================================
 
 class NavigationRouteRequest(BaseModel):
     """Request pathfinding from avatar start position to an asset."""
@@ -325,9 +303,6 @@ class NavigationRouteResponse(BaseModel):
     waypoints: List[List[float]] = Field(description="Ordered list of [x, y, z] navigation waypoints")
 
 
-# ==========================================
-# 7. Proximity & Metaverse Dashboard Schemas (R4 / F14 / F19)
-# ==========================================
 
 class ProximityQueryRequest(BaseModel):
     """Query nearby assets relative to avatar position."""
@@ -371,9 +346,6 @@ class DashboardSummaryResponse(BaseModel):
 MetaverseDashboardResponse = DashboardSummaryResponse
 
 
-# ==========================================
-# Legacy Nutrition Schemas (Backwards Compatibility)
-# ==========================================
 
 class UserCreate(BaseModel):
     name: str
@@ -439,6 +411,5 @@ class JournalRead(JournalBase):
     updated_at: datetime
 
 
-# Aliases
 AssetStateRead = CurrentStateRead
 WorkOrderRead = MaintenanceHistoryRead

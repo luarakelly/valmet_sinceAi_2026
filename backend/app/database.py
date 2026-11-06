@@ -25,7 +25,6 @@ from contextlib import contextmanager
 from sqlalchemy import event, text, select, func, delete
 from sqlmodel import SQLModel, create_engine, Session
 
-# Set up logger
 logger = logging.getLogger("ask_your_factory_database")
 if not logger.handlers:
     handler = logging.StreamHandler(sys.stdout)
@@ -33,7 +32,6 @@ if not logger.handlers:
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
-# Base directories and database paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -42,7 +40,6 @@ DB_FILE = BASE_DIR / "database.db"
 DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{DB_FILE}"
 DB_URL = DATABASE_URL
 
-# Engine initialization
 is_sqlite = DATABASE_URL.startswith("sqlite")
 if is_sqlite:
     connect_args = {"check_same_thread": False}
@@ -55,7 +52,6 @@ engine = create_engine(
     connect_args=connect_args,
 )
 
-# SQLite PRAGMA configuration for high performance, concurrency & referential integrity
 if is_sqlite:
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
@@ -79,9 +75,6 @@ def get_db_context() -> Generator[Session, None, None]:
         yield session
 
 
-# =====================================================================
-# Robust Type Casting Helpers
-# =====================================================================
 
 def parse_datetime(val: Any) -> Optional[datetime]:
     """Robustly parse ISO datetime strings, timestamps, or datetime objects with UTC timezone."""
@@ -164,9 +157,6 @@ def parse_bool(val: Any, default: bool = True) -> bool:
     return default
 
 
-# =====================================================================
-# Ingestion Pipeline
-# =====================================================================
 
 def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -> Dict[str, Any]:
     """Topologically ingests all 10 entity sheets into the SQLModel database.
@@ -202,7 +192,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         session = Session(engine)
 
     try:
-        # Check idempotency
         existing_assets = session.scalar(select(func.count(AssetMaster.asset_id))) or 0
         if existing_assets >= 30 and not force:
             logger.info(f"Database already populated ({existing_assets} assets present). Skipping ingestion.")
@@ -226,7 +215,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
             session.commit()
             logger.info("Purge complete.")
 
-        # Load raw dataset from JSON cache or Excel workbook
         dataset = get_dataset()
         data = dataset.data
         if not data or "Asset_Master" not in data:
@@ -234,9 +222,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
 
         stats: Dict[str, int] = {}
 
-        # -------------------------------------------------------------
-        # Tier 1: Knowledge_Docs (8 rows)
-        # -------------------------------------------------------------
         docs_raw = data.get("Knowledge_Docs", [])
         docs = [
             KnowledgeDoc(
@@ -252,9 +237,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         session.flush()
         stats["KnowledgeDoc"] = len(docs)
 
-        # -------------------------------------------------------------
-        # Tier 1: Asset_Master (30 rows)
-        # -------------------------------------------------------------
         assets_raw = data.get("Asset_Master", [])
         assets = [
             AssetMaster(
@@ -281,9 +263,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         session.flush()
         stats["AssetMaster"] = len(assets)
 
-        # -------------------------------------------------------------
-        # Tier 2: Scene_Anchors (30 rows)
-        # -------------------------------------------------------------
         anchors_raw = data.get("Scene_Anchors", [])
         anchors = [
             SceneAnchor(
@@ -310,9 +289,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         session.flush()
         stats["SceneAnchor"] = len(anchors)
 
-        # -------------------------------------------------------------
-        # Tier 2: Current_State (30 rows)
-        # -------------------------------------------------------------
         states_raw = data.get("Current_State", [])
         states = [
             CurrentState(
@@ -338,9 +314,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         session.flush()
         stats["CurrentState"] = len(states)
 
-        # -------------------------------------------------------------
-        # Tier 2: Historical_Service_Cases (50 rows)
-        # -------------------------------------------------------------
         cases_raw = data.get("Historical_Service_Cases", [])
         cases = [
             HistoricalServiceCase(
@@ -361,9 +334,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         session.flush()
         stats["HistoricalServiceCase"] = len(cases)
 
-        # -------------------------------------------------------------
-        # Tier 3: Maintenance_History (300 rows)
-        # -------------------------------------------------------------
         maint_raw = data.get("Maintenance_History", [])
         wos = [
             MaintenanceHistory(
@@ -388,9 +358,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         session.flush()
         stats["MaintenanceHistory"] = len(wos)
 
-        # -------------------------------------------------------------
-        # Tier 3: Alarms_Events (1,000 rows)
-        # -------------------------------------------------------------
         events_raw = data.get("Alarms_Events", [])
         events = [
             AlarmEvent(
@@ -413,9 +380,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         session.flush()
         stats["AlarmEvent"] = len(events)
 
-        # -------------------------------------------------------------
-        # Tier 3: Data_Quality (120 rows)
-        # -------------------------------------------------------------
         dq_raw = data.get("Data_Quality", [])
         dqs = [
             DataQuality(
@@ -434,9 +398,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         session.flush()
         stats["DataQuality"] = len(dqs)
 
-        # -------------------------------------------------------------
-        # Tier 3: RAG_Corpus_Index (38 rows)
-        # -------------------------------------------------------------
         rag_raw = data.get("RAG_Corpus_Index", [])
         rags = []
         for r in rag_raw:
@@ -468,9 +429,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         session.flush()
         stats["RAGCorpusIndex"] = len(rags)
 
-        # -------------------------------------------------------------
-        # Tier 4: Telemetry_Sample_3d (4,320 rows in batches of 500)
-        # -------------------------------------------------------------
         telem_raw = data.get("Telemetry_Sample_3d", [])
         batch_size = 500
         telemetry_count = 0
@@ -509,7 +467,6 @@ def ingest_valmet_data(session: Optional[Session] = None, force: bool = False) -
         stats["TelemetrySample"] = telemetry_count
         stats["total_records"] = sum(stats.values())
 
-        # Commit full transaction atomically
         session.commit()
         logger.info(f"Ingestion successful! Populated {stats['total_records']} total records: {stats}")
         return {"status": "success", "stats": stats}

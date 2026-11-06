@@ -39,7 +39,6 @@ def _as_dict(obj):
     return dict(obj)
 
 
-# Legacy user methods
 def create_user(session: Session, user: Optional[object] = None):
     data = _as_dict(user)
     name = data.get("name")
@@ -111,10 +110,6 @@ def delete_catalog_entry(session: Session, item: Catalog) -> None:
     session.delete(item)
     session.commit()
 
-
-# =====================================================================
-# Ask Your Factory CRUD & Auto-Seeder
-# =====================================================================
 
 def get_all_assets(session: Session) -> List[Asset]:
     return session.exec(select(Asset)).all()
@@ -227,7 +222,6 @@ def seed_metaverse_data(session: Session) -> None:
     if not data:
         return
 
-    # 1. Assets
     for a in data.get("Asset_Master", []):
         session.add(Asset(
             asset_id=a["asset_id"],
@@ -246,15 +240,12 @@ def seed_metaverse_data(session: Session) -> None:
             nfc_id=a.get("nfc_id"),
         ))
 
-    # 2. Scene Anchors (remapped and fitted to actual boiler room envelope [-4.5 to +4.0m])
     for anc in data.get("Scene_Anchors", []):
-        # Scale coordinates to fit the actual ~8m x 3m x 6m boiler room envelope
         raw_x = float(anc.get("x_local_m", 0.0))
         raw_y = float(anc.get("y_local_m", 0.0))
         raw_z = float(anc.get("z_local_m", 0.0))
-        # Normalized remapping from 0-30m range into boiler room coordinates [-4.0m, +3.5m]
         norm_x = round(((raw_x / 30.5) * 7.0) - 3.5, 2)
-        norm_y = round(-0.85 + (raw_z * 0.45), 2)  # Elevation in boiler room
+        norm_y = round(-0.85 + (raw_z * 0.45), 2)
         norm_z = round(((raw_y / 16.0) * 4.5) - 3.8, 2)
 
         session.add(SceneAnchor(
@@ -274,7 +265,6 @@ def seed_metaverse_data(session: Session) -> None:
             remap_instruction=anc.get("remap_instruction"),
         ))
 
-    # 3. Current State
     for s in data.get("Current_State", []):
         session.add(AssetState(
             asset_id=s["asset_id"],
@@ -293,7 +283,6 @@ def seed_metaverse_data(session: Session) -> None:
             knowledge_doc_id=s.get("knowledge_doc_id"),
         ))
 
-    # 4. Alarms / Events
     for e in data.get("Alarms_Events", []):
         session.add(AlarmEvent(
             event_id=e["event_id"],
@@ -309,7 +298,6 @@ def seed_metaverse_data(session: Session) -> None:
             status=e["status"],
         ))
 
-    # 5. Work Orders
     for w in data.get("Maintenance_History", []):
         session.add(MaintenanceWorkOrder(
             work_order_id=w["work_order_id"],
@@ -327,7 +315,6 @@ def seed_metaverse_data(session: Session) -> None:
             knowledge_doc_id=w.get("knowledge_doc_id"),
         ))
 
-    # 6. Telemetry (Batch insert)
     for t in data.get("Telemetry_Sample_3d", []):
         def _f(val):
             if val is not None and val != "":
@@ -353,7 +340,6 @@ def seed_metaverse_data(session: Session) -> None:
             signal_quality_pct=_f(t.get("signal_quality_pct")),
         ))
 
-    # 7. Knowledge Docs
     for d in data.get("Knowledge_Docs", []):
         session.add(KnowledgeDoc(
             doc_id=d["doc_id"],
@@ -362,7 +348,6 @@ def seed_metaverse_data(session: Session) -> None:
             content=d["content"],
         ))
 
-    # 8. Data Quality Issues
     for dq in data.get("Data_Quality", []):
         session.add(DataQualityIssue(
             issue_id=dq["issue_id"],
