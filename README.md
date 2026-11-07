@@ -7,7 +7,7 @@
 
 ## Run
 
-1. Copy `.env.example` to `.env`; optionally add `GEMINI_API_KEY` (without it the deterministic evidence engine answers).
+1. Copy `.env.example` to `.env`; optionally add `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` (without a key the deterministic evidence engine answers).
 2. Install [uv](https://docs.astral.sh/uv/) (or use `python -m venv` + `pip`).
 3. Initialize once, then run:
 	- **Git Bash (Windows) / Linux / macOS:** `./initialize.sh`, then `./run.sh`
@@ -17,7 +17,7 @@
 5. Tests: `cd backend && .venv/Scripts/python -m pytest -q` (Linux/macOS: `.venv/bin/python`).
 
 The raw 355 MB scan is optional: the viewer cloud and mesh are in git. To rebuild the mesh, put
-`Industrial Boiler Room.ply` in `data/` or `data/input/` and run `backend/.venv/Scripts/python scripts/build_mesh.py`.
+`Industrial Boiler Room.ply` in `data/` or `data/input/` and run `backend/.venv/Scripts/python scripts/build_mesh.py`. Reseed the database with `scripts/seed_database.py --force`.
 
 ## Using the UI
 
@@ -43,7 +43,7 @@ The header shows the three demo steps:
 | Proximity display | Frames within 1.5 m light up; live list of nearby assets with state, health and distance | updates every frame |
 | AI diagnostics | Telemetry drift (Welch t-score vs own baseline), matching alarms, similar service cases, docs, data-quality confidence penalty; optional Gemini answer accepted only if every cited ID exists | P-005: flow −8.7 % (t = −4.8), 3 fouling alarms, 2 matching cases, confidence 0.91 → 0.61 from 9 data-quality issues |
 
-Pipeline details: [`stack.md`](stack.md). Code map: [`fileStructure.md`](fileStructure.md).
+Architecture: [`docs/architecture.md`](docs/architecture.md). Pipeline details: [`docs/stack.md`](docs/stack.md). Code map: [`docs/file-structure.md`](docs/file-structure.md).
 
 Ask Your Factory is an AI-powered conversational spatial intelligence system that enables industrial field-service personnel to interact with complex industrial environments through natural language.
 

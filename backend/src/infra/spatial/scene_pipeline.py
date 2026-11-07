@@ -1,0 +1,216 @@
+"""Scene adapter: point cloud → semantic frames → asset bindings → navigation.
+
+Implements the business `SceneEngine` port. Built once per process (≈1–2 s) by the
+composition root (api/container.py) and shared by every service.
+Coordinates are canonical: Y up, floor at y = 0 (see point_cloud.py).
+"""
+
+from dataclasses import dataclass
+import logging
+import math
+import time
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import numpy as np
+
+from infra.spatial.asset_mapping import Binding, bind_assets, choose_target
+from infra.spatial.navigation import ROBOT_RADIUS, WALK_SPEED_M_S, Cell, OccupancyGrid, build_grid, nearest_free, plan_route, travel_distances
+from infra.spatial.point_cloud import PointCloud, VIEWER_MESH_PATH, VIEWER_PLY_PATH, load_scene_cloud
+from infra.spatial.segmentation import Room, SceneObject, detect_room, extract_objects
+
+logger = logging.getLogger("ask_your_factory.scene")
+
+ALGORITHM = "Voxel connected components + recursive thin-link / sparse-plane splitting"
+
+
+class RouteNotFound(Exception):
+    """No collision-free route exists between the entry and the requested target."""
+
+
+@dataclass(frozen=True)
+class ScenePipelineResult:
+    cloud: PointCloud
+    room: Room
+    objects: List[SceneObject]
+    grid: OccupancyGrid
+    entry: Tuple[float, float]
+    bindings: Dict[str, Binding]
+    target_asset_id: str
+    seconds: float
+
+
+class BoilerRoomScene:
+    """SceneEngine adapter. `assets_provider` returns builder-pack assets (dicts with a "state")."""
+
+    def __init__(self, assets_provider: Callable[[], List[Dict[str, Any]]]) -> None:
+        self._assets_provider = assets_provider
+        self.result = run_pipeline(assets_provider())
+        self.frames = [self._frame(obj) for obj in self.result.objects]
+
+    def rebuild(self) -> "BoilerRoomScene":
+        """Re-run the pipeline from disk (e.g. after replacing the scan)."""
+        self.result = run_pipeline(self._assets_provider())
+        self.frames = [self._frame(obj) for obj in self.result.objects]
+        return self
+
+    def get_mesh_path(self) -> Path:
+        return VIEWER_MESH_PATH
+
+    @property
+    def target_asset_id(self) -> str:
+        return self.result.target_asset_id
+
+    def get_ply_path(self) -> Path:
+        return VIEWER_PLY_PATH
+
+    def get_semantic_frames(self) -> List[Dict[str, Any]]:
+        return self.frames
+
+    def summary(self) -> Dict[str, Any]:
+        labels: Dict[str, int] = {}
+        for frame in self.frames:
+            labels[frame["label"]] = labels.get(frame["label"], 0) + 1
+        room = self.result.room
+        return {
+            "algorithm": ALGORITHM,
+            "source": self.result.cloud.source.name,
+            "processed_points": len(self.result.cloud),
+            "extracted_count": len(self.frames),
+            "mapped_asset_count": len(self.result.bindings),
+            "label_counts": labels,
+            "room": {"x": [room.x_min, room.x_max], "z": [room.z_min, room.z_max], "ceiling": room.ceiling},
+            "entry": {"x": self.result.entry[0], "y": 0.0, "z": self.result.entry[1]},
+            "target_asset_id": self.target_asset_id,
+            "processing_seconds": self.result.seconds,
+        }
+
+    def find_frame(self, identifier: str) -> Optional[Dict[str, Any]]:
+        wanted = identifier.strip().lower()
+        for frame in self.frames:
+            keys = (frame["id"], frame["scene_id"], frame.get("tag") or "")
+            if wanted in (k.lower() for k in keys):
+                return frame
+        return None
+
+    def nearby(self, x: float, z: float, radius_m: float) -> List[Dict[str, Any]]:
+        """Frames whose centre lies within radius_m of (x, z) on the floor plane, nearest first."""
+        hits = []
+        for frame in self.frames:
+            distance = math.dist((x, z), (frame["pos"][0], frame["pos"][2]))
+            if distance <= radius_m:
+                hits.append({**frame, "distance_m": round(distance, 2)})
+        return sorted(hits, key=lambda f: f["distance_m"])
+
+    def get_navigation_path(self, target_id: Optional[str] = None, start: Optional[Tuple[float, float]] = None) -> Dict[str, Any]:
+        target = self.find_frame(target_id or self.target_asset_id)
+        if target is None:
+            raise KeyError(target_id)
+
+        grid = self.result.grid
+        origin = start or self.result.entry
+        start_cell = nearest_free(grid, *origin)
+        goal_cell = nearest_free(grid, target["pos"][0], target["pos"][2])
+        route = None
+        if start_cell is not None and goal_cell is not None:
+            route = plan_route(grid, start_cell, goal_cell)
+        if route is None:
+            raise RouteNotFound(target["id"])
+
+        return {
+            "target_id": target["id"],
+            "target_tag": target["tag"],
+            "target_pos": target["pos"],
+            "waypoints": [{"x": x, "y": 0.0, "z": z} for x, z in route.waypoints],
+            "total_distance_m": route.length_m,
+            "estimated_walk_seconds": round(route.length_m / WALK_SPEED_M_S, 1),
+            "collision_free": route.collision_free,
+            "min_clearance_m": route.min_clearance_m,
+            "robot_radius_m": ROBOT_RADIUS,
+            "algorithm": "A* on inflated 2D occupancy grid + line-of-sight smoothing",
+        }
+
+    def _frame(self, obj: SceneObject) -> Dict[str, Any]:
+        binding = self.result.bindings.get(obj.object_id)
+        frame: Dict[str, Any] = {
+            "id": obj.object_id,
+            "scene_id": obj.object_id,
+            "tag": obj.object_id,
+            "label": obj.label,
+            "class": obj.label,
+            "pos": list(obj.center),
+            "size": list(obj.size),
+            "point_count": obj.point_count,
+            "asset_id": None,
+            "mapped_asset": None,
+            "mapping_confidence": None,
+            "state": None,
+            "health": None,
+            "issue_code": None,
+            "is_target": False,
+        }
+        if binding is None:
+            return frame
+
+        asset = binding.asset
+        state = asset.get("state") or {}
+        frame.update({
+            "id": asset["asset_id"],
+            "tag": asset.get("tag"),
+            "class": asset.get("asset_class"),
+            "asset_id": asset["asset_id"],
+            "mapped_asset": {
+                "asset_id": asset["asset_id"],
+                "tag": asset.get("tag"),
+                "asset_class": asset.get("asset_class"),
+                "area_id": asset.get("area_id"),
+                "area_name": asset.get("area_name"),
+                "criticality": asset.get("criticality"),
+            },
+            "mapping_confidence": binding.confidence,
+            "state": state.get("condition_state"),
+            "health": state.get("health_score"),
+            "issue_code": state.get("issue_code"),
+            "is_target": asset["asset_id"] == self.target_asset_id,
+        })
+        return frame
+
+
+def run_pipeline(assets: List[Dict[str, Any]]) -> ScenePipelineResult:
+    started = time.perf_counter()
+    cloud = load_scene_cloud()
+    room = detect_room(cloud)
+    objects = extract_objects(cloud, room)
+    grid = build_grid(cloud, room)
+
+    entry_cell = _walkway_end(grid, room)
+    entry = grid.to_world(entry_cell)
+
+    travel = travel_distances(grid, entry_cell)
+    reach: Dict[str, float] = {}
+    walk: Dict[str, float] = {}
+    for obj in objects:
+        stand = nearest_free(grid, obj.center[0], obj.center[2])
+        reach[obj.object_id] = math.dist((obj.center[0], obj.center[2]), grid.to_world(stand))
+        walk[obj.object_id] = float(travel[stand])
+
+    target = choose_target(assets)
+    bindings = bind_assets(objects, assets, target["asset_id"], reach, walk)
+
+    seconds = round(time.perf_counter() - started, 2)
+    logger.info("Scene pipeline: %d points → %d objects, %d assets bound in %.2fs", len(cloud), len(objects), len(bindings), seconds)
+    return ScenePipelineResult(cloud, room, objects, grid, entry, bindings, target["asset_id"], seconds)
+
+
+def _walkway_end(grid: OccupancyGrid, room: Room) -> Cell:
+    """Entry point: the walkway extremity found by a double sweep from the room's west side.
+
+    The scan has no door annotation, so the robot starts at one end of the longest walk.
+    """
+    seed = nearest_free(grid, room.x_min, (room.z_min + room.z_max) / 2)
+    if seed is None:
+        raise RuntimeError("Occupancy grid has no free floor space")
+    distances = travel_distances(grid, seed)
+    distances[~np.isfinite(distances)] = -1.0
+    i, j = np.unravel_index(int(np.argmax(distances)), distances.shape)
+    return int(i), int(j)

@@ -15,4 +15,4 @@ if [ ! -x "$PYTHON" ]; then
 fi
 
 cd "$BACKEND_DIR"
-exec "$PYTHON" -m uvicorn app.main:app --reload
+exec "$PYTHON" -m uvicorn api.server:app --app-dir src --reload --reload-dir src

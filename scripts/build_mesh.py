@@ -10,9 +10,9 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend" / "src"))
 
-from app.metaverse.point_cloud import RAW_SPLAT_PATH, build_scene_mesh  # noqa: E402
+from infra.spatial.point_cloud import RAW_SPLAT_PATH, build_scene_mesh  # noqa: E402
 
 if __name__ == "__main__":
     if not RAW_SPLAT_PATH.exists():

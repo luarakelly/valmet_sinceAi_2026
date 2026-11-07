@@ -111,6 +111,10 @@ Valmet challenge data/
 backend/database.db-shm
 backend/database.db-wal
 
+# Model weights (ultralytics downloads them on first use)
+data/weights/
+*.pt
+
 # Local challenge inputs and generated caches
 data/input/
 data/processed/
