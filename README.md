@@ -21,17 +21,17 @@ The raw scan is required: put `Equipment Room.ply` (395 MB, not in git) in `data
 
 ## Using the UI
 
-The header shows the three demo steps:
+The robot starts at the door. The faulty device (P-005) is pinned top left, and its route is drawn on the floor.
 
-1. **Scene & target** — the scan loads as coloured points; the faulty device (lowest health, P-005) has a red frame and a route.
-2. **Start inspection** — the robot walks the collision-free route; the camera follows it. Frames within 1.5 m light up and are listed under the view.
-3. **AI diagnosis** — while walking, the copilot explains every device it passes; on arrival it shows observations, confidence, next safe steps and the cited evidence IDs.
+1. **Go** on the target card — the robot walks the collision-free route; assets within 1.5 m are listed under *Near the robot*.
+2. **Click the blue floor** to walk anywhere, or **Route here** on any asset. The robot stops 0.8 m from the asset.
+3. **Click a label** (or arrive at an asset) — the copilot panel shows observation, hypothesis, next safe check, confidence and the evidence IDs; the object is highlighted through walls (x-ray).
 
-- Mouse: drag = rotate, wheel = zoom, right-drag = pan, double-click = focus there, click a frame = details.
-- Left list: assets grouped by *Needs attention* / *Healthy*. Click = select and show in 3D; **Route here** changes the inspection target.
-- Ask in the bottom bar: “Why is P-005 flagged?”, “Which assets need attention?”, “Where is M-006?”, “Route to CV-003”.
-- Display: **Points** (default) or **Mesh**, **Heat** colouring, **All frames** shows all 144 extracted boxes. Free camera, YOLO “AI Scan” and re-extraction are under **More**.
-- Asset ↔ 3D object links are synthetic (allowed by the brief) and labelled with their mapping confidence.
+- Camera: **Follow robot** (drag = turn around the robot, wheel = zoom; it stays inside the room) or **Top** (plan view).
+- Left list: target card, *Near the robot*, *Needs attention*, *Healthy*, *Detected objects* (all 144, by shape, with **Show all in 3D**).
+- Ask in the bottom bar: “Why is P-005 flagged?”, “Which assets need attention?”, “Where is M-006?”, “Route to CV-003”. With an LLM key the copilot can also navigate, select, diagnose or reset.
+- **View** menu: Photoreal (default), Point cloud, Height colours, **Verify placement (camera)** — a vision-language model looks at each object and says what it is. Free camera, YOLO and re-extraction are under `?debug=1`.
+- Asset ↔ 3D object links are synthetic unless camera-verified, and are labelled with their mapping confidence.
 
 ## Results on `Equipment Room.ply`
 
@@ -39,7 +39,7 @@ The header shows the three demo steps:
 |---|---|---|
 | Extract & 3D-frame assets | Splat → canonical Y-up cloud → voxel components split at thin links / sparse planes → geometric + colour labels | **144 framed objects** (pipe runs, fittings, valves, floor machines, instruments) from 207 k splats in **0.55 s** |
 | Map Excel metadata | Pack assets bound to compatible, reachable objects with `mapping_confidence`; every other object joins the nearest asset's system as a procedural component (allowed by the brief) | **30 / 30 assets** bound, **144 / 144 objects** carry pack metadata; target = lowest health (**P-005**, fouling, 44/100) |
-| Collision-free navigation | Obstacle grid (ankle → robot height), robot-radius inflation, A* + line-of-sight smoothing; clearance re-measured on the final route | **5.3 m** route to P-005, min clearance **0.24 m** ≥ robot radius 0.22 m; every asset route tested collision-free |
+| Collision-free navigation | Obstacle grid (ankle → robot height), robot-radius inflation, A* + line-of-sight smoothing; clearance re-measured on the final route; stops 0.8 m from the asset | **5.3 m** route to P-005, min clearance **0.24 m** ≥ robot radius 0.22 m; every asset route tested collision-free |
 | Proximity display | Frames within 1.5 m light up; live list of nearby assets and their components with state, health and distance | updates every frame |
 | AI along the route | Each pack asset the robot passes is explained in the copilot thread: status line for healthy devices, grounded evidence-engine diagnosis with citations for the rest | 21 devices explained on the P-005 walk |
 | AI diagnostics | Telemetry drift (Welch t-score vs own baseline), matching alarms, similar service cases, docs, data-quality confidence penalty; optional Gemini answer accepted only if every cited ID exists | P-005: flow −8.7 % (t = −4.8), 3 fouling alarms, 2 matching cases, confidence 0.91 → 0.61 from 9 data-quality issues |

@@ -11,6 +11,7 @@
 2. The system displays the boiler-room scene with extracted objects framed.
 3. The user selects or inspects a frame and sees its detected label, bounds, and extraction confidence.
 4. If pack data has been mapped, the user sees the synthetic-mapping indicator and associated asset status.
+5. Optionally, the user runs **Verify placement (camera)**: a vision-language model labels each object, and confirmed objects replace shape-based guesses in the mapping.
 
 **Outcome:** The user can distinguish extracted geometry from inferred labels and synthetic metadata.
 
@@ -22,7 +23,7 @@
 
 **Main flow**
 
-1. The system selects or loads the predetermined faulty target.
+1. The system selects or loads the predetermined faulty target; the user presses **Go** (or clicks the floor or **Route here** to walk elsewhere).
 2. The planner computes a route over the walkable area.
 3. The route is checked against the obstacle representation.
 4. The viewer shows the route and moves the avatar/robot along its waypoints.
