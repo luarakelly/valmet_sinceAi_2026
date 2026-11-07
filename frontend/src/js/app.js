@@ -1227,6 +1227,7 @@ function showSelection(id) {
 }
 
 // The asset modal covers the screen, chat included: scan render on the left, diagnosis on the right.
+// Opened from the 3D scene only (a label click or arriving at an asset); the left list inspects.
 function openAssetModal(id) {
   const frame = framesById.get(id);
   const modal = document.getElementById("asset-modal");
@@ -1658,7 +1659,7 @@ function renderTargetCard() {
     "<span>" + escapeHtml(prettyClass(a.asset_class)) + "</span>" +
     '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(a.state ? a.state.health_score : 100) + "%</span></div>" +
     '<div class="target-row"><span class="muted">' + dist + '</span><button class="btn" id="btn-target-go">Go ▶</button></div>';
-  el.querySelector(".target-row").onclick = function () { openAssetModal(a.asset_id); };
+  el.querySelector(".target-row").onclick = function () { goTo(a.asset_id); };
   document.getElementById("btn-target-go").onclick = function (e) {
     e.stopPropagation();
     goTo(a.asset_id);
@@ -1702,7 +1703,7 @@ function assetCard(a, distanceText) {
     '<button class="action-pill" data-act="inspect">🔍 Inspect</button>' +
     "</div>";
   card.querySelector(".asset-card-main").onclick = function () {
-    openAssetModal(a.asset_id);
+    inspectAsset(a.asset_id);
   };
   card.querySelector('[data-act="inspect"]').onclick = function (e) {
     e.stopPropagation();
@@ -1726,7 +1727,7 @@ function componentCard(frame, distanceText) {
     '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(parent.health == null ? 100 : parent.health) + "%</span>" +
     "</div>";
   card.querySelector(".asset-card-main").onclick = function () {
-    openAssetModal(frame.id);
+    goTo(frame.id);
   };
   return card;
 }
