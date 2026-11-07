@@ -2246,11 +2246,14 @@ function setupChat() {
   setChatContext();
 }
 
+// The round button and the chat box share the bottom-right corner: one shows at a time.
 function toggleChat() {
   const panel = document.getElementById("chat-panel");
+  const button = document.getElementById("btn-chat");
   panel.hidden = !panel.hidden;
+  button.hidden = !panel.hidden;
   if (!panel.hidden) {
-    document.getElementById("btn-chat").classList.remove("has-unread");
+    button.classList.remove("has-unread");
     document.getElementById("omnibar-input").focus();
   }
 }

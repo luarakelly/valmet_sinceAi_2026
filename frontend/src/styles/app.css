@@ -1183,6 +1183,7 @@ body.debug .debug-only { display: block; }
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 .chat-fab:hover { border-color: var(--accent); }
+.chat-fab[hidden] { display: none; }
 .chat-fab.has-unread::after {
   content: "";
   position: absolute;
@@ -1196,7 +1197,7 @@ body.debug .debug-only { display: block; }
 .chat-panel {
   position: fixed;
   right: 20px;
-  bottom: 88px;
+  bottom: 20px;
   z-index: var(--chat-z);
   display: flex;
   flex-direction: column;
