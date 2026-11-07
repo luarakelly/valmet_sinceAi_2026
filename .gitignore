@@ -118,3 +118,5 @@ data/weights/
 # Local challenge inputs and generated caches
 data/input/
 data/processed/
+.mcp.json
+port_snapshot.tgz
