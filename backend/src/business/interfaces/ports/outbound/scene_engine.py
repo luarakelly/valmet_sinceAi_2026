@@ -35,6 +35,10 @@ class SceneEngine(Protocol):
         """
         ...
 
+    def walkable_grid(self) -> Dict[str, Any]:
+        """Occupancy grid: origin, cell size, nx × nz, and base64 layers `reachable` / `blocked`."""
+        ...
+
     def rebuild(self) -> "SceneEngine":
         ...
 

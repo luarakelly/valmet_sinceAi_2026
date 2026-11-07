@@ -1,5 +1,6 @@
 """Scene pipeline tests: canonical frame, extraction density, bindings and navigation guarantees."""
 
+import base64
 import math
 
 import numpy as np
@@ -7,7 +8,7 @@ import numpy as np
 from functools import lru_cache
 
 from infra.importers.workbook.dataset import get_dataset
-from infra.spatial.navigation import CELL, ROBOT_RADIUS, OccupancyGrid, plan_route
+from infra.spatial.navigation import CELL, ROBOT_RADIUS, STANDOFF_M, OccupancyGrid, plan_route, walkable_layers
 from infra.spatial.scene_pipeline import BoilerRoomScene
 from infra.spatial.segmentation import classify
 
@@ -82,7 +83,22 @@ def test_route_to_every_asset_is_collision_free():
         route = scene.get_navigation_path(frame["asset_id"])
         assert route["collision_free"], frame["asset_id"]
         last = route["waypoints"][-1]
-        assert math.dist((last["x"], last["z"]), (frame["pos"][0], frame["pos"][2])) <= 0.9 + CELL
+        # Stops at an inspection distance from the asset's footprint: close, but not touching.
+        gap = math.hypot(max(abs(last["x"] - frame["pos"][0]) - frame["size"][0] / 2, 0),
+                         max(abs(last["z"] - frame["pos"][2]) - frame["size"][2] / 2, 0))
+        assert gap <= STANDOFF_M + 0.25, (frame["asset_id"], gap)
+        assert gap >= min(STANDOFF_M, 0.3) - CELL or len(route["waypoints"]) == 1, (frame["asset_id"], gap)
+
+
+def test_walkable_grid_matches_the_route_grid():
+    scene = get_scene()
+    layers = walkable_layers(scene.result.grid)
+    encoded = scene.walkable_grid()
+    assert len(base64.b64decode(encoded["reachable"])) == layers["nx"] * layers["nz"]
+    assert layers["reachable"].shape == (layers["nx"], layers["nz"])
+    assert layers["reachable"].sum() > 0
+    # Nowhere walkable is also an obstacle.
+    assert not (layers["reachable"].astype(bool) & layers["blocked"].astype(bool)).any()
 
 
 def test_route_to_a_floor_point_snaps_to_walkable_space():

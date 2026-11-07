@@ -38,3 +38,17 @@ class NavigationPathResponse(BaseModel):
     min_clearance_m: float
     robot_radius_m: float
     algorithm: str
+
+
+
+class WalkableGridResponse(BaseModel):
+    """Occupancy grid. Cell (i, j) covers x = x_min + i·cell, z = z_min + j·cell; layers are
+    base64 bytes in row-major (i, j) order, index = i·nz + j, 1 = true."""
+
+    x_min: float
+    z_min: float
+    cell: float
+    nx: int
+    nz: int
+    reachable: str = Field(description="1 where the robot centre may stand (inflated by its radius)")
+    blocked: str = Field(description="1 on obstacle cells (walls, equipment)")

@@ -4,7 +4,7 @@ from fastapi import Depends, Query
 
 from api.container import Container, get_container
 from api.controllers.errors import http_errors
-from dto.navigation_dto import NavigationPathResponse
+from dto.navigation_dto import NavigationPathResponse, WalkableGridResponse
 
 
 def get_navigation_path(
@@ -20,3 +20,9 @@ def get_navigation_path(
     goal = (goal_x, goal_z) if goal_x is not None and goal_z is not None else None
     with http_errors():
         return NavigationPathResponse.model_validate(app.navigation.path(target_id, start, goal))
+
+
+
+def get_walkable_grid(app: Container = Depends(get_container)) -> WalkableGridResponse:
+    """The navigation occupancy grid, for the walkable-floor overlay and camera collision."""
+    return WalkableGridResponse.model_validate(app.navigation.walkable())

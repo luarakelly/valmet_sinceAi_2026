@@ -25,6 +25,8 @@ ROBOT_HEIGHT = 1.2
 ROBOT_RADIUS = 0.22
 MIN_OBSTACLE_POINTS = 3
 SEGMENT_SAMPLE_STEP = 0.02
+# The robot stops this far from an asset's footprint (room to inspect it), not as close as possible.
+STANDOFF_M = 0.8
 WALK_SPEED_M_S = 0.8
 
 Cell = Tuple[int, int]
@@ -130,6 +132,42 @@ def plan_route(grid: OccupancyGrid, start: Cell, goal: Cell) -> Optional[Route]:
         min_clearance_m=round(min_clearance, 3),
         collision_free=min_clearance >= ROBOT_RADIUS - CELL / 2,
     )
+
+
+def trim_to_standoff(grid: OccupancyGrid, route: Route, footprint_distance, standoff: float = STANDOFF_M) -> Route:
+    """Cut the route where it first comes within `standoff` of the target's footprint.
+
+    `footprint_distance(x, z)` = metres from a floor point to the target's footprint. A route that
+    never gets that close is returned unchanged; one that starts inside the zone stays put.
+    """
+    points = route.waypoints
+    if footprint_distance(*points[0]) <= standoff:
+        return Route([points[0]], 0.0, round(grid.clearance_at(*points[0]), 3), route.collision_free)
+    kept = [points[0]]
+    for (x0, z0), (x1, z1) in zip(points, points[1:]):
+        samples = max(2, int(math.dist((x0, z0), (x1, z1)) / SEGMENT_SAMPLE_STEP))
+        for t in np.linspace(0.0, 1.0, samples)[1:]:
+            x, z = x0 + (x1 - x0) * t, z0 + (z1 - z0) * t
+            if footprint_distance(x, z) <= standoff:
+                kept.append((round(x, 3), round(z, 3)))
+                length = sum(math.dist(a, b) for a, b in zip(kept, kept[1:]))
+                return Route(kept, round(length, 2), round(_min_clearance(grid, kept), 3), route.collision_free)
+        kept.append((x1, z1))
+    return route
+
+
+def walkable_layers(grid: OccupancyGrid) -> Dict[str, object]:
+    """The grid for the viewer: where the robot may stand (reachable) and obstacle cells (blocked)."""
+    nx, nz = grid.clearance.shape
+    return {
+        "x_min": grid.x_min,
+        "z_min": grid.z_min,
+        "cell": CELL,
+        "nx": nx,
+        "nz": nz,
+        "reachable": grid.reachable.astype(np.uint8),
+        "blocked": (grid.clearance < CELL * 0.75).astype(np.uint8),
+    }
 
 
 def _neighbours(free: np.ndarray, cell: Cell):

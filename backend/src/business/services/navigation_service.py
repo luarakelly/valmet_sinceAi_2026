@@ -25,3 +25,8 @@ class NavigationService:
             if type(error).__name__ == "RouteNotFound":
                 raise RouteNotFoundError("No collision-free route to '{}'.".format(target_id or "that point")) from error
             raise
+
+
+    def walkable(self) -> Dict[str, Any]:
+        """Where the robot may walk (viewer overlay) and where obstacles are (camera collision)."""
+        return self._scene.walkable_grid()

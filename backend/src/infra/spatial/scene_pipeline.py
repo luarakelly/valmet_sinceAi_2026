@@ -5,6 +5,7 @@ composition root (api/container.py) and shared by every service.
 Coordinates are canonical: Y up, floor at y = 0 (see point_cloud.py).
 """
 
+import base64
 from dataclasses import dataclass
 import logging
 import math
@@ -15,7 +16,19 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 
 from infra.spatial.asset_mapping import Binding, bind_assets, choose_target
-from infra.spatial.navigation import ROBOT_RADIUS, WALK_SPEED_M_S, Cell, OccupancyGrid, build_grid, nearest_free, plan_route, travel_distances
+from infra.spatial.navigation import (
+    ROBOT_RADIUS,
+    STANDOFF_M,
+    WALK_SPEED_M_S,
+    Cell,
+    OccupancyGrid,
+    build_grid,
+    nearest_free,
+    plan_route,
+    travel_distances,
+    trim_to_standoff,
+    walkable_layers,
+)
 from infra.spatial.point_cloud import PointCloud, VIEWER_MESH_PATH, VIEWER_PLY_PATH, load_scene_cloud
 from infra.spatial.splat_export import ensure_viewer_splat
 from infra.spatial.segmentation import Room, SceneObject, detect_room, extract_objects
@@ -134,6 +147,8 @@ class BoilerRoomScene:
             route = plan_route(grid, start_cell, goal_cell)
         if route is None:
             raise RouteNotFound(target["id"])
+        if goal is None and "size" in target:
+            route = trim_to_standoff(grid, route, _footprint_distance(target))
 
         return {
             "target_id": target["id"],
@@ -147,6 +162,13 @@ class BoilerRoomScene:
             "robot_radius_m": ROBOT_RADIUS,
             "algorithm": "A* on inflated 2D occupancy grid + line-of-sight smoothing",
         }
+
+    def walkable_grid(self) -> Dict[str, Any]:
+        """Occupancy grid for the viewer (walkable overlay + camera collision), layers as base64 bytes."""
+        layers = walkable_layers(self.result.grid)
+        for key in ("reachable", "blocked"):
+            layers[key] = base64.b64encode(layers[key].tobytes(order="C")).decode("ascii")
+        return layers
 
     def _frame(self, obj: SceneObject) -> Dict[str, Any]:
         binding = self.result.bindings.get(obj.object_id)
@@ -232,3 +254,14 @@ def _walkway_end(grid: OccupancyGrid, room: Room) -> Cell:
     distances[~np.isfinite(distances)] = -1.0
     i, j = np.unravel_index(int(np.argmax(distances)), distances.shape)
     return int(i), int(j)
+
+
+def _footprint_distance(frame: Dict[str, Any]) -> Callable[[float, float], float]:
+    """Floor distance from a point to the frame's box footprint (0 inside it)."""
+    cx, _, cz = frame["pos"]
+    half_w, half_d = frame["size"][0] / 2, frame["size"][2] / 2
+
+    def distance(x: float, z: float) -> float:
+        return math.hypot(max(abs(x - cx) - half_w, 0.0), max(abs(z - cz) - half_d, 0.0))
+
+    return distance

@@ -30,7 +30,7 @@ from dto.asset_dto import (
 from dto.copilot_dto import CopilotQueryResponse
 from dto.dashboard_dto import DashboardSummaryResponse
 from dto.maintenance_dto import MaintenancePriorityRead
-from dto.navigation_dto import NavigationPathResponse
+from dto.navigation_dto import NavigationPathResponse, WalkableGridResponse
 from dto.scene_dto import ProximityAssetResponse
 from dto.vision_dto import VisionAnalysisResponse
 from dto.work_order_dto import WorkOrderDraftResponse
@@ -58,6 +58,7 @@ get("/scene/boiler-room.splat")(scene.get_boiler_room_splat)
 
 # Navigation
 get("/navigation/path", response_model=NavigationPathResponse)(navigation.get_navigation_path)
+get("/navigation/walkable", response_model=WalkableGridResponse)(navigation.get_walkable_grid)
 
 # AI & workflow
 post("/copilot/query", response_model=CopilotQueryResponse)(copilot.copilot_query)
