@@ -23,6 +23,7 @@ logger = logging.getLogger("ask_your_factory")
 
 from api import container as container_module
 from api.controllers.health_controller import health_check
+from dto.common_dto import HealthResponse
 from api.routes import router as api_router
 from infra.paths import FRONTEND_DIR
 
@@ -98,8 +99,8 @@ async def root_index():
     )
 
 
-app.get("/health", tags=["System"])(health_check)
-app.get("/api/health", tags=["System"])(health_check)
+app.get("/health", tags=["System"], response_model=HealthResponse)(health_check)
+app.get("/api/health", tags=["System"], response_model=HealthResponse)(health_check)
 
 
 def start_server(host: str = "0.0.0.0", port: int = 8000):

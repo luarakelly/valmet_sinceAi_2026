@@ -32,6 +32,7 @@ from dto.dashboard_dto import DashboardSummaryResponse
 from dto.maintenance_dto import MaintenancePriorityRead
 from dto.navigation_dto import NavigationPathResponse
 from dto.scene_dto import ProximityAssetResponse
+from dto.vision_dto import VisionAnalysisResponse
 from dto.work_order_dto import WorkOrderDraftResponse
 
 router = APIRouter(tags=["Ask Your Factory"])
@@ -62,4 +63,4 @@ post("/copilot/query", response_model=CopilotQueryResponse)(copilot.copilot_quer
 post("/work-orders/draft", response_model=WorkOrderDraftResponse, status_code=status.HTTP_201_CREATED)(work_orders.create_draft_work_order)
 get("/maintenance/priorities", response_model=List[MaintenancePriorityRead])(maintenance.get_maintenance_priorities)
 get("/metaverse/dashboard", response_model=DashboardSummaryResponse)(dashboard.get_metaverse_dashboard)
-post("/vision/analyze")(vision.analyze_viewport_view)
+post("/vision/analyze", response_model=VisionAnalysisResponse)(vision.analyze_viewport_view)

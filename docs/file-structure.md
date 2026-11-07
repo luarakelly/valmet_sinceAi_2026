@@ -14,6 +14,7 @@ valmet_sinceAi_2026/
 │   │   ├── dto/                            # API contracts (Pydantic)
 │   │   │   ├── asset_dto.py  scene_dto.py  navigation_dto.py  copilot_dto.py
 │   │   │   └── work_order_dto.py  dashboard_dto.py  maintenance_dto.py
+│   │   │       vision_dto.py  common_dto.py
 │   │   ├── business/
 │   │   │   ├── errors.py
 │   │   │   ├── models/records.py           # record types exchanged across ports
