@@ -206,7 +206,10 @@ class EvidenceCitation(BaseModel):
 
 class CopilotQueryRequest(BaseModel):
     """Diagnostic query command directed to an asset."""
-    asset_id: str = Field(description="Target asset identifier or tag (e.g. ASSET-017 or P-005)")
+    asset_id: Optional[str] = Field(
+        default=None,
+        description="Target asset identifier or tag (e.g. ASSET-017 or P-005). Auto-resolved if omitted."
+    )
     query: Optional[str] = Field(
         default=None,
         description="Technician question; omit for a general status diagnosis"
@@ -254,6 +257,7 @@ class CopilotQueryResponse(BaseModel):
     safety_guardrails: List[str] = []
     confidence_score: Optional[float] = None
     work_order_draft_ready: bool = True
+    flow_topology: Optional[Dict[str, Any]] = None
 
 
 
@@ -329,6 +333,7 @@ class DashboardSummaryResponse(BaseModel):
     total_assets: int = 30
     average_health_score: float = 81.2
     condition_counts: Dict[str, int] = {}
+    criticality_breakdown: Dict[str, int] = {}
     healthy_count: int = 17
     watch_count: int = 4
     degraded_count: int = 6

@@ -10,6 +10,7 @@ AI & workflow:     /copilot/query, /work-orders/draft (draft only, never a contr
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
@@ -51,6 +52,7 @@ from app.metaverse.briefings import build_briefings
 from app.metaverse.copilot import get_copilot
 from app.metaverse.dataset import get_dataset
 from app.metaverse.scene_processor import RouteNotFound, get_scene, reset_scene
+from app.metaverse.topology import build_process_topology, get_asset_flow_context
 from app.metaverse.vision import analyze_image
 
 router = APIRouter(tags=["Ask Your Factory"])
@@ -377,8 +379,8 @@ def create_draft_work_order(
             detail="Mandatory safety verification required: You must acknowledge DOC-FIELD-SAFETY guidelines before drafting work orders.",
         )
 
-    stamp = int(datetime.now(timezone.utc).timestamp()) % 100000
-    draft_id = f"WO-DRAFT-{stamp:05d}"
+    unique_suffix = uuid.uuid4().hex[:6].upper()
+    draft_id = f"WO-DRAFT-{unique_suffix}"
 
     state = session.exec(select(CurrentState).where(CurrentState.asset_id == asset.asset_id)).first()
     if state:
@@ -456,6 +458,12 @@ def get_metaverse_dashboard(session: Session = Depends(get_session)):
         k = s.condition_state.lower()
         condition_counts[k] = condition_counts.get(k, 0) + 1
 
+    all_assets = session.exec(select(Asset)).all()
+    criticality_counts: Dict[str, int] = {}
+    for a in all_assets:
+        crit = a.criticality or "standard"
+        criticality_counts[crit] = criticality_counts.get(crit, 0) + 1
+
     total_telemetry = session.scalar(select(func.count(Telemetry.id))) or 0
     total_events = session.scalar(select(func.count(AlarmEvent.event_id))) or 0
     high_events = session.scalar(
@@ -468,6 +476,7 @@ def get_metaverse_dashboard(session: Session = Depends(get_session)):
         total_assets=total_assets,
         average_health_score=round(avg_health, 1),
         condition_counts=condition_counts,
+        criticality_breakdown=criticality_counts,
         healthy_count=condition_counts.get("healthy", 0),
         watch_count=condition_counts.get("watch", 0),
         degraded_count=condition_counts.get("degraded", 0),
@@ -531,6 +540,26 @@ def get_scene_summary():
     return get_scene().summary()
 
 
+@router.get("/scene/topology")
+def get_scene_topology():
+    """Process flow circuits connecting equipment in 3D with flow rates and propagation status."""
+    frames = get_scene().get_semantic_frames()
+    return build_process_topology(frames)
+
+
+@router.get("/scene/topology/{asset_id}")
+def get_asset_topology(asset_id: str):
+    """Specific process loop, upstream/downstream equipment, and LOTO isolation procedure for an asset."""
+    frames = get_scene().get_semantic_frames()
+    flow_context = get_asset_flow_context(asset_id, frames)
+    if flow_context is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Asset '{asset_id}' has no assigned process flow circuit.",
+        )
+    return flow_context
+
+
 @router.post("/scene/extract-assets")
 def extract_scene_assets():
     """Re-run the extraction pipeline on the boiler-room point cloud and return all frames."""
@@ -542,7 +571,21 @@ def planned_route(target_id: Optional[str], start_x: Optional[float], start_z: O
     """Collision-free route from the entry (or start_x/start_z) to a standing spot beside the target."""
     start = None
     if start_x is not None and start_z is not None:
+        scene = get_scene()
+        room = scene.result.room
+        is_outside = False
+        if start_x < room.x_min - 1.5 or start_x > room.x_max + 1.5:
+            is_outside = True
+        if start_z < room.z_min - 1.5 or start_z > room.z_max + 1.5:
+            is_outside = True
+
+        if is_outside:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Start position ({start_x}, {start_z}) is outside the boiler room envelope.",
+            )
         start = (start_x, start_z)
+
     try:
         return get_scene().get_navigation_path(target_id=target_id, start=start)
     except KeyError:
@@ -628,13 +671,59 @@ async def analyze_viewport_view(
         )
 
 
+@router.get("/copilot/status")
+def copilot_status():
+    """Report Gemini and evidence engine status."""
+    copilot = get_copilot()
+    return {
+        "gemini_enabled": bool(copilot.api_key),
+        "model": copilot.model,
+        "active_model": getattr(copilot, "_last_active_model", copilot.model),
+    }
+
+
+@router.get("/process/topology")
+def process_topology():
+    """Connected industrial process flow circuits linking pumps, motors, valves and instruments."""
+    scene = get_scene()
+    return build_process_topology(scene.frames)
+
+
 @router.post("/copilot/query", response_model=CopilotQueryResponse)
 def copilot_query(
     request: CopilotQueryRequest,
     session: Session = Depends(get_session),
 ):
     """Evidence-grounded diagnosis: telemetry drift, alarms, similar cases, docs and data quality."""
-    asset = get_asset_or_404(session, request.asset_id)
+    target_id = request.asset_id
+    if not target_id:
+        q_text = (request.query or request.prompt or "").lower()
+        all_assets = session.exec(select(Asset)).all()
+        # 1. Look for explicit tag or asset_id mention in query
+        for a in all_assets:
+            if a.tag.lower() in q_text or a.asset_id.lower() in q_text:
+                target_id = a.asset_id
+                break
+        # 2. Look for equipment class keywords
+        if not target_id:
+            for a in all_assets:
+                c_name = a.asset_class.lower().replace("_", " ")
+                if c_name in q_text or a.asset_class.lower() in q_text:
+                    target_id = a.asset_id
+                    break
+        # 3. Default to the highest priority faulty asset
+        if not target_id:
+            states = session.exec(select(CurrentState)).all()
+            degraded_states = [s for s in states if s.condition_state in ("attention_required", "degraded", "watch")]
+            if degraded_states:
+                degraded_states.sort(key=lambda s: s.health_score)
+                target_id = degraded_states[0].asset_id
+            elif all_assets:
+                target_id = all_assets[0].asset_id
+            else:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No assets registered.")
+
+    asset = get_asset_or_404(session, target_id)
     state = crud.get_asset_state(session, asset.asset_id)
     if state is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No current state for {asset.asset_id}.")
@@ -648,6 +737,8 @@ def copilot_query(
     if frame is not None:
         mapping_confidence = frame["mapping_confidence"]
 
+    flow_context = get_asset_flow_context(asset.asset_id, get_scene().get_semantic_frames())
+
     return get_copilot().diagnose_asset(
         asset=asset.model_dump(),
         state=state.model_dump(),
@@ -659,4 +750,5 @@ def copilot_query(
         dq_issues=[q.model_dump() for q in dq_issues],
         mapping_confidence=mapping_confidence,
         question=request.prompt or request.query,
+        flow_context=flow_context,
     )

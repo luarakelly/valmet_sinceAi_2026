@@ -154,6 +154,44 @@ def test_copilot_diagnostics():
     print("PASS: Evidence-Grounded AI Diagnostics Copilot")
 
 
+def test_copilot_status_endpoint():
+    """Verify copilot status endpoint reports model configuration."""
+    res = client.get("/api/copilot/status")
+    assert res.status_code == 200
+    data = res.json()
+    assert "gemini_enabled" in data
+    assert "model" in data
+
+
+def test_process_topology_endpoint():
+    """Verify process circuits and flow loops."""
+    res = client.get("/api/scene/topology")
+    assert res.status_code == 200
+    loops = res.json()
+    assert len(loops) >= 3
+    assert any("P-005" in str(l) for l in loops)
+
+    res_target = client.get("/api/scene/topology/ASSET-017")
+    assert res_target.status_code == 200
+    ctx = res_target.json()
+    assert ctx["loop_id"] == "LOOP-UTILITY"
+    assert "safety_loto" in ctx
+
+
+def test_copilot_query_auto_resolve():
+    """Verify querying copilot without asset_id auto-resolves target asset."""
+    # Query specifying tag in natural language
+    res = client.post("/api/copilot/query", json={"query": "Why is pump P-005 vibrating?"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["tag"] == "P-005"
+
+    # Query with general question auto-resolves to degraded asset
+    res2 = client.post("/api/copilot/query", json={"query": "What should I inspect first?"})
+    assert res2.status_code == 200
+    assert res2.json()["asset_id"]
+
+
 def run_all_tests():
     """Run all API test suites sequentially."""
     print("==================================================")

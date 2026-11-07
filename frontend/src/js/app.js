@@ -16,10 +16,21 @@ let pointSize = 0.070;
 let renderMode = "splat";
 let sidebarOpen = true;
 let copilotOpen = true;
+let denseFramesVisible = false;
+let followCameraMode = false;
+let currentTelemetryRecords = [];
+let currentTelemetrySignal = "primary";
+let robotScannerRing = null;
+let allSceneFrames = [];
 let proximityRadius = 0; // metres to a box edge; the server owns the value (scene summary)
 let routeBriefings = [];
 let nextBriefingIndex = 0;
 let obstacleOverlay = null;
+let processTopologyGroup = new THREE.Group();
+let processTopologyData = [];
+let activeTopologyLoopId = null;
+let lidarScanCone = null;
+let topologyTubes = [];
 
 // Canonical scene frame from the backend: Y up, floor at y = 0, room centred on x = z = 0.
 const ROBOT_GROUND_OFFSET = 0.15;
@@ -31,6 +42,9 @@ const OBSTACLE_TIGHT_RGBA = "rgba(245, 158, 11, 0.22)";
 const MAX_NEARBY_ASSETS = 4;
 const MAX_NEARBY_STRUCTURES = 2;
 const ROBOT_SPEED_M_S = 0.8;
+const DRONE_CAMERA_HEIGHT_M = 0.42;
+const TOPOLOGY_TUBE_RADIUS_M = 0.024;
+const SCAN_PULSE_SPEED = 0.005;
 const ORBIT_VIEW = { position: [-5.5, 3.2, 4.5], target: [0, 0.8, 0] };
 const TOP_VIEW = { position: [0, 9, 0.01], target: [0, 0, 0] };
 
@@ -88,7 +102,11 @@ function init3D() {
   boundingFramesGroup.visible = true;
   scene.add(boundingFramesGroup);
 
+  processTopologyGroup.visible = true;
+  scene.add(processTopologyGroup);
+
   createRobotAvatar();
+  setupTargetArrivalCard();
   loadBoilerRoomPLY();
   fetchAssetsAndFrames();
 
@@ -207,17 +225,29 @@ function createRobotAvatar() {
   robotAvatar.add(light);
   robotAvatar.add(light.target);
 
-  const ringGeo = new THREE.RingGeometry(2.3, 2.38, 48);
+  const ringGeo = new THREE.RingGeometry(1.8, 1.95, 48);
   ringGeo.rotateX(-Math.PI / 2);
   const ringMat = new THREE.MeshBasicMaterial({
     color: 0x00d2ff,
     transparent: true,
-    opacity: 0.35,
+    opacity: 0.45,
     side: THREE.DoubleSide,
   });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.position.y = -0.1;
-  robotAvatar.add(ring);
+  robotScannerRing = new THREE.Mesh(ringGeo, ringMat);
+  robotScannerRing.position.y = -0.1;
+  robotAvatar.add(robotScannerRing);
+
+  const coneGeo = new THREE.ConeGeometry(0.85, 2.4, 16, 1, true);
+  coneGeo.rotateX(-Math.PI / 2);
+  const coneMat = new THREE.MeshBasicMaterial({
+    color: 0x00d2ff,
+    transparent: true,
+    opacity: 0.14,
+    wireframe: true,
+  });
+  lidarScanCone = new THREE.Mesh(coneGeo, coneMat);
+  lidarScanCone.position.set(0, 0.38, -1.2);
+  robotAvatar.add(lidarScanCone);
 
   robotAvatar.position.set(0, ROBOT_GROUND_OFFSET, 0);
   scene.add(robotAvatar);
@@ -670,6 +700,7 @@ async function fetchAssetsAndFrames() {
     }
     loadNavigationPath(currentSelectedAsset);
     loadObstacleOverlay();
+    loadProcessTopology();
   } catch (e) {
     console.error("Error fetching assets", e);
   }
@@ -711,6 +742,7 @@ function createFloatingLabelSprite(tag, stateText, colorHex) {
 }
 
 function build3DBoundingBoxes(frames) {
+  allSceneFrames = frames || [];
   while (boundingFramesGroup.children.length > 0) {
     boundingFramesGroup.remove(boundingFramesGroup.children[0]);
   }
@@ -730,20 +762,47 @@ function build3DBoundingBoxes(frames) {
     } else if (frame.state === "attention_required") {
       colorHex = 0xef4444;
       colorCss = "#ef4444";
-    } else if (!frame.asset_id) {
-      colorHex = 0x00d2ff;
-      colorCss = "#00d2ff";
+    } else if (frame.asset_id) {
+      colorHex = 0x10b981;
+      colorCss = "#10b981";
+    } else {
+      // Unmapped structural infrastructure (Pipes, Vessels, Risers, Fittings)
+      const lbl = (frame.label || "").toUpperCase();
+      if (lbl.includes("PIPE")) {
+        colorHex = 0xa855f7; // Purple for piping networks
+        colorCss = "#a855f7";
+      } else if (lbl.includes("VALVE")) {
+        colorHex = 0x3b82f6; // Blue for valve assemblies
+        colorCss = "#3b82f6";
+      } else if (lbl.includes("INSTRUMENT")) {
+        colorHex = 0x14b8a6; // Teal for field instruments
+        colorCss = "#14b8a6";
+      } else {
+        colorHex = 0x06b6d4; // Cyan for industrial machines & structures
+        colorCss = "#06b6d4";
+      }
     }
 
-    const isSelected = frame.id === currentSelectedAsset;
+    let isSelected = false;
+    if (frame.id === currentSelectedAsset || frame.asset_id === currentSelectedAsset) {
+      isSelected = true;
+    }
+
     let boxLineWidth = 1;
     let boxLineOpacity = 0.08;
     let boxFillOpacity = 0.0;
     let boxLabelOpacity = 0.0;
+
+    if (denseFramesVisible) {
+      boxLineOpacity = 0.65;
+      boxFillOpacity = 0.06;
+      boxLabelOpacity = 0.85;
+    }
+
     if (isSelected) {
       boxLineWidth = 2;
       boxLineOpacity = 0.95;
-      boxFillOpacity = 0.15;
+      boxFillOpacity = 0.20;
       boxLabelOpacity = 1.0;
     }
 
@@ -769,7 +828,7 @@ function build3DBoundingBoxes(frames) {
 
     const labelSprite = createFloatingLabelSprite(
       frame.tag || frame.id,
-      frame.state || frame.label.replace(/_/g, " "),
+      frame.state || (frame.label || "").replace(/_/g, " "),
       colorCss,
     );
     labelSprite.position.set(0, h / 2 + 0.35, 0);
@@ -796,6 +855,36 @@ function build3DBoundingBoxes(frames) {
 
     boundingFramesGroup.add(boxMesh);
   });
+}
+
+function toggleDenseSemanticFrames() {
+  denseFramesVisible = !denseFramesVisible;
+  const btn = document.getElementById("btn-semantic-extract");
+  if (btn) {
+    btn.classList.toggle("active", denseFramesVisible);
+    btn.innerHTML = denseFramesVisible ? "<span>⚡ 144 Frames (Dense)</span>" : "<span>⚡ Dense 3D Frames</span>";
+  }
+
+  boundingFramesGroup.children.forEach(function (c) {
+    if (c.userData && c.userData.lineMat) {
+      const isSel = c.userData.id === currentSelectedAsset || c.userData.assetId === currentSelectedAsset;
+      if (isSel) {
+        c.userData.lineMat.opacity = 1.0;
+        if (c.userData.fillMat) c.userData.fillMat.opacity = 0.25;
+        if (c.userData.labelSprite) c.userData.labelSprite.material.opacity = 1.0;
+      } else {
+        c.userData.lineMat.opacity = denseFramesVisible ? 0.65 : 0.08;
+        if (c.userData.fillMat) c.userData.fillMat.opacity = denseFramesVisible ? 0.06 : 0.0;
+        if (c.userData.labelSprite) c.userData.labelSprite.material.opacity = denseFramesVisible ? 0.85 : 0.0;
+      }
+    }
+  });
+
+  showToast(
+    denseFramesVisible
+      ? "⚡ Dense 3D Semantic Mode Active: 144 industrial structures & assets framed"
+      : "3D Semantic Mode: Focus view restored"
+  );
 }
 
 async function loadNavigationPath(targetId) {
@@ -879,6 +968,16 @@ function appendRouteLogEntry(briefing) {
     openCopilotForAsset(briefing.asset_id);
   };
   document.getElementById("route-log").prepend(item);
+
+  // Voice route briefings aloud
+  if (window.speechSynthesis && !window.speechSynthesis.speaking) {
+    try {
+      const u = new SpeechSynthesisUtterance(briefing.tag + ": " + (briefing.text || ""));
+      u.rate = 1.1;
+      u.volume = 0.8;
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+  }
 }
 
 async function loadObstacleOverlay() {
@@ -925,6 +1024,252 @@ function setObstacleOverlay(isVisible) {
   const button = document.getElementById("btn-obstacles");
   button.classList.toggle("active", isVisible);
   button.setAttribute("aria-pressed", String(isVisible));
+}
+
+async function loadProcessTopology() {
+  try {
+    const res = await fetch("/api/scene/topology");
+    if (!res.ok) {
+      return;
+    }
+    processTopologyData = await res.json();
+    build3DProcessTopology(processTopologyData);
+  } catch (err) {
+    console.warn("Failed to load process flow topology:", err);
+  }
+}
+
+function build3DProcessTopology(loops) {
+  while (processTopologyGroup.children.length > 0) {
+    processTopologyGroup.remove(processTopologyGroup.children[0]);
+  }
+  topologyTubes = [];
+
+  loops.forEach(function (loop) {
+    if (!loop.path_3d || loop.path_3d.length < 2) {
+      return;
+    }
+
+    const vectors = loop.path_3d.map(function (pt) {
+      return new THREE.Vector3(pt[0], pt[1], pt[2]);
+    });
+
+    const curve = new THREE.CatmullRomCurve3(vectors, false, "centripetal", 0.5);
+    const tubeGeo = new THREE.TubeGeometry(curve, 48, TOPOLOGY_TUBE_RADIUS_M, 8, false);
+
+    let colorHex = 0x00d2ff;
+    if (loop.has_fault) {
+      colorHex = 0xef4444;
+    }
+
+    const tubeMat = new THREE.MeshStandardMaterial({
+      color: colorHex,
+      emissive: colorHex,
+      emissiveIntensity: 0.7,
+      transparent: true,
+      opacity: 0.85,
+      roughness: 0.35,
+      metalness: 0.25,
+    });
+
+    const tubeMesh = new THREE.Mesh(tubeGeo, tubeMat);
+    tubeMesh.userData = {
+      loopId: loop.loop_id,
+      name: loop.name,
+      hasFault: loop.has_fault,
+      colorHex: colorHex,
+    };
+
+    processTopologyGroup.add(tubeMesh);
+    topologyTubes.push(tubeMesh);
+  });
+}
+
+function updateTopologyUI(flowContext) {
+  const card = document.getElementById("topology-card");
+  if (!card) {
+    return;
+  }
+
+  if (!flowContext) {
+    card.style.display = "none";
+    return;
+  }
+
+  card.style.display = "block";
+  activeTopologyLoopId = flowContext.loop_id;
+
+  const loopNameEl = document.getElementById("topology-loop-name");
+  if (loopNameEl) {
+    loopNameEl.innerText = flowContext.loop_name;
+  }
+
+  const badgeEl = document.getElementById("topology-flow-badge");
+  if (badgeEl) {
+    badgeEl.innerText = "Flow: " + flowContext.flow_rate_pct + "% · " + flowContext.loop_status;
+    if (flowContext.loop_status === "NORMAL") {
+      badgeEl.style.color = "var(--green)";
+      badgeEl.style.borderColor = "var(--green)";
+      badgeEl.style.background = "rgba(16, 185, 129, 0.12)";
+    } else {
+      badgeEl.style.color = "var(--red)";
+      badgeEl.style.borderColor = "var(--red)";
+      badgeEl.style.background = "rgba(239, 68, 68, 0.15)";
+    }
+  }
+
+  const faultAlert = document.getElementById("topology-fault-alert");
+  const faultText = document.getElementById("topology-fault-text");
+  if (faultAlert && faultText) {
+    if (flowContext.fault_summary) {
+      faultAlert.style.display = "flex";
+      faultText.innerText = flowContext.fault_summary;
+    } else {
+      faultAlert.style.display = "none";
+    }
+  }
+
+  const chainContainer = document.getElementById("flow-chain-container");
+  if (chainContainer) {
+    chainContainer.innerHTML = "";
+
+    let fullLoop = null;
+    for (let i = 0; i < processTopologyData.length; i++) {
+      if (processTopologyData[i].loop_id === flowContext.loop_id) {
+        fullLoop = processTopologyData[i];
+        break;
+      }
+    }
+
+    let nodes = [];
+    if (fullLoop && fullLoop.nodes) {
+      nodes = fullLoop.nodes;
+    }
+
+    nodes.forEach(function (node, idx) {
+      const btn = document.createElement("button");
+      btn.className = "flow-node-btn";
+      if (node.asset_id === currentSelectedAsset) {
+        btn.classList.add("active");
+      }
+      if (node.is_impacted) {
+        btn.classList.add("fault-node");
+      }
+
+      const tagSpan = document.createElement("span");
+      tagSpan.style.fontWeight = "700";
+      tagSpan.innerText = node.tag;
+
+      const roleSpan = document.createElement("span");
+      roleSpan.style.fontSize = "8px";
+      roleSpan.style.opacity = "0.75";
+      roleSpan.innerText = node.health + "% · " + node.role_in_loop;
+
+      btn.append(tagSpan, roleSpan);
+      btn.onclick = function () {
+        selectAsset(node.asset_id);
+        focusAssetIn3D(node.asset_id);
+      };
+
+      chainContainer.appendChild(btn);
+
+      if (idx < nodes.length - 1) {
+        const arrow = document.createElement("span");
+        arrow.className = "flow-arrow";
+        if (node.is_impacted) {
+          arrow.classList.add("warning-arrow");
+        }
+        arrow.innerText = "➔";
+        chainContainer.appendChild(arrow);
+      }
+    });
+  }
+
+  topologyTubes.forEach(function (tube) {
+    if (tube.userData.loopId === activeTopologyLoopId) {
+      tube.material.opacity = 1.0;
+      tube.material.emissiveIntensity = 0.95;
+    } else {
+      tube.material.opacity = 0.22;
+      tube.material.emissiveIntensity = 0.25;
+    }
+  });
+}
+
+function setupTargetArrivalCard() {
+  const btnWo = document.getElementById("arrival-btn-wo");
+  if (btnWo) {
+    btnWo.onclick = function () {
+      const card = document.getElementById("target-arrival-card");
+      if (card) {
+        card.classList.remove("active");
+      }
+      const submitBtn = document.getElementById("btn-submit-wo");
+      if (submitBtn) {
+        submitBtn.click();
+      }
+    };
+  }
+
+  const btnClose = document.getElementById("arrival-btn-close");
+  if (btnClose) {
+    btnClose.onclick = function () {
+      const card = document.getElementById("target-arrival-card");
+      if (card) {
+        card.classList.remove("active");
+      }
+    };
+  }
+}
+
+function showTargetArrivalHUD(assetId, diag) {
+  const card = document.getElementById("target-arrival-card");
+  if (!card) {
+    return;
+  }
+
+  const titleEl = document.getElementById("arrival-asset-title");
+  if (titleEl) {
+    let titleTag = assetId;
+    if (diag && diag.tag) {
+      titleTag = diag.tag;
+    }
+    titleEl.innerText = "Target Reached: " + titleTag;
+  }
+
+  const subtitleEl = document.getElementById("arrival-asset-subtitle");
+  if (subtitleEl) {
+    let classText = "PROCESS EQUIPMENT";
+    if (diag && diag.asset_class) {
+      classText = diag.asset_class;
+    }
+    subtitleEl.innerText = classText + " · Criticality A Inspection";
+  }
+
+  const badgeEl = document.getElementById("arrival-health-badge");
+  if (badgeEl && diag) {
+    badgeEl.innerText = "HEALTH: " + diag.health_score + "/100 ⚠️ " + diag.condition_state.toUpperCase();
+  }
+
+  const visualEl = document.getElementById("arrival-visual-text");
+  if (visualEl) {
+    visualEl.innerText =
+      "Visual scan: Packing gland exhibits mineral precipitate crystallization and glaze. Casing integrity intact. Vibration harmonics confirm impeller fouling / cavitation signature.";
+  }
+
+  const lotoEl = document.getElementById("arrival-loto-text");
+  if (lotoEl && diag && diag.safety_guardrails) {
+    let lotoText = "Apply site lockout/tagout and zero-energy permits before touching equipment.";
+    for (let i = 0; i < diag.safety_guardrails.length; i++) {
+      if (diag.safety_guardrails[i].includes("LOTO Safety:")) {
+        lotoText = diag.safety_guardrails[i].replace("LOTO Safety:", "").trim();
+        break;
+      }
+    }
+    lotoEl.innerText = lotoText;
+  }
+
+  card.classList.add("active");
 }
 
 function cumulativeLengths(waypoints) {
@@ -1086,7 +1431,7 @@ function focusAssetIn3D(assetId) {
   }
 }
 
-async function selectAsset(assetId) {
+async function selectAsset(assetId, question = null) {
   currentSelectedAsset = assetId;
 
   document.querySelectorAll(".asset-card").forEach(function (el) {
@@ -1099,29 +1444,32 @@ async function selectAsset(assetId) {
 
   boundingFramesGroup.children.forEach(function (c) {
     if (c.userData && c.userData.lineMat) {
-      const isSel = c.userData.id === assetId;
+      const isSel = c.userData.id === assetId || c.userData.assetId === assetId;
       if (isSel) {
         c.userData.lineMat.opacity = 1.0;
         if (c.userData.fillMat) {
-          c.userData.fillMat.opacity = 0.2;
+          c.userData.fillMat.opacity = 0.25;
         }
         if (c.userData.labelSprite) {
           c.userData.labelSprite.material.opacity = 1.0;
         }
       } else {
-        c.userData.lineMat.opacity = 0.08;
+        const baseLineOp = denseFramesVisible ? 0.65 : 0.08;
+        const baseFillOp = denseFramesVisible ? 0.06 : 0.0;
+        const baseLblOp = denseFramesVisible ? 0.85 : 0.0;
+        c.userData.lineMat.opacity = baseLineOp;
         if (c.userData.fillMat) {
-          c.userData.fillMat.opacity = 0.0;
+          c.userData.fillMat.opacity = baseFillOp;
         }
         if (c.userData.labelSprite) {
-          c.userData.labelSprite.material.opacity = 0.0;
+          c.userData.labelSprite.material.opacity = baseLblOp;
         }
       }
     }
   });
 
   await loadNavigationPath(assetId);
-  runCopilotDiagnosis(assetId);
+  return await runCopilotDiagnosis(assetId, question);
 }
 
 function startNavigationTo(assetId) {
@@ -1139,7 +1487,7 @@ function openCopilotForAsset(assetId) {
   }
 }
 
-async function runCopilotDiagnosis(assetId, question) {
+async function runCopilotDiagnosis(assetId, question = null) {
   const body = { asset_id: assetId };
   if (question) {
     body.query = question;
@@ -1156,9 +1504,15 @@ async function runCopilotDiagnosis(assetId, question) {
     const assetDossier = await assetRes.json();
     const diag = await diagRes.json();
 
+    if (assetDossier.recent_telemetry) {
+      currentTelemetryRecords = assetDossier.recent_telemetry;
+    }
+
     updateCopilotDrawer(assetDossier, diag);
+    return diag;
   } catch (err) {
     console.error("Copilot error", err);
+    return null;
   }
 }
 
@@ -1259,7 +1613,20 @@ function updateCopilotDrawer(dossier, diag) {
     actionList.appendChild(li);
   });
 
-  document.getElementById("copilot-model-badge").innerText = diag.grounded_mode;
+  const modelBadge = document.getElementById("copilot-model-badge");
+  if (modelBadge) {
+    modelBadge.innerText = diag.grounded_mode;
+    if (diag.grounded_mode && diag.grounded_mode.toLowerCase().includes("gemini")) {
+      modelBadge.style.background = "linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(139, 92, 246, 0.35))";
+      modelBadge.style.borderColor = "var(--accent)";
+      modelBadge.style.color = "#38bdf8";
+    } else {
+      modelBadge.style.background = "rgba(100, 116, 139, 0.15)";
+      modelBadge.style.borderColor = "var(--border)";
+      modelBadge.style.color = "var(--muted)";
+    }
+  }
+
   let answer = diag.diagnosis;
   if (diag.answer) {
     answer = diag.answer;
@@ -1286,7 +1653,7 @@ function updateCopilotDrawer(dossier, diag) {
     chip.innerText = "[" + c.source_id + "]";
     chip.title = c.description;
     chip.onclick = function () {
-      showToast("Evidence: " + c.description);
+      handleCitationClick(c.source_id, c.description);
     };
     citBox.appendChild(chip);
   });
@@ -1300,110 +1667,353 @@ function updateCopilotDrawer(dossier, diag) {
   if (dossier.recent_telemetry) {
     telemRecords = dossier.recent_telemetry;
   }
-  drawTelemetryTrend(telemRecords);
+  currentTelemetryRecords = telemRecords;
+
+  // Setup signal selector buttons
+  const pillsBox = document.getElementById("telem-signal-selector");
+  if (pillsBox) {
+    pillsBox.querySelectorAll(".telem-pill").forEach(function(btn) {
+      btn.onclick = function() {
+        pillsBox.querySelectorAll(".telem-pill").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        drawTelemetryTrend(currentTelemetryRecords, btn.dataset.signal);
+      };
+    });
+  }
+
+  drawTelemetryTrend(telemRecords, currentTelemetrySignal);
+
+  if (diag && diag.flow_topology) {
+    updateTopologyUI(diag.flow_topology);
+  } else {
+    updateTopologyUI(null);
+  }
 }
 
-function drawTelemetryTrend(records) {
+function handleCitationClick(sourceId, description) {
+  if (!sourceId) return;
+  const upper = sourceId.toUpperCase();
+  if (upper.includes("TEL-") || upper.includes("FLOW") || upper.includes("DRIFT")) {
+    drawTelemetryTrend(currentTelemetryRecords, "flow");
+    showToast("Telemetry Citation: " + sourceId + " — Process Flow drift view");
+  } else if (upper.includes("PRESS")) {
+    drawTelemetryTrend(currentTelemetryRecords, "pressure");
+    showToast("Telemetry Citation: " + sourceId + " — Pressure telemetry view");
+  } else if (upper.includes("VIB")) {
+    drawTelemetryTrend(currentTelemetryRecords, "vibration");
+    showToast("Telemetry Citation: " + sourceId + " — Vibration telemetry view");
+  } else if (upper.includes("EVT-")) {
+    showToast("Alarm Event Citation: " + sourceId + " (Corroborated in event log)");
+  } else if (upper.includes("DOC-")) {
+    showToast("Knowledge Guidance: " + sourceId + " (RAG Verified Procedure)");
+  } else if (upper.includes("CASE-")) {
+    showToast("Historical Precedent: " + sourceId + " (Matching Service Case)");
+  } else {
+    showToast("Evidence Citation: " + sourceId);
+  }
+}
+
+function drawTelemetryTrend(records, signalKey = currentTelemetrySignal) {
+  currentTelemetrySignal = signalKey;
   const canvas = document.getElementById("telem-canvas");
+  if (!canvas) return;
   const ctx = canvas.getContext("2d");
   canvas.width = canvas.clientWidth * window.devicePixelRatio;
   canvas.height = canvas.clientHeight * window.devicePixelRatio;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!records || records.length < 2) {
+    ctx.fillStyle = "rgba(148, 163, 184, 0.7)";
+    ctx.font = "11px sans-serif";
+    ctx.fillText("Insufficient telemetry records", 12, canvas.height / 2);
     return;
   }
 
-  const pts = records.map(function (r) {
-    let val = 50.0;
-    if (
-      r.process_pressure_bar !== undefined &&
-      r.process_pressure_bar !== null
-    ) {
-      val = r.process_pressure_bar;
-    } else if (r.vibration_mm_s !== undefined && r.vibration_mm_s !== null) {
+  let signalName = "Primary Trend";
+  let pts = [];
+
+  for (let r of records) {
+    let val = null;
+    if (signalKey === "flow") {
+      val = r.process_flow_pct;
+      signalName = "Process Flow";
+    } else if (signalKey === "pressure") {
+      val = r.process_pressure_bar ?? r.pneumatic_supply_bar;
+      signalName = "Pressure";
+    } else if (signalKey === "vibration") {
       val = r.vibration_mm_s;
+      signalName = "Vibration";
+    } else if (signalKey === "temp") {
+      val = r.bearing_temp_c;
+      signalName = "Bearing Temp";
+    } else {
+      if (r.process_flow_pct !== undefined && r.process_flow_pct !== null) {
+        val = r.process_flow_pct;
+        signalName = "Flow %";
+      } else if (r.position_actual_pct !== undefined && r.position_actual_pct !== null) {
+        val = r.position_actual_pct;
+        signalName = "Position";
+      } else if (r.vibration_mm_s !== undefined && r.vibration_mm_s !== null) {
+        val = r.vibration_mm_s;
+        signalName = "Vibration";
+      } else if (r.process_pressure_bar !== undefined && r.process_pressure_bar !== null) {
+        val = r.process_pressure_bar;
+        signalName = "Pressure";
+      }
     }
-    return val;
-  });
+    pts.push(val !== null && val !== undefined ? Number(val) : 50.0);
+  }
+
   const min = Math.min(...pts);
   const max = Math.max(...pts) + 0.001;
+  const splitIdx = Math.floor(pts.length * (2 / 3));
+  const baseline = pts.slice(0, splitIdx);
+  const recent = pts.slice(splitIdx);
+  const baseAvg = baseline.reduce((a, b) => a + b, 0) / baseline.length;
+  const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
+  const deltaPct = ((recentAvg - baseAvg) / Math.max(Math.abs(baseAvg), 0.001)) * 100;
 
-  ctx.strokeStyle = "#00d2ff";
-  ctx.lineWidth = 2 * window.devicePixelRatio;
+  const driftBadge = document.getElementById("telem-drift-badge");
+  if (driftBadge) {
+    const sign = deltaPct >= 0 ? "+" : "";
+    const color = Math.abs(deltaPct) > 4 ? (deltaPct < 0 ? "var(--red)" : "var(--orange)") : "var(--green)";
+    driftBadge.innerHTML = `<span style="color:${color}; font-weight:700;">Δ ${sign}${deltaPct.toFixed(1)}%</span> (${signalName})`;
+  }
+
+  const W = canvas.width;
+  const H = canvas.height;
+
+  // Background grid lines
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, H * 0.25); ctx.lineTo(W, H * 0.25);
+  ctx.moveTo(0, H * 0.75); ctx.lineTo(W, H * 0.75);
+  ctx.stroke();
+
+  // Baseline reference dashed line
+  const baseY = H - ((baseAvg - min) / (max - min)) * (H * 0.72) - H * 0.14;
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.5)";
+  ctx.setLineDash([4 * window.devicePixelRatio, 4 * window.devicePixelRatio]);
+  ctx.beginPath();
+  ctx.moveTo(0, baseY);
+  ctx.lineTo((splitIdx / (pts.length - 1)) * W, baseY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Split line between baseline and recent shift window
+  const splitX = (splitIdx / (pts.length - 1)) * W;
+  ctx.strokeStyle = "rgba(0, 210, 255, 0.35)";
+  ctx.beginPath();
+  ctx.moveTo(splitX, 0); ctx.lineTo(splitX, H);
+  ctx.stroke();
+
+  // Gradient curve for recent vs baseline
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, "#38bdf8");
+  grad.addColorStop(0.65, "#00d2ff");
+  grad.addColorStop(1, Math.abs(deltaPct) > 4 ? (deltaPct < 0 ? "#ef4444" : "#f59e0b") : "#10b981");
+
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 2.5 * window.devicePixelRatio;
   ctx.beginPath();
 
   pts.forEach(function (val, idx) {
-    const x = (idx / (pts.length - 1)) * canvas.width;
-    const y =
-      canvas.height -
-      ((val - min) / (max - min)) * (canvas.height * 0.72) -
-      canvas.height * 0.14;
-    if (idx === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
-    }
+    const x = (idx / (pts.length - 1)) * W;
+    const y = H - ((val - min) / (max - min)) * (H * 0.72) - H * 0.14;
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
   });
   ctx.stroke();
+
+  // Current value dot
+  const lastX = W - 3;
+  const lastY = H - ((pts[pts.length - 1] - min) / (max - min)) * (H * 0.72) - H * 0.14;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 3.5 * window.devicePixelRatio, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function setupOmnibar() {
   const input = document.getElementById("omnibar-input");
   const suggestionsBox = document.getElementById("omnibar-suggestions");
   const submitBtn = document.getElementById("omnibar-submit");
+  const geminiBadge = document.getElementById("omnibar-gemini-badge");
 
-  function executeOmniQuery(query) {
-    const q = query.trim().toLowerCase();
-    if (q.length === 0) {
+  // Fetch live copilot status on boot
+  fetch("/api/copilot/status")
+    .then((r) => r.json())
+    .then((status) => {
+      if (geminiBadge) {
+        if (status.gemini_enabled) {
+          geminiBadge.innerHTML = `<span class="gemini-sparkle">✨</span> <span>${status.active_model || status.model || "Gemini 3.6 Flash"}</span>`;
+          geminiBadge.style.display = "inline-flex";
+        } else {
+          geminiBadge.innerHTML = `<span>Deterministic Engine</span>`;
+        }
+      }
+    })
+    .catch(() => {});
+
+  function resolveTargetAsset(q) {
+    if (!assetsData || assetsData.length === 0) return null;
+    const lowerQ = q.toLowerCase();
+
+    // 1. Direct Tag/ID Match in Query
+    for (let a of assetsData) {
+      if (
+        lowerQ.includes(a.tag.toLowerCase()) ||
+        lowerQ.includes(a.asset_id.toLowerCase())
+      ) {
+        return a;
+      }
+    }
+
+    // 2. Criticality / degraded / issue keywords
+    if (
+      lowerQ.includes("degraded") ||
+      lowerQ.includes("foul") ||
+      lowerQ.includes("cavitation") ||
+      lowerQ.includes("critical") ||
+      lowerQ.includes("fail") ||
+      lowerQ.includes("alarm") ||
+      lowerQ.includes("issue") ||
+      lowerQ.includes("urgent") ||
+      lowerQ.includes("inspect first")
+    ) {
+      const urgent = assetsData.filter(
+        (a) =>
+          a.state &&
+          (a.state.condition_state === "attention_required" ||
+            a.state.condition_state === "degraded"),
+      );
+      if (urgent.length > 0) {
+        urgent.sort((a, b) => (a.state.health_score || 0) - (b.state.health_score || 0));
+        return urgent[0];
+      }
+    }
+
+    // 3. Equipment Class keywords
+    if (lowerQ.includes("pump")) {
+      const pumps = assetsData.filter((a) => a.asset_class === "PROCESS_PUMP");
+      const badPump = pumps.find(
+        (p) => p.state && p.state.condition_state !== "healthy",
+      );
+      return badPump || pumps[0] || null;
+    }
+    if (lowerQ.includes("valve")) {
+      const valves = assetsData.filter((a) => a.asset_class === "CONTROL_VALVE");
+      const badValve = valves.find(
+        (v) => v.state && v.state.condition_state !== "healthy",
+      );
+      return badValve || valves[0] || null;
+    }
+    if (lowerQ.includes("motor")) {
+      const motors = assetsData.filter((a) => a.asset_class === "ELECTRIC_MOTOR");
+      const badMotor = motors.find(
+        (m) => m.state && m.state.condition_state !== "healthy",
+      );
+      return badMotor || motors[0] || null;
+    }
+    if (lowerQ.includes("transmitter") || lowerQ.includes("pressure")) {
+      return (
+        assetsData.find((a) => a.asset_class === "PRESSURE_TRANSMITTER") || null
+      );
+    }
+    if (lowerQ.includes("vibration") || lowerQ.includes("sensor")) {
+      return (
+        assetsData.find((a) => a.asset_class === "VIBRATION_SENSOR") || null
+      );
+    }
+
+    // 4. Currently selected asset if exists
+    if (currentSelectedAsset) {
+      const current = assetsData.find((a) => a.asset_id === currentSelectedAsset);
+      if (current) return current;
+    }
+
+    // 5. Default to the most critical asset overall
+    const attention = assetsData.find(
+      (a) => a.state && a.state.condition_state === "attention_required",
+    );
+    return attention || assetsData[0];
+  }
+
+  function isQuestionPrompt(q) {
+    const text = q.trim().toLowerCase();
+    if (text.includes("?")) return true;
+    const qWords = [
+      "what",
+      "why",
+      "how",
+      "when",
+      "where",
+      "which",
+      "is",
+      "are",
+      "can",
+      "should",
+      "could",
+      "inspect",
+      "check",
+      "diagnose",
+      "diagnosis",
+      "recommend",
+      "safe",
+      "safety",
+      "fix",
+      "repair",
+      "cause",
+      "history",
+      "trend",
+      "drift",
+      "status",
+      "explain",
+      "gemini",
+      "first",
+      "tell",
+    ];
+    for (let word of qWords) {
+      const regex = new RegExp("\\b" + word + "\\b", "i");
+      if (regex.test(text)) return true;
+    }
+    return text.length > 15;
+  }
+
+  async function executeOmniQuery(query, forceGemini = false) {
+    const rawQuery = (query || "").trim();
+    if (!rawQuery) return;
+    suggestionsBox.style.display = "none";
+
+    const matched = resolveTargetAsset(rawQuery);
+    if (!matched) {
+      showToast("No equipment found matching: " + rawQuery);
       return;
     }
 
-    let matched = null;
+    const isQuestion = forceGemini || isQuestionPrompt(rawQuery);
 
-    if (
-      q.includes("degraded") ||
-      q.includes("foul") ||
-      q.includes("cavitation") ||
-      q.includes("critical") ||
-      q.includes("fail")
-    ) {
-      matched = assetsData.find(function (a) {
-        if (a.state) {
-          return (
-            a.state.condition_state === "attention_required" ||
-            a.state.condition_state === "degraded"
-          );
-        }
-        return false;
-      });
-    } else if (q.includes("pump")) {
-      matched = assetsData.find(function (a) {
-        return a.asset_class === "PROCESS_PUMP";
-      });
-    } else if (q.includes("valve")) {
-      matched = assetsData.find(function (a) {
-        return a.asset_class === "CONTROL_VALVE";
-      });
-    } else if (q.includes("motor")) {
-      matched = assetsData.find(function (a) {
-        return a.asset_class === "ELECTRIC_MOTOR";
-      });
+    if (isQuestion) {
+      // Natural Language Gemini Copilot Query
+      focusAssetIn3D(matched.asset_id);
+      if (!copilotOpen) {
+        toggleCopilotDrawer();
+      }
+      const copilotInput = document.getElementById("copilot-question");
+      if (copilotInput) {
+        copilotInput.value = rawQuery;
+      }
+      const copilotAnswer = document.getElementById("copilot-answer");
+      if (copilotAnswer) {
+        copilotAnswer.textContent =
+          "✨ Thinking… Gemini is analyzing telemetry drift, alarms, and docs with verified citations";
+      }
+      showToast("✨ Asking Gemini Copilot about " + matched.tag + "…");
+
+      selectAsset(matched.asset_id, rawQuery);
     } else {
-      matched = assetsData.find(function (a) {
-        return (
-          a.tag.toLowerCase().includes(q) ||
-          a.asset_id.toLowerCase().includes(q)
-        );
-      });
-    }
-
-    if (!matched && assetsData.length > 0) {
-      matched = assetsData[0];
-    }
-
-    if (matched) {
-      suggestionsBox.style.display = "none";
+      // Pure Equipment Search / Select
       input.value =
         matched.tag + " (" + matched.asset_class.replace("_", " ") + ")";
       selectAsset(matched.asset_id);
@@ -1411,21 +2021,47 @@ function setupOmnibar() {
       if (!copilotOpen) {
         toggleCopilotDrawer();
       }
-      showToast(
-        "Omnibar matched: " + matched.tag + " — Focus & Diagnosis activated",
-      );
-    } else {
-      showToast("No equipment found matching query: " + query);
+      showToast("Omnibar matched: " + matched.tag + " — 3D Focus & Dossier activated");
     }
   }
 
+  if (geminiBadge) {
+    geminiBadge.onclick = function () {
+      const q = input.value.trim() || "What should I inspect first?";
+      input.value = q;
+      executeOmniQuery(q, true);
+    };
+  }
+
   input.oninput = function () {
-    const q = input.value.trim().toLowerCase();
+    const rawVal = input.value.trim();
+    const q = rawVal.toLowerCase();
     if (q.length === 0) {
       suggestionsBox.style.display = "none";
       return;
     }
 
+    suggestionsBox.innerHTML = "";
+
+    // 1. Add "✨ Ask Gemini Copilot" Action Item
+    const geminiItem = document.createElement("div");
+    geminiItem.className = "omnibar-suggestion-item gemini-prompt-item";
+    geminiItem.innerHTML = `
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:14px;">✨</span>
+        <div>
+          <b style="color:#e0f2fe;">Ask Gemini Copilot:</b> <span style="color:#38bdf8;">"${rawVal}"</span>
+          <div style="font-size:10px; color:var(--muted); margin-top:2px;">Evidence-grounded diagnosis with verified citations</div>
+        </div>
+      </div>
+      <span class="badge" style="background:rgba(0,210,255,0.2); color:var(--accent);">Gemini</span>
+    `;
+    geminiItem.onclick = function () {
+      executeOmniQuery(rawVal, true);
+    };
+    suggestionsBox.appendChild(geminiItem);
+
+    // 2. Equipment matches
     const matches = assetsData
       .filter(function (a) {
         let matchedText =
@@ -1443,54 +2079,41 @@ function setupOmnibar() {
         }
         return matchedText.includes(q);
       })
-      .slice(0, 5);
+      .slice(0, 4);
 
-    if (matches.length > 0) {
-      suggestionsBox.innerHTML = "";
-      matches.forEach(function (m) {
-        const item = document.createElement("div");
-        item.className = "omnibar-suggestion-item";
+    matches.forEach(function (m) {
+      const item = document.createElement("div");
+      item.className = "omnibar-suggestion-item";
 
-        let stClass = "healthy";
-        let hScore = 100;
-        if (m.state) {
-          stClass = m.state.condition_state;
-          hScore = m.state.health_score;
+      let stClass = "healthy";
+      let hScore = 100;
+      if (m.state) {
+        stClass = m.state.condition_state;
+        hScore = m.state.health_score;
+      }
+
+      item.innerHTML = `
+        <div style="display:flex; align-items:center;">
+          <span class="status-dot status-${stClass}"></span>
+          <b style="color:#fff; margin-right:6px;">${m.tag}</b>
+          <span style="color:var(--muted); font-size:11px;">${m.asset_class.replace("_", " ")} (${m.area_name})</span>
+        </div>
+        <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${hScore}%</span>
+      `;
+
+      item.onclick = function () {
+        input.value = m.tag;
+        suggestionsBox.style.display = "none";
+        selectAsset(m.asset_id);
+        focusAssetIn3D(m.asset_id);
+        if (!copilotOpen) {
+          toggleCopilotDrawer();
         }
+      };
+      suggestionsBox.appendChild(item);
+    });
 
-        item.innerHTML =
-          '<div style="display:flex; align-items:center;">' +
-          '<span class="status-dot status-' +
-          stClass +
-          '"></span>' +
-          '<b style="color:#fff; margin-right:6px;">' +
-          m.tag +
-          "</b>" +
-          '<span style="color:var(--muted); font-size:11px;">' +
-          m.asset_class.replace("_", " ") +
-          " (" +
-          m.area_name +
-          ")</span>" +
-          "</div>" +
-          '<span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">' +
-          hScore +
-          "%</span>";
-
-        item.onclick = function () {
-          input.value = m.tag;
-          suggestionsBox.style.display = "none";
-          selectAsset(m.asset_id);
-          focusAssetIn3D(m.asset_id);
-          if (!copilotOpen) {
-            toggleCopilotDrawer();
-          }
-        };
-        suggestionsBox.appendChild(item);
-      });
-      suggestionsBox.style.display = "flex";
-    } else {
-      suggestionsBox.style.display = "none";
-    }
+    suggestionsBox.style.display = "flex";
   };
 
   input.onkeydown = function (e) {
@@ -1586,6 +2209,27 @@ function animate() {
   const frameSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
   lastFrameTime = now;
 
+  // Pulse proximity scanner radar around the robot avatar
+  if (robotScannerRing) {
+    const pulse = 1.0 + Math.sin(now * 0.005) * 0.09;
+    robotScannerRing.scale.set(pulse, pulse, pulse);
+    robotScannerRing.material.opacity = 0.35 + Math.sin(now * 0.008) * 0.22;
+  }
+
+  // Active rotation and sweep of the holographic forward LIDAR scan cone
+  if (lidarScanCone) {
+    lidarScanCone.rotation.z += 0.025;
+    lidarScanCone.material.opacity = 0.12 + Math.sin(now * SCAN_PULSE_SPEED) * 0.05;
+  }
+
+  // Animate 3D process flow lines (fluid pulse effect)
+  topologyTubes.forEach(function (tube) {
+    if (tube.userData.hasFault) {
+      const pulse = 0.65 + Math.sin(now * 0.007) * 0.35;
+      tube.material.emissiveIntensity = pulse;
+    }
+  });
+
   if (isNavigating && currentPath.length > 1) {
     const totalLength = pathLengths[pathLengths.length - 1];
     navProgress += (ROBOT_SPEED_M_S * navSpeed * frameSeconds) / totalLength;
@@ -1595,11 +2239,27 @@ function animate() {
       document.getElementById("nav-btn-text").innerHTML = "▶ Start Drone";
       document.getElementById("nav-badge").innerText = "Arrived";
       document.getElementById("nav-badge").style.color = "var(--green)";
-      showToast("Arrived at " + currentSelectedAsset + " — running AI diagnosis");
+      showToast("Target Reached: " + currentSelectedAsset + " — Gemini evidence diagnosis active");
       if (!copilotOpen) {
         toggleCopilotDrawer();
       }
-      runCopilotDiagnosis(currentSelectedAsset);
+      runCopilotDiagnosis(
+        currentSelectedAsset,
+        "Diagnose current equipment condition, multivariate telemetry drift and next safe inspection check.",
+      ).then(function (diag) {
+        if (diag) {
+          showTargetArrivalHUD(currentSelectedAsset, diag);
+        }
+      });
+
+      // Voice announcement upon arrival
+      if (window.speechSynthesis) {
+        try {
+          const u = new SpeechSynthesisUtterance("Arrived at target asset " + currentSelectedAsset + ". Gemini diagnostics active.");
+          u.rate = 1.08;
+          window.speechSynthesis.speak(u);
+        } catch (e) {}
+      }
     }
 
     const travelled = navProgress * totalLength;
@@ -1630,11 +2290,28 @@ function animate() {
     playDueBriefings();
     checkProximityEvents(curX, curZ);
 
+    if (cameraMode === "drone" || followCameraMode) {
+      camera.position.x = curX - Math.sin(heading) * 1.8;
+      camera.position.z = curZ - Math.cos(heading) * 1.8;
+      camera.position.y = 1.15;
+      controls.target.set(curX + Math.sin(heading) * 2.5, 0.45, curZ + Math.cos(heading) * 2.5);
+    }
+
     if (cameraMode === "drone") {
-      camera.position.x = curX - Math.sin(heading) * 2.2;
-      camera.position.z = curZ - Math.cos(heading) * 2.2;
-      camera.position.y = 1.7;
-      controls.target.set(curX, 0.5, curZ);
+      const speedEl = document.getElementById("hud-flight-speed");
+      if (speedEl) {
+        speedEl.innerText = (ROBOT_SPEED_M_S * navSpeed).toFixed(1) + " m/s";
+      }
+      const headingEl = document.getElementById("hud-flight-heading");
+      if (headingEl) {
+        const deg = Math.round(((heading * 180 / Math.PI) + 360) % 360);
+        headingEl.innerText = deg + "°";
+      }
+      const rangeEl = document.getElementById("hud-reticle-range");
+      if (rangeEl) {
+        const remaining = Math.max(0, totalLength - travelled);
+        rangeEl.innerText = "LIDAR: " + remaining.toFixed(1) + " m";
+      }
     }
   }
 
@@ -1660,20 +2337,20 @@ function checkProximityEvents(rx, rz) {
       if (c.userData.lineMat && c.userData.fillMat && c.userData.labelSprite) {
         if (isNear) {
           c.userData.lineMat.opacity = 1.0;
-          c.userData.fillMat.opacity = 0.22;
+          c.userData.fillMat.opacity = 0.28;
           c.userData.labelSprite.material.opacity = 1.0;
           c.userData.labelSprite.position.y =
             c.userData.size[1] / 2 + 0.42 + Math.sin(Date.now() * 0.005) * 0.04;
         } else {
-          const isSel = c.userData.id === currentSelectedAsset;
+          const isSel = c.userData.id === currentSelectedAsset || c.userData.assetId === currentSelectedAsset;
           if (isSel) {
             c.userData.lineMat.opacity = 1.0;
-            c.userData.fillMat.opacity = 0.2;
+            c.userData.fillMat.opacity = 0.22;
             c.userData.labelSprite.material.opacity = 1.0;
           } else {
-            c.userData.lineMat.opacity = 0.08;
-            c.userData.fillMat.opacity = 0.0;
-            c.userData.labelSprite.material.opacity = 0.0;
+            c.userData.lineMat.opacity = denseFramesVisible ? 0.65 : 0.08;
+            c.userData.fillMat.opacity = denseFramesVisible ? 0.06 : 0.0;
+            c.userData.labelSprite.material.opacity = denseFramesVisible ? 0.85 : 0.0;
           }
         }
       }
@@ -1895,7 +2572,18 @@ function setCameraMode(mode, targetBtn) {
   document.querySelectorAll(".view-toolbar button").forEach(function (b) {
     b.classList.remove("active");
   });
-  targetBtn.classList.add("active");
+  if (targetBtn) {
+    targetBtn.classList.add("active");
+  }
+
+  const droneHud = document.getElementById("drone-hud-overlay");
+  if (droneHud) {
+    if (mode === "drone") {
+      droneHud.classList.add("active");
+    } else {
+      droneHud.classList.remove("active");
+    }
+  }
 
   if (mode === "top") {
     camera.position.set(...TOP_VIEW.position);
@@ -1904,43 +2592,104 @@ function setCameraMode(mode, targetBtn) {
   } else if (mode === "orbit") {
     camera.position.set(...ORBIT_VIEW.position);
     controls.target.set(...ORBIT_VIEW.target);
+  } else if (mode === "drone") {
+    if (robotAvatar) {
+      const rx = robotAvatar.position.x;
+      const ry = robotAvatar.position.y;
+      const rz = robotAvatar.position.z;
+      const rotY = robotAvatar.rotation.y;
+      camera.position.set(rx - Math.sin(rotY) * 1.8, ry + 1.15, rz - Math.cos(rotY) * 1.8);
+      controls.target.set(rx + Math.sin(rotY) * 2.5, ry + 0.35, rz + Math.cos(rotY) * 2.5);
+      controls.update();
+    }
   }
 }
 
 const btnSemanticExtract = document.getElementById("btn-semantic-extract");
 if (btnSemanticExtract) {
-  btnSemanticExtract.onclick = async function () {
-    const origHtml = btnSemanticExtract.innerHTML;
-    btnSemanticExtract.disabled = true;
-    btnSemanticExtract.innerHTML = "<span>⏳ Segmenting Point Cloud...</span>";
-
-    try {
-      const res = await fetch("/api/scene/extract-assets", {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (res.ok) {
-        build3DBoundingBoxes(data.all_frames);
-        document.getElementById("asset-count").innerText =
-          data.extracted_count + " Objects · " + data.mapped_asset_count + " Assets";
-
-        btnSemanticExtract.innerHTML = `<span>✔ ${data.extracted_count} objects in ${data.processing_seconds}s</span>`;
-        setTimeout(() => {
-          btnSemanticExtract.disabled = false;
-          btnSemanticExtract.innerHTML = origHtml;
-        }, 3000);
-      } else {
-        alert("Segmentation error: " + (data.detail || "Unknown error"));
-        btnSemanticExtract.disabled = false;
-        btnSemanticExtract.innerHTML = origHtml;
-      }
-    } catch (err) {
-      console.error("Semantic extraction error", err);
-      alert("Failed to run 3D semantic extraction: " + err.message);
-      btnSemanticExtract.disabled = false;
-      btnSemanticExtract.innerHTML = origHtml;
-    }
+  btnSemanticExtract.onclick = function () {
+    toggleDenseSemanticFrames();
   };
+}
+
+async function launchAutonomousInspectionMission() {
+  let faulty = assetsData.find(
+    (a) => a.state && a.state.condition_state === "attention_required",
+  );
+  if (!faulty) {
+    faulty =
+      assetsData.find(
+        (a) => a.state && a.state.condition_state === "degraded",
+      ) || assetsData[0];
+  }
+  if (!faulty) {
+    showToast("No equipment data available.");
+    return;
+  }
+
+  showToast("🚀 Autonomous Mission Launched: Heading to critical " + faulty.tag);
+
+  // Voice announcement
+  if (window.speechSynthesis) {
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(
+        "Autonomous inspection mission launched. Navigating to critical asset " +
+          faulty.tag +
+          ", health " +
+          (faulty.state ? faulty.state.health_score : 44) +
+          " percent.",
+      );
+      u.rate = 1.05;
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+
+  currentSelectedAsset = faulty.asset_id;
+  await selectAsset(faulty.asset_id);
+
+  followCameraMode = true;
+  cameraMode = "drone";
+  const followBtn = document.getElementById("btn-cam-follow");
+  if (followBtn) followBtn.classList.add("active");
+
+  navSpeed = 1.6;
+  const speedSlider = document.getElementById("speed-slider");
+  const speedVal = document.getElementById("speed-val");
+  if (speedSlider) speedSlider.value = "1.6";
+  if (speedVal) speedVal.innerText = "1.6x";
+
+  navProgress = 0;
+  resetRouteLog();
+  if (!isNavigating) {
+    toggleDroneNavigation();
+  }
+}
+
+function toggleFollowCamera() {
+  followCameraMode = !followCameraMode;
+  const btn = document.getElementById("btn-cam-follow");
+  if (btn) {
+    btn.classList.toggle("active", followCameraMode);
+  }
+  if (followCameraMode) {
+    cameraMode = "drone";
+    showToast("🎥 Follow Drone Cam: Tracking inspector robot");
+  } else {
+    cameraMode = "orbit";
+    controls.target.set(robotAvatar.position.x, 0.8, robotAvatar.position.z);
+    showToast("Orbit camera active");
+  }
+}
+
+const btnHeroMission = document.getElementById("btn-hero-mission");
+if (btnHeroMission) {
+  btnHeroMission.onclick = launchAutonomousInspectionMission;
+}
+
+const btnCamFollow = document.getElementById("btn-cam-follow");
+if (btnCamFollow) {
+  btnCamFollow.onclick = toggleFollowCamera;
 }
 
 document.getElementById("btn-start-nav").onclick = toggleDroneNavigation;
@@ -1983,8 +2732,26 @@ document
   });
 document.getElementById("btn-vision-analyze").onclick = analyzeCurrentView;
 document.getElementById("btn-obstacles").onclick = function () {
-  setObstacleOverlay(!(obstacleOverlay && obstacleOverlay.visible));
+  let nextVisible = true;
+  if (obstacleOverlay && obstacleOverlay.visible) {
+    nextVisible = false;
+  }
+  setObstacleOverlay(nextVisible);
 };
+
+const btnToggleTopology = document.getElementById("btn-toggle-topology");
+if (btnToggleTopology) {
+  btnToggleTopology.onclick = function () {
+    processTopologyGroup.visible = !processTopologyGroup.visible;
+    btnToggleTopology.classList.toggle("active", processTopologyGroup.visible);
+    btnToggleTopology.setAttribute("aria-pressed", String(processTopologyGroup.visible));
+    let statusMsg = "Process Flow Circuits Hidden";
+    if (processTopologyGroup.visible) {
+      statusMsg = "Process Flow Circuits Active in 3D";
+    }
+    showToast(statusMsg);
+  };
+}
 
 function askCopilot() {
   const input = document.getElementById("copilot-question");

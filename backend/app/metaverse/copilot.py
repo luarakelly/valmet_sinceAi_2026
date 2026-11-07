@@ -23,6 +23,7 @@ logger = logging.getLogger("ask_your_factory.copilot")
 
 DETERMINISTIC_MODE = "deterministic-evidence-engine"
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
+FALLBACK_GEMINI_MODELS = ["gemini-3.5-flash", "gemini-3.8-flash"]
 MAX_LLM_ATTEMPTS = 2  # first try plus one retry that names the rejected IDs
 MAX_NARRATION_WORDS = 24
 
@@ -152,6 +153,7 @@ class FieldServiceCopilot:
     def __init__(self) -> None:
         self.api_key = os.getenv("GEMINI_API_KEY")
         self.model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+        self._last_active_model = self.model
         self._client = None
         self._narrations: Dict[str, str] = {}
 
@@ -167,6 +169,7 @@ class FieldServiceCopilot:
         dq_issues: List[Dict[str, Any]],
         mapping_confidence: Optional[float] = None,
         question: Optional[str] = None,
+        flow_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         tag = asset.get("tag", "UNKNOWN")
         issue_code = state.get("issue_code", "NORMAL")
@@ -214,6 +217,22 @@ class FieldServiceCopilot:
         confidence = self._confidence(state, dq_issues, mapping_confidence)
         recommended = self._recommended_actions(tag, state, matching_cases)
         safety = self._safety_checks(docs, mapping_confidence)
+
+        if flow_context is not None:
+            loop_id = flow_context.get("loop_id", "LOOP-MAIN")
+            loop_name = flow_context.get("loop_name", "Process Circuit")
+            loop_status = flow_context.get("loop_status", "NORMAL")
+            flow_pct = flow_context.get("flow_rate_pct", 100.0)
+            topo_text = f"Process circuit: {loop_name} (Status: {loop_status}, flow rate: {flow_pct}%)"
+            evidence.append(f"{topo_text} [{loop_id}]")
+            cite("process_topology", loop_id, topo_text, 0.95)
+
+            loto = flow_context.get("safety_loto")
+            if loto is not None:
+                instructions = loto.get("isolation_instructions")
+                if instructions:
+                    safety.append(f"LOTO Safety: {instructions}")
+
         diagnosis = self._diagnosis(asset, state, evidence, dq_issues, confidence)
 
         result = {
@@ -237,6 +256,7 @@ class FieldServiceCopilot:
             "model_confidence": confidence,
             "work_order_draft_ready": state.get("condition_state") in ("watch", "degraded", "attention_required"),
             "grounded_mode": DETERMINISTIC_MODE,
+            "flow_topology": flow_context,
         }
         result["answer"] = _answer_for_intent(classify_intent(question), result)
         if self.api_key:
@@ -305,7 +325,7 @@ class FieldServiceCopilot:
                 return
             problem = self._citation_problem(payload, allowed)
             if problem is None:
-                self._accept_llm(result, payload)
+                self._accept_llm(result, payload, getattr(self, "_last_active_model", self.model))
                 return
             logger.warning("Gemini answer rejected: %s", problem)
             prompt += f"\nYour previous answer was rejected: {problem}. Cite only allowed source IDs."
@@ -323,30 +343,39 @@ class FieldServiceCopilot:
             return f"unknown source IDs {sorted(unknown)}"
         return None
 
-    def _accept_llm(self, result: Dict[str, Any], payload: Dict[str, Any]) -> None:
+    def _accept_llm(self, result: Dict[str, Any], payload: Dict[str, Any], model_used: Optional[str] = None) -> None:
         result["answer"] = payload["answer"]
         actions = payload.get("recommended_actions")
         if isinstance(actions, list) and actions:
             result["recommended_actions"] = [str(action) for action in actions]
             result["recommended_action"] = result["recommended_actions"][0]
-        result["grounded_mode"] = f"{self.model} (citations verified)"
+        active_model = model_used or self.model
+        result["grounded_mode"] = f"{active_model} (citations verified)"
 
-    def _ask_gemini(self, prompt: str) -> Optional[Dict[str, Any]]:
-        """One JSON-mode Gemini call; None (logged) on any failure so callers keep the deterministic text."""
-        try:
-            response = self._gemini().models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={"response_mime_type": "application/json", "temperature": 0.2},
-            )
-            payload = json.loads(response.text)
-        except Exception as exc:
-            logger.warning("Gemini unavailable, keeping deterministic text: %s", exc)
-            return None
-        if not isinstance(payload, dict):
-            logger.warning("Gemini returned %s instead of a JSON object", type(payload).__name__)
-            return None
-        return payload
+    def _ask_gemini(self, prompt: str) -> Optional[tuple[Dict[str, Any], str] | Dict[str, Any]]:
+        """One JSON-mode Gemini call with fallback models; None on total failure."""
+        models_to_try = [self.model]
+        for m in FALLBACK_GEMINI_MODELS:
+            if m not in models_to_try:
+                models_to_try.append(m)
+
+        for model_name in models_to_try:
+            try:
+                response = self._gemini().models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config={"response_mime_type": "application/json", "temperature": 0.2},
+                )
+                payload = json.loads(response.text)
+                if isinstance(payload, dict):
+                    self._last_active_model = model_name
+                    return payload
+                logger.warning("Gemini model %s returned %s instead of JSON dict", model_name, type(payload).__name__)
+            except Exception as exc:
+                logger.warning("Gemini model %s unavailable: %s", model_name, exc)
+                continue
+        logger.warning("All Gemini models unavailable, keeping deterministic text")
+        return None
 
     def narrate(self, assets: List[Dict[str, Any]]) -> Dict[str, str]:
         """asset_id → one-sentence briefing for a technician walking past it; {} without Gemini.
