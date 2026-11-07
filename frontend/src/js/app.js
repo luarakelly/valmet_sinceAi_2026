@@ -22,16 +22,15 @@ let sceneSummary = null;
 let roomBounds = { x: [-5, 5], z: [-3, 3], ceiling: 3 };
 
 let routeTargetId = null; // where the robot is (or was last) heading: an asset id, or "POINT"
-let faultTargetId = null; // the pre-determined faulty device (pinned card); never changes
+let inspectionTargetId = null; // pinned card: starts as the pre-determined faulty device, Inspect changes it
 let goalMarker = null;
-let selectedId = null; // what the copilot panel shows
+let selectedId = null; // highlighted in 3D (and shown in the asset modal when open)
 let nearbyIds = new Set();
 let nearLabelIds = new Set(); // the few nearest assets that get a label (keeps the view readable)
 let nearbyAssets = []; // [{assetId, dist}] nearest first, shown in the left list
 let nearbyComponents = []; // [{frame, dist}] unbound objects attached to a pack asset's system
-let narratedIds = new Set(); // pack assets the copilot already explained on this walk
-const groupOpen = { near: true, attention: true, healthy: false, detected: false }; // remembers what the user expanded
-let showAllFrames = false;
+let passedIds = new Set(); // pack assets the robot passed on the current or last walk
+const groupOpen = { near: true, attention: true, healthy: false }; // remembers what the user expanded
 
 let currentPath = [];
 let pathLengths = [0];
@@ -44,12 +43,13 @@ let walkGrid = null; // {x_min, z_min, cell, nx, nz, reachable: Uint8Array, bloc
 let lastRobotPos = null;
 let camTween = null;
 let sidebarOpen = true;
-let copilotOpen = false;
 
 const ROBOT_GROUND_OFFSET = 0.15;
+const MAX_THREAD_MESSAGES = 30;
+const WALK_RECAP_PATTERN = /\b(on the way|passed|along the (way|route)|during the walk)\b/;
+const HEALTHY_WORD_PATTERN = /\bhealthy\b/;
 const PROXIMITY_RADIUS = 1.5;
 const MAX_NEAR_LABELS = 4;
-const MAX_ROUTE_CITATIONS = 4;
 const XRAY_POINT_SIZE = 0.035;
 const XRAY_BASE_OPACITY = 0.75;
 const XRAY_PULSE_AMPLITUDE = 0.2;
@@ -664,9 +664,9 @@ async function fetchSceneData() {
       framesById.set(f.id, f);
     });
 
-    faultTargetId = summary.target_asset_id;
-    routeTargetId = faultTargetId;
-    selectedId = faultTargetId;
+    inspectionTargetId = summary.target_asset_id;
+    routeTargetId = inspectionTargetId;
+    selectedId = inspectionTargetId;
     robotAvatar.position.set(summary.entry.x, ROBOT_GROUND_OFFSET, summary.entry.z);
     lastRobotPos = robotAvatar.position.clone();
 
@@ -675,12 +675,12 @@ async function fetchSceneData() {
 
     buildFrames(frames);
     renderAssetList(assetsData);
-    await previewRoute(faultTargetId);
+    await previewRoute(inspectionTargetId);
     if (currentPath.length > 1) {
       robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
     }
     setCameraMode("follow");
-    showSelection(faultTargetId);
+    showSelection(inspectionTargetId);
     loadWalkableGrid();
   } catch (e) {
     console.error("Scene data error", e);
@@ -783,7 +783,7 @@ function refreshFrameStyles() {
   boundingFramesGroup.children.forEach(function (box) {
     const u = box.userData;
     const f = u.frame;
-    const isTarget = f.id === faultTargetId || f.id === routeTargetId;
+    const isTarget = f.id === inspectionTargetId || f.id === routeTargetId;
     const isSelected = f.id === selectedId;
     const isNear = nearbyIds.has(f.id);
     let line = 0;
@@ -797,12 +797,8 @@ function refreshFrameStyles() {
       line = 0.9;
       fill = nearLabelIds.has(f.id) ? 0.06 : 0;
       label = nearLabelIds.has(f.id) ? 1 : 0;
-    } else if (isNear && showAllFrames) {
-      line = 0.5;
     } else if (f.asset_id) {
-      line = showAllFrames ? 0.55 : 0.28;
-    } else if (showAllFrames) {
-      line = 0.35;
+      line = 0.28;
     }
     u.lineMat.opacity = line;
     u.fillMat.opacity = fill;
@@ -944,16 +940,8 @@ function useRoute(data) {
   routeTargetId = data.target_id;
   navProgress = 0;
   renderPathRibbon(currentPath);
-  setHud(data.target_id === "POINT" ? "Walking to a floor point" : "Target: " + (data.target_tag || data.target_id),
-    data.total_distance_m + " m");
   refreshFrameStyles();
   renderTargetCard();
-}
-
-function setHud(name, dist) {
-  setText("hud-target-name", name);
-  setText("hud-dist", dist);
-  document.getElementById("hud-nav-fill").style.width = "0%";
 }
 
 // Route from the door to an asset, drawn on the floor; the robot does not move yet.
@@ -1008,8 +996,8 @@ function resetRobot() {
   nearLabelIds = new Set();
   if (goalMarker) goalMarker.visible = false;
   renderNearby([]);
-  if (faultTargetId) {
-    previewRoute(faultTargetId).then(function () {
+  if (inspectionTargetId) {
+    previewRoute(inspectionTargetId).then(function () {
       if (currentPath.length > 1) {
         robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
       }
@@ -1020,6 +1008,7 @@ function resetRobot() {
 
 // Start walking along the current route (from where the robot stands).
 function startWalking() {
+  passedIds = new Set();
   if (currentPath.length < 2) {
     onArrival();
     return;
@@ -1027,23 +1016,11 @@ function startWalking() {
   navProgress = 0;
   isNavigating = true;
   groupOpen.near = true;
-  narratedIds = new Set();
-  if (!copilotOpen) {
-    toggleCopilotDrawer();
-  }
-  addMessage("ai", "Walking to " + routeTargetLabel() + ". I'll explain each device we pass.");
   hideHelp();
 }
 
-function routeTargetLabel() {
-  const frame = framesById.get(routeTargetId);
-  if (frame && frame.tag) {
-    return frame.tag;
-  }
-  return "the selected point";
-}
 
-// "Go" (target card), "Route here" (any asset) and chat "take me to …": walk there now.
+
 async function goTo(assetId) {
   try {
     useRoute(await fetchRoute({ assetId: assetId }, false));
@@ -1083,12 +1060,88 @@ function showGoalMarker(p) {
 
 function onArrival() {
   isNavigating = false;
-  document.getElementById("hud-nav-fill").style.width = "100%";
+  addMessage("ai", walkSummary());
   if (routeTargetId === "POINT") return; // walked to a floor point: nothing to diagnose
   const frame = framesById.get(routeTargetId);
-  showToast("Arrived at " + (frame ? frame.tag : routeTargetId));
-  showSelection(routeTargetId);
   if (frame) lookAtAsset(frame);
+  openAssetModal(routeTargetId);
+}
+
+function passedAssets() {
+  return assetsData.filter(function (a) {
+    return passedIds.has(a.asset_id);
+  });
+}
+
+// "On the way: 5 assets, 3 healthy, 2 to watch (P-004, M-001)."
+function walkSummary() {
+  const passed = passedAssets();
+  if (passed.length === 0) {
+    return "On the way: no assets nearby.";
+  }
+  const toWatch = passed.filter(function (a) {
+    return assetState(a) !== "healthy";
+  });
+  const healthyCount = passed.length - toWatch.length;
+  let text = "On the way: " + passed.length + " assets, " + healthyCount + " healthy, " + toWatch.length + " to watch";
+  if (toWatch.length > 0) {
+    text += " (" + tagsOf(toWatch).join(", ") + ")";
+  }
+  return text + ".";
+}
+
+function tagsOf(assets) {
+  return assets.map(function (a) {
+    return a.tag;
+  });
+}
+
+// Follow-up about the walk: list the passed assets in the chat and highlight them in 3D.
+function answerWalkRecap(lower) {
+  const passed = passedAssets();
+  if (passed.length === 0) {
+    addMessage("ai", "No walk yet: press Go on the target card or click the floor.");
+    return;
+  }
+  const wantHealthy = HEALTHY_WORD_PATTERN.test(lower);
+  const matching = passed.filter(function (a) {
+    return matchesHealth(a, wantHealthy);
+  });
+  if (matching.length === 0) {
+    addMessage("ai", "None of the " + passed.length + " assets on the way match. " + walkSummary());
+    return;
+  }
+  highlightAssets(matching);
+  addMessage("ai", recapLine(matching, wantHealthy), tagsOf(matching));
+}
+
+function matchesHealth(asset, wantHealthy) {
+  if (wantHealthy) {
+    return assetState(asset) === "healthy";
+  }
+  return assetState(asset) !== "healthy";
+}
+
+function recapLine(assets, healthy) {
+  const details = assets.map(function (a) {
+    const state = a.state || {};
+    return a.tag + " (" + prettyClass(state.condition_state) + ", " + state.health_score + "/100)";
+  });
+  let heading = "To watch on the way: ";
+  if (healthy) {
+    heading = "Healthy on the way: ";
+  }
+  return heading + details.join(", ") + ". They are highlighted in 3D.";
+}
+
+// Reuses the "near the robot" highlight: frames and labels of these assets light up.
+function highlightAssets(assets) {
+  const ids = new Set(assets.map(function (a) {
+    return a.asset_id;
+  }));
+  nearbyIds = ids;
+  nearLabelIds = ids;
+  refreshFrameStyles();
 }
 
 // ---------------------------------------------------------------- proximity
@@ -1127,49 +1180,27 @@ function checkProximityEvents(rx, rz) {
     refreshFrameStyles();
     renderNearby(near);
     if (isNavigating) {
-      narratePassedAssets(near);
+      rememberPassedAssets(near);
     }
   }
 }
 
 // Criterion 3: explain device status along the path, grounded in the builder pack.
-function narratePassedAssets(near) {
+// Criterion 3: the walk is summarised on arrival; follow-up questions can list these assets.
+function rememberPassedAssets(near) {
   near.forEach(function (n) {
     const assetId = n.frame.asset_id;
-    const isNew = assetId && !narratedIds.has(assetId) && assetId !== routeTargetId;
-    if (!isNew) {
+    if (!assetId) {
       return;
     }
-    narratedIds.add(assetId);
-    narrateAsset(assetId);
+    if (assetId !== routeTargetId) {
+      passedIds.add(assetId);
+    }
   });
 }
 
-async function narrateAsset(assetId) {
-  const asset = assetsData.find(function (a) { return a.asset_id === assetId; });
-  if (!asset) {
-    return;
-  }
-  const state = asset.state || {};
-  const intro = "Passing " + asset.tag + " (" + prettyClass(asset.asset_class) + ", " + state.health_score + "/100, " +
-    prettyClass(state.condition_state) + "): ";
-  if (assetState(asset) === "healthy") {
-    addMessage("ai", intro + (state.issue_summary || "no deviation") + ". Next: " + (state.recommended_next_check || "monitor") + ".",
-      [state.knowledge_doc_id].filter(Boolean));
-    return;
-  }
-  try {
-    const diag = await fetchJson("/api/copilot/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ asset_id: assetId }),
-    });
-    const citations = (diag.evidence_citations || []).filter(function (id) { return id.indexOf("DQ-") !== 0; });
-    addMessage("ai", intro + (diag.diagnosis || state.issue_summary), citations.slice(0, MAX_ROUTE_CITATIONS));
-  } catch (err) {
-    addMessage("ai", intro + (state.issue_summary || "status unavailable") + " (diagnosis failed: " + err.message + ")");
-  }
-}
+
+
 window.appCheckProximityEvents = checkProximityEvents;
 
 // Nearby assets live in the left Equipment list as the "Near the robot" group (no floating panel).
@@ -1184,7 +1215,7 @@ function renderNearby(near) {
   renderAssetList(filteredAssets());
 }
 
-// ---------------------------------------------------------------- selection & copilot panel
+// ---------------------------------------------------------------- selection & asset modal
 
 function showSelection(id) {
   selectedId = id;
@@ -1193,12 +1224,116 @@ function showSelection(id) {
   document.querySelectorAll(".asset-card").forEach(function (el) {
     el.classList.toggle("active", el.dataset.id === id);
   });
+}
+
+// The asset modal covers the screen, chat included: scan render on the left, diagnosis on the right.
+// Opened from the 3D scene only (a label click or arriving at an asset); the left list inspects.
+function openAssetModal(id) {
   const frame = framesById.get(id);
+  const modal = document.getElementById("asset-modal");
+  showSelection(id);
+  modal.dataset.assetId = id;
+  modal.hidden = false;
+  renderAssetImage(frame);
   if (frame && !frame.asset_id) {
     renderStructureCard(frame);
     return;
   }
   runCopilotDiagnosis(id);
+}
+
+function closeAssetModal() {
+  const modal = document.getElementById("asset-modal");
+  modal.hidden = true;
+  delete modal.dataset.assetId;
+}
+
+// The asset shown in the modal, or null when it is closed.
+function openAssetId() {
+  const modal = document.getElementById("asset-modal");
+  if (modal.hidden) {
+    return null;
+  }
+  return modal.dataset.assetId || null;
+}
+
+// Renders the object from a close camera spot behind the modal, then puts the camera back.
+async function renderAssetImage(frame) {
+  const image = document.getElementById("asset-image");
+  const note = document.getElementById("asset-image-note");
+  image.hidden = true;
+  note.hidden = false;
+  if (!frame) {
+    note.textContent = "No 3D object for this asset.";
+    return;
+  }
+  if (!sceneSummary) {
+    note.textContent = "The scene is still loading.";
+    return;
+  }
+  note.textContent = "Rendering from the scan…";
+  const request = String(Date.now());
+  image.dataset.request = request;
+  const blob = await captureWithoutDisturbing(frame);
+  if (image.dataset.request !== request) {
+    return; // another asset was opened meanwhile
+  }
+  if (!blob) {
+    note.textContent = "Could not render this object.";
+    return;
+  }
+  if (image.src) {
+    URL.revokeObjectURL(image.src);
+  }
+  image.src = URL.createObjectURL(blob);
+  image.hidden = false;
+  note.hidden = true;
+}
+
+async function captureWithoutDisturbing(frame) {
+  const previousMode = cameraMode;
+  const savedPosition = camera.position.clone();
+  const savedTarget = controls.target.clone();
+  const restoreOverlays = hideOverlays();
+  cameraMode = "verify";
+  camTween = null;
+  try {
+    return await captureFrameCrop(frame, sceneSummary.room);
+  } catch (err) {
+    console.warn("Asset render failed", err);
+    return null;
+  } finally {
+    restoreOverlays();
+    camera.position.copy(savedPosition);
+    controls.target.copy(savedTarget);
+    cameraMode = previousMode;
+  }
+}
+
+function isVisibleOverlay(node) {
+  if (node === sparkRenderer) {
+    return false;
+  }
+  if (node === sceneModel) {
+    return false;
+  }
+  if (node.isLight) {
+    return false;
+  }
+  return node.visible;
+}
+
+// Labels, frames, robot and path must not appear in a render of the scan; returns the undo.
+function hideOverlays() {
+  const hidden = scene.children.filter(isVisibleOverlay);
+  hidden.forEach(function (n) {
+    n.visible = false;
+  });
+  return function () {
+    hidden.forEach(function (n) {
+      n.visible = true;
+    });
+  };
 }
 
 // How sure we are that this asset really is the 3D object it is attached to, and why.
@@ -1349,7 +1484,7 @@ async function runCopilotDiagnosis(assetId, question) {
       }),
     ]);
     if (thinking) thinking.remove();
-    if (selectedId === assetId || question) updateCopilotDrawer(dossier, diag);
+    if (openAssetId() === assetId) updateAssetModal(dossier, diag);
     if (question) {
       const ids = (diag.citations || []).filter(function (c) { return c.source_type !== "data_quality"; })
         .map(function (c) { return c.source_id; }).slice(0, 6);
@@ -1363,7 +1498,7 @@ async function runCopilotDiagnosis(assetId, question) {
   }
 }
 
-// Conversation thread in the right column; every answer stays here (never only in a toast).
+// Conversation thread in the chat box; every answer stays here (never only in a toast).
 function addMessage(role, text, chips) {
   const thread = document.getElementById("cp-thread");
   const msg = document.createElement("div");
@@ -1381,12 +1516,13 @@ function addMessage(role, text, chips) {
     msg.appendChild(row);
   }
   thread.appendChild(msg);
-  while (thread.children.length > 30) thread.removeChild(thread.firstChild);
+  while (thread.children.length > MAX_THREAD_MESSAGES) thread.removeChild(thread.firstChild);
   thread.scrollTop = thread.scrollHeight;
+  markUnreadIfClosed();
   return msg;
 }
 
-function updateCopilotDrawer(dossier, diag) {
+function updateAssetModal(dossier, diag) {
   const state = dossier.current_state || dossier.state || {};
   const tag = diag.tag || dossier.tag || dossier.asset_id;
   const health = diag.health_score != null ? diag.health_score : state.health_score;
@@ -1438,10 +1574,26 @@ function updateCopilotDrawer(dossier, diag) {
     li.appendChild(text);
     list.appendChild(li);
   });
-  setText("dx-why-title", "Why? " + evidence.length + " evidence · " + docs.length + " document" + (docs.length === 1 ? "" : "s"));
+  setText("dx-why-title", "Evidence · " + evidence.length + " items · " + docs.length + " document" + (docs.length === 1 ? "" : "s"));
+  lockDiagnosisHeight();
+}
 
-  const llm = diag.grounded_mode && diag.grounded_mode !== "deterministic-evidence-engine";
-  setText("copilot-model-badge", llm ? "Grounded answer · " + diag.grounded_mode + " (citations verified)" : "Grounded answer · evidence engine (no LLM)");
+// The diagnosis card keeps its collapsed size; opening the evidence scrolls inside it.
+function lockDiagnosisHeight() {
+  const block = document.getElementById("diag-block");
+  document.getElementById("dx-why").open = false;
+  block.style.maxHeight = "";
+  block.style.maxHeight = block.offsetHeight + "px";
+}
+
+// Opening the evidence scrolls the card so the list starts at its top edge.
+function scrollToEvidence() {
+  const why = document.getElementById("dx-why");
+  if (!why.open) {
+    return;
+  }
+  const block = document.getElementById("diag-block");
+  block.scrollTop = why.offsetTop - block.offsetTop;
 }
 
 
@@ -1487,71 +1639,49 @@ function renderAssetList(assets) {
   }, "near-group");
   group("attention", "Needs attention", attention, assetCard, "attention-group");
   group("healthy", "Healthy", healthy, assetCard, "healthy-group");
-  renderDetectedGroup(list);
   renderTargetCard();
-}
-
-// "Detected objects": the extraction result (challenge criterion 1) in one place.
-function renderDetectedGroup(list) {
-  if (!framesData.length) return;
-  const mapped = framesData.filter(function (f) { return f.asset_id; }).length;
-  const components = framesData.filter(function (f) { return !f.asset_id && f.part_of; }).length;
-  const counts = {};
-  framesData.filter(function (f) { return !f.asset_id; }).forEach(function (f) {
-    const k = prettyClass(f.label);
-    counts[k] = (counts[k] || 0) + 1;
-  });
-  const details = document.createElement("details");
-  details.className = "asset-group detected-group";
-  details.open = groupOpen.detected;
-  details.ontoggle = function () { groupOpen.detected = details.open; };
-  const summary = document.createElement("summary");
-  summary.innerText = "Detected objects (" + framesData.length + ")";
-  details.appendChild(summary);
-  const body = document.createElement("div");
-  body.className = "detected-body";
-  const rows = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })
-    .map(function (k) { return "<li><span>" + escapeHtml(k) + "</span><b>" + counts[k] + "</b></li>"; }).join("");
-  body.innerHTML =
-    '<div class="detected-line"><b>' + mapped + "</b> mapped to builder-pack assets (synthetic mapping)</div>" +
-    '<div class="detected-line"><b>' + components + "</b> mapped as components of the nearest asset's system</div>" +
-    '<div class="detected-line"><b>' + (framesData.length - mapped) + "</b> other structures, by shape:</div>" +
-    '<ul class="detected-counts">' + rows + "</ul>";
-  const btn = document.createElement("button");
-  btn.className = "action-pill" + (showAllFrames ? " active" : "");
-  btn.textContent = showAllFrames ? "Hide extra frames in 3D" : "Show all " + framesData.length + " in 3D";
-  btn.onclick = function () {
-    showAllFrames = !showAllFrames;
-    refreshFrameStyles();
-    renderAssetList(filteredAssets());
-  };
-  body.appendChild(btn);
-  details.appendChild(body);
-  list.appendChild(details);
 }
 
 // Pinned inspection target at the top of the left column.
 function renderTargetCard() {
   const el = document.getElementById("target-card");
-  const a = assetsData.find(function (x) { return x.asset_id === faultTargetId; });
+  const a = assetsData.find(function (x) { return x.asset_id === inspectionTargetId; });
   if (!a) {
     el.innerHTML = "";
     return;
   }
   const state = assetState(a);
-  const heading = routeTargetId === faultTargetId && currentPath.length > 1;
-  const dist = heading ? "Route " + pathLengths[pathLengths.length - 1].toFixed(1) + " m" : "Faulty device";
+  const heading = routeTargetId === inspectionTargetId && currentPath.length > 1;
+  const dist = heading ? "Route " + pathLengths[pathLengths.length - 1].toFixed(1) + " m" : prettyClass(state);
   el.innerHTML =
-    '<div class="target-label">Inspection target · faulty device</div>' +
+    '<div class="target-label">' + targetCardLabel(a.asset_id) + "</div>" +
     '<div class="target-row"><span class="status-dot status-' + dotClass(state) + '"></span><b>' + escapeHtml(a.tag) + "</b>" +
     "<span>" + escapeHtml(prettyClass(a.asset_class)) + "</span>" +
     '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(a.state ? a.state.health_score : 100) + "%</span></div>" +
     '<div class="target-row"><span class="muted">' + dist + '</span><button class="btn" id="btn-target-go">Go ▶</button></div>';
-  el.querySelector(".target-row").onclick = function () { selectAndFocus(a.asset_id); };
+  el.querySelector(".target-row").onclick = function () { goTo(a.asset_id); };
   document.getElementById("btn-target-go").onclick = function (e) {
     e.stopPropagation();
     goTo(a.asset_id);
   };
+}
+
+function targetCardLabel(assetId) {
+  const label = "Inspection target";
+  if (!sceneSummary) {
+    return label;
+  }
+  if (assetId === sceneSummary.target_asset_id) {
+    return label + " · faulty device";
+  }
+  return label;
+}
+
+// Inspect: this asset becomes the inspection target and the robot walks to it.
+function inspectAsset(assetId) {
+  inspectionTargetId = assetId;
+  renderTargetCard();
+  goTo(assetId);
 }
 
 function assetCard(a, distanceText) {
@@ -1570,14 +1700,14 @@ function assetCard(a, distanceText) {
     '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(health) + "%</span>" +
     "</div>" +
     '<div class="asset-actions">' +
-    '<button class="action-pill" data-act="route">🚶 Route here</button>' +
+    '<button class="action-pill" data-act="inspect">🔍 Inspect</button>' +
     "</div>";
   card.querySelector(".asset-card-main").onclick = function () {
-    selectAndFocus(a.asset_id);
+    inspectAsset(a.asset_id);
   };
-  card.querySelector('[data-act="route"]').onclick = function (e) {
+  card.querySelector('[data-act="inspect"]').onclick = function (e) {
     e.stopPropagation();
-    goTo(a.asset_id);
+    inspectAsset(a.asset_id);
   };
   return card;
 }
@@ -1597,11 +1727,12 @@ function componentCard(frame, distanceText) {
     '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(parent.health == null ? 100 : parent.health) + "%</span>" +
     "</div>";
   card.querySelector(".asset-card-main").onclick = function () {
-    selectAndFocus(frame.id);
+    goTo(frame.id);
   };
   return card;
 }
 
+// Highlight an asset and turn the camera to it (no modal).
 function selectAndFocus(id) {
   showSelection(id);
   const frame = framesById.get(id);
@@ -1754,7 +1885,7 @@ function setupViewportPicking() {
       const u = b.userData;
       if (!b.visible) return;
       if (u.label && u.label.visible && u.label.material.opacity > 0) clickable.push(u.label);
-      if (u.fillMat.opacity > 0 || (showAllFrames && u.shown)) clickable.push(b.children[0]);
+      if (u.fillMat.opacity > 0) clickable.push(b.children[0]);
     });
     const hits = raycaster.intersectObjects(clickable, false);
     for (const hit of hits) {
@@ -1768,6 +1899,18 @@ function setupViewportPicking() {
   renderer.domElement.addEventListener("pointerdown", function (e) {
     down = { x: e.clientX, y: e.clientY, t: Date.now() };
   });
+  // Pointer over a clickable label or frame, crosshair (walk) everywhere else.
+  renderer.domElement.addEventListener("pointermove", function (e) {
+    if (freeCam.active) {
+      return;
+    }
+    pick(e);
+    if (frameHit()) {
+      renderer.domElement.style.cursor = "pointer";
+    } else {
+      renderer.domElement.style.cursor = "";
+    }
+  });
   renderer.domElement.addEventListener("pointerup", function (e) {
     if (!down || freeCam.active) return;
     const moved = Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y);
@@ -1775,7 +1918,7 @@ function setupViewportPicking() {
     pick(e);
     const hit = frameHit();
     if (hit) {
-      showSelection(hit.frame.id);
+      openAssetModal(hit.frame.id);
       return;
     }
     const floor = new THREE.Vector3();
@@ -1921,7 +2064,6 @@ function animate() {
     robotAvatar.position.x = p1.x + (p2.x - p1.x) * t;
     robotAvatar.position.z = p1.z + (p2.z - p1.z) * t;
     robotAvatar.rotation.y = Math.atan2(p2.x - p1.x, p2.z - p1.z);
-    document.getElementById("hud-nav-fill").style.width = (navProgress * 100).toFixed(1) + "%";
     checkProximityEvents(robotAvatar.position.x, robotAvatar.position.z);
     if (navProgress >= 1) onArrival();
   }
@@ -1967,13 +2109,14 @@ function setupOmnibar() {
     box.style.display = "none";
     input.value = "";
     addMessage("user", q);
-
+    if (WALK_RECAP_PATTERN.test(q.toLowerCase())) {
+      answerWalkRecap(q.toLowerCase());
+      return;
+    }
+    const named = findAsset(q);
     let currentTarget = "";
-    if (selectedId && framesById.has(selectedId)) {
-      const frame = framesById.get(selectedId);
-      if (frame.asset_id) {
-        currentTarget = frame.asset_id;
-      }
+    if (named) {
+      currentTarget = named.asset_id;
     }
 
     const thinking = addMessage("ai", "Processing command…");
@@ -1985,18 +2128,8 @@ function setupOmnibar() {
       });
       thinking.remove();
 
-      const action = resp.action || "diagnose";
       const targetId = resp.target_asset_id || resp.asset_id;
-
-      if (action === "reset") {
-        resetRobot();
-      } else if (action === "navigate" && targetId) {
-        goTo(targetId);
-      } else if (action === "select" && targetId) {
-        selectAndFocus(targetId);
-      } else if (action === "diagnose" && targetId) {
-        selectAndFocus(targetId);
-      }
+      runFloorAction(resp.action, targetId);
 
       const answerText = resp.answer || resp.diagnosis_summary || resp.diagnosis || "Command executed.";
       const citations = resp.citations || [];
@@ -2010,11 +2143,6 @@ function setupOmnibar() {
         .slice(0, 6);
 
       addMessage("ai", answerText, ids);
-
-      if (targetId) {
-        const dossier = await fetchJson("/api/assets/" + encodeURIComponent(targetId));
-        updateCopilotDrawer(dossier, resp);
-      }
     } catch (err) {
       thinking.remove();
       addMessage("ai", "Copilot error: " + err.message);
@@ -2054,11 +2182,72 @@ function setupOmnibar() {
   };
 }
 
+// Robot and camera actions proposed by the copilot. The answer stays readable in the chat,
+// so "diagnose" highlights the asset instead of opening the modal over it.
+function runFloorAction(action, targetId) {
+  if (action === "reset") {
+    resetRobot();
+    return;
+  }
+  if (!targetId) {
+    return;
+  }
+  if (action === "navigate") {
+    goTo(targetId);
+    return;
+  }
+  if (action === "diagnose") {
+    selectAndFocus(targetId);
+    return;
+  }
+  if (action === "select") {
+    selectAndFocus(targetId);
+  }
+}
+
+function setupChat() {
+  document.getElementById("btn-chat").onclick = toggleChat;
+  document.getElementById("btn-chat-close").onclick = toggleChat;
+  document.getElementById("btn-asset-close").onclick = closeAssetModal;
+  document.getElementById("dx-why").addEventListener("toggle", scrollToEvidence);
+  document.getElementById("asset-modal").onclick = function (e) {
+    if (e.target.id === "asset-modal") {
+      closeAssetModal();
+    }
+  };
+  window.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") {
+      return;
+    }
+    if (openAssetId()) {
+      closeAssetModal();
+    }
+  });
+}
+
+// The round button and the chat box share the bottom-right corner: one shows at a time.
+function toggleChat() {
+  const panel = document.getElementById("chat-panel");
+  const button = document.getElementById("btn-chat");
+  panel.hidden = !panel.hidden;
+  button.hidden = !panel.hidden;
+  if (!panel.hidden) {
+    button.classList.remove("has-unread");
+    document.getElementById("omnibar-input").focus();
+  }
+}
+
+function markUnreadIfClosed() {
+  if (document.getElementById("chat-panel").hidden) {
+    document.getElementById("btn-chat").classList.add("has-unread");
+  }
+}
+
 // ---------------------------------------------------------------- panels, toolbar, help
 
 function setupPanels() {
   document.getElementById("btn-toggle-left-sidebar").onclick = toggleLeftSidebar;
-  document.getElementById("btn-toggle-copilot").onclick = toggleCopilotDrawer;
+  setupChat();
 }
 
 function toggleLeftSidebar() {
@@ -2069,13 +2258,7 @@ function toggleLeftSidebar() {
   setTimeout(onWindowResize, 310);
 }
 
-function toggleCopilotDrawer() {
-  copilotOpen = !copilotOpen;
-  document.getElementById("right-copilot-container").classList.toggle("collapsed", !copilotOpen);
-  document.getElementById("copilot-drawer").classList.toggle("collapsed", !copilotOpen);
-  document.getElementById("btn-toggle-copilot").innerText = copilotOpen ? "▶" : "◀";
-  setTimeout(onWindowResize, 310);
-}
+
 
 function setupToolbar() {
   document.getElementById("btn-reset-nav").onclick = resetRobot;
@@ -2242,8 +2425,7 @@ async function verifyPlacementByCamera() {
   verifyRunning = true;
   verifyStop = false;
   const previousMode = cameraMode;
-  const hiddenNodes = scene.children.filter(function (n) { return n !== sparkRenderer && n !== sceneModel && !n.isLight && n.visible; });
-  hiddenNodes.forEach(function (n) { n.visible = false; }); // overlays must not appear in the crops
+  const restoreOverlays = hideOverlays(); // overlays must not appear in the crops
   let done = 0, failed = 0, consecutiveFailures = 0, lastError = "";
   try {
     const summary = await fetchJson("/api/scene/summary");
@@ -2271,7 +2453,7 @@ async function verifyPlacementByCamera() {
   } catch (err) {
     showToast("Verification failed: " + err.message);
   } finally {
-    hiddenNodes.forEach(function (n) { n.visible = true; });
+    restoreOverlays();
     setCameraMode(previousMode === "verify" ? "follow" : previousMode);
     verifyRunning = false;
   }

@@ -23,7 +23,7 @@
 
 **Main flow**
 
-1. The system selects or loads the predetermined faulty target; the user presses **Go** (or clicks the floor or **Route here** to walk elsewhere).
+1. The system selects or loads the predetermined faulty target; the user presses **Go** (or clicks the floor, or **Inspect** on another asset to make it the target).
 2. The planner computes a route over the walkable area.
 3. The route is checked against the obstacle representation.
 4. The viewer shows the route and moves the avatar/robot along its waypoints.
