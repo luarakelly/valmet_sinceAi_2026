@@ -22,7 +22,7 @@ let sceneSummary = null;
 let roomBounds = { x: [-5, 5], z: [-3, 3], ceiling: 3 };
 
 let routeTargetId = null; // where the robot is (or was last) heading: an asset id, or "POINT"
-let faultTargetId = null; // the pre-determined faulty device (pinned card); never changes
+let inspectionTargetId = null; // pinned card: starts as the pre-determined faulty device, Inspect changes it
 let goalMarker = null;
 let selectedId = null; // highlighted in 3D (and shown in the asset modal when open)
 let nearbyIds = new Set();
@@ -665,9 +665,9 @@ async function fetchSceneData() {
       framesById.set(f.id, f);
     });
 
-    faultTargetId = summary.target_asset_id;
-    routeTargetId = faultTargetId;
-    selectedId = faultTargetId;
+    inspectionTargetId = summary.target_asset_id;
+    routeTargetId = inspectionTargetId;
+    selectedId = inspectionTargetId;
     robotAvatar.position.set(summary.entry.x, ROBOT_GROUND_OFFSET, summary.entry.z);
     lastRobotPos = robotAvatar.position.clone();
 
@@ -676,12 +676,12 @@ async function fetchSceneData() {
 
     buildFrames(frames);
     renderAssetList(assetsData);
-    await previewRoute(faultTargetId);
+    await previewRoute(inspectionTargetId);
     if (currentPath.length > 1) {
       robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
     }
     setCameraMode("follow");
-    showSelection(faultTargetId);
+    showSelection(inspectionTargetId);
     loadWalkableGrid();
   } catch (e) {
     console.error("Scene data error", e);
@@ -784,7 +784,7 @@ function refreshFrameStyles() {
   boundingFramesGroup.children.forEach(function (box) {
     const u = box.userData;
     const f = u.frame;
-    const isTarget = f.id === faultTargetId || f.id === routeTargetId;
+    const isTarget = f.id === inspectionTargetId || f.id === routeTargetId;
     const isSelected = f.id === selectedId;
     const isNear = nearbyIds.has(f.id);
     let line = 0;
@@ -1001,8 +1001,8 @@ function resetRobot() {
   nearLabelIds = new Set();
   if (goalMarker) goalMarker.visible = false;
   renderNearby([]);
-  if (faultTargetId) {
-    previewRoute(faultTargetId).then(function () {
+  if (inspectionTargetId) {
+    previewRoute(inspectionTargetId).then(function () {
       if (currentPath.length > 1) {
         robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
       }
@@ -1689,16 +1689,16 @@ function renderDetectedGroup(list) {
 // Pinned inspection target at the top of the left column.
 function renderTargetCard() {
   const el = document.getElementById("target-card");
-  const a = assetsData.find(function (x) { return x.asset_id === faultTargetId; });
+  const a = assetsData.find(function (x) { return x.asset_id === inspectionTargetId; });
   if (!a) {
     el.innerHTML = "";
     return;
   }
   const state = assetState(a);
-  const heading = routeTargetId === faultTargetId && currentPath.length > 1;
-  const dist = heading ? "Route " + pathLengths[pathLengths.length - 1].toFixed(1) + " m" : "Faulty device";
+  const heading = routeTargetId === inspectionTargetId && currentPath.length > 1;
+  const dist = heading ? "Route " + pathLengths[pathLengths.length - 1].toFixed(1) + " m" : prettyClass(state);
   el.innerHTML =
-    '<div class="target-label">Inspection target · faulty device</div>' +
+    '<div class="target-label">' + targetCardLabel(a.asset_id) + "</div>" +
     '<div class="target-row"><span class="status-dot status-' + dotClass(state) + '"></span><b>' + escapeHtml(a.tag) + "</b>" +
     "<span>" + escapeHtml(prettyClass(a.asset_class)) + "</span>" +
     '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(a.state ? a.state.health_score : 100) + "%</span></div>" +
@@ -1708,6 +1708,24 @@ function renderTargetCard() {
     e.stopPropagation();
     goTo(a.asset_id);
   };
+}
+
+function targetCardLabel(assetId) {
+  const label = "Inspection target";
+  if (!sceneSummary) {
+    return label;
+  }
+  if (assetId === sceneSummary.target_asset_id) {
+    return label + " · faulty device";
+  }
+  return label;
+}
+
+// Inspect: this asset becomes the inspection target and the robot walks to it.
+function inspectAsset(assetId) {
+  inspectionTargetId = assetId;
+  renderTargetCard();
+  goTo(assetId);
 }
 
 function assetCard(a, distanceText) {
@@ -1726,14 +1744,14 @@ function assetCard(a, distanceText) {
     '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(health) + "%</span>" +
     "</div>" +
     '<div class="asset-actions">' +
-    '<button class="action-pill" data-act="route">🚶 Route here</button>' +
+    '<button class="action-pill" data-act="inspect">🔍 Inspect</button>' +
     "</div>";
   card.querySelector(".asset-card-main").onclick = function () {
     openAssetModal(a.asset_id);
   };
-  card.querySelector('[data-act="route"]').onclick = function (e) {
+  card.querySelector('[data-act="inspect"]').onclick = function (e) {
     e.stopPropagation();
-    goTo(a.asset_id);
+    inspectAsset(a.asset_id);
   };
   return card;
 }

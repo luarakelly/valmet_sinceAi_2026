@@ -24,7 +24,7 @@ The raw scan is required: put `Equipment Room.ply` (395 MB, not in git) in `data
 The robot starts at the door. The faulty device (P-005) is pinned top left, and its route is drawn on the floor.
 
 1. **Go** on the target card — the robot walks the collision-free route; assets within 1.5 m are listed under *Near the robot*.
-2. **Click the blue floor** to walk anywhere, or **Route here** on any asset. The robot stops 0.8 m from the asset.
+2. **Click the blue floor** to walk anywhere, or **Inspect** on any asset to make it the target and walk there. The robot stops 0.8 m from the asset.
 3. **Click a label** (or arrive at an asset) — the copilot panel shows observation, hypothesis, next safe check, confidence and the evidence IDs; the object is highlighted through walls (x-ray).
 
 - Camera: **Follow robot** (drag = turn around the robot, wheel = zoom; it stays inside the room) or **Top** (plan view).
