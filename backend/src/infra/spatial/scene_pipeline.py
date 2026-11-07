@@ -6,7 +6,7 @@ Coordinates are canonical: Y up, floor at y = 0 (see point_cloud.py).
 """
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 import math
 import time
@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from infra.spatial.asset_mapping import Binding, bind_assets, choose_target
+from infra.spatial.asset_mapping import Binding, Verified, bind_assets, choose_target
 from infra.spatial.navigation import (
     ROBOT_RADIUS,
     STANDOFF_M,
@@ -35,6 +35,8 @@ from infra.spatial.segmentation import Room, SceneObject, detect_room, extract_o
 
 logger = logging.getLogger("ask_your_factory.scene")
 
+MAX_GEOMETRY_POINTS = 30000  # x-ray highlight payload stays < 360 KB
+
 ALGORITHM = "Voxel connected components + recursive thin-link / sparse-plane splitting"
 
 
@@ -52,20 +54,28 @@ class ScenePipelineResult:
     bindings: Dict[str, Binding]
     target_asset_id: str
     seconds: float
+    verified: Dict[str, Verified] = field(default_factory=dict)
 
 
 class BoilerRoomScene:
     """SceneEngine adapter. `assets_provider` returns builder-pack assets (dicts with a "state")."""
 
-    def __init__(self, assets_provider: Callable[[], List[Dict[str, Any]]]) -> None:
+    def __init__(
+        self,
+        assets_provider: Callable[[], List[Dict[str, Any]]],
+        verification_provider: Optional[Callable[[], Dict[str, Dict[str, Any]]]] = None,
+    ) -> None:
         self._assets_provider = assets_provider
-        self.result = run_pipeline(assets_provider())
+        self._verification_provider = verification_provider or (lambda: {})
+        self._build()
+
+    def _build(self) -> None:
+        self.result = run_pipeline(self._assets_provider(), self._verification_provider())
         self.frames = [self._frame(obj) for obj in self.result.objects]
 
     def rebuild(self) -> "BoilerRoomScene":
         """Re-run the pipeline from disk (e.g. after replacing the scan)."""
-        self.result = run_pipeline(self._assets_provider())
-        self.frames = [self._frame(obj) for obj in self.result.objects]
+        self._build()
         return self
 
     def get_mesh_path(self) -> Path:
@@ -96,6 +106,8 @@ class BoilerRoomScene:
             "processed_points": len(self.result.cloud),
             "extracted_count": len(self.frames),
             "mapped_asset_count": len(self.result.bindings),
+            "camera_verified_asset_count": sum(1 for b in self.result.bindings.values() if b.status == "camera_verified"),
+            "verified_object_count": len(self.result.verified),
             "label_counts": labels,
             "room": {"x": [room.x_min, room.x_max], "z": [room.z_min, room.z_max], "ceiling": room.ceiling},
             "entry": {"x": self.result.entry[0], "y": 0.0, "z": self.result.entry[1]},
@@ -163,12 +175,28 @@ class BoilerRoomScene:
             "algorithm": "A* on inflated 2D occupancy grid + line-of-sight smoothing",
         }
 
+    def get_object_geometry(self, identifier: str) -> Optional[bytes]:
+        """The object's own points as little-endian float32 x, y, z triples; None if unknown."""
+        frame = self.find_frame(identifier)
+        if frame is None:
+            return None
+        obj = next(o for o in self.result.objects if o.object_id == frame["scene_id"])
+        stride = max(1, -(-len(obj.points) // MAX_GEOMETRY_POINTS))
+        return np.ascontiguousarray(obj.points[::stride], dtype="<f4").tobytes()
+
     def walkable_grid(self) -> Dict[str, Any]:
         """Occupancy grid for the viewer (walkable overlay + camera collision), layers as base64 bytes."""
         layers = walkable_layers(self.result.grid)
         for key in ("reachable", "blocked"):
             layers[key] = base64.b64encode(layers[key].tobytes(order="C")).decode("ascii")
         return layers
+
+    def _seen_as(self, obj: SceneObject) -> Optional[Dict[str, Any]]:
+        """What the camera check said this object is, if it has been looked at."""
+        seen = self.result.verified.get(obj.object_id)
+        if seen is None:
+            return None
+        return {"category": seen.category, "confidence": seen.confidence, "features": seen.features}
 
     def _frame(self, obj: SceneObject) -> Dict[str, Any]:
         binding = self.result.bindings.get(obj.object_id)
@@ -184,6 +212,9 @@ class BoilerRoomScene:
             "asset_id": None,
             "mapped_asset": None,
             "mapping_confidence": None,
+            "mapping_status": None,
+            "mapping_evidence": None,
+            "seen_as": self._seen_as(obj),
             "state": None,
             "health": None,
             "issue_code": None,
@@ -208,6 +239,8 @@ class BoilerRoomScene:
                 "criticality": asset.get("criticality"),
             },
             "mapping_confidence": binding.confidence,
+            "mapping_status": binding.status,
+            "mapping_evidence": binding.evidence,
             "state": state.get("condition_state"),
             "health": state.get("health_score"),
             "issue_code": state.get("issue_code"),
@@ -216,7 +249,7 @@ class BoilerRoomScene:
         return frame
 
 
-def run_pipeline(assets: List[Dict[str, Any]]) -> ScenePipelineResult:
+def run_pipeline(assets: List[Dict[str, Any]], verification: Optional[Dict[str, Dict[str, Any]]] = None) -> ScenePipelineResult:
     started = time.perf_counter()
     cloud = load_scene_cloud()
     room = detect_room(cloud)
@@ -235,11 +268,35 @@ def run_pipeline(assets: List[Dict[str, Any]]) -> ScenePipelineResult:
         walk[obj.object_id] = float(travel[stand])
 
     target = choose_target(assets)
-    bindings = bind_assets(objects, assets, target["asset_id"], reach, walk)
+    verified = _verified_objects(verification or {}, objects)
+    bindings = bind_assets(objects, assets, target["asset_id"], reach, walk, verified)
 
     seconds = round(time.perf_counter() - started, 2)
-    logger.info("Scene pipeline: %d points → %d objects, %d assets bound in %.2fs", len(cloud), len(objects), len(bindings), seconds)
-    return ScenePipelineResult(cloud, room, objects, grid, entry, bindings, target["asset_id"], seconds)
+    logger.info("Scene pipeline: %d points → %d objects (%d camera-verified), %d assets bound in %.2fs", len(cloud), len(objects), len(verified), len(bindings), seconds)
+    return ScenePipelineResult(cloud, room, objects, grid, entry, bindings, target["asset_id"], seconds, verified)
+
+
+STALE_VERIFICATION_M = 0.15
+
+
+def _verified_objects(records: Dict[str, Dict[str, Any]], objects: List[SceneObject]) -> Dict[str, Verified]:
+    """Stored camera verifications that still describe the same object (same id, same place)."""
+    by_id = {obj.object_id: obj for obj in objects}
+    verified: Dict[str, Verified] = {}
+    for object_id, record in records.items():
+        obj = by_id.get(object_id)
+        if obj is None:
+            continue
+        center = record.get("center")
+        if center and math.dist(center, obj.center) > STALE_VERIFICATION_M:
+            continue  # the scan or the extraction changed: this verdict is about something else now
+        verified[object_id] = Verified(
+            category=str(record.get("category", "unknown")),
+            asset_class=record.get("asset_class"),
+            confidence=float(record.get("confidence", 0.0)),
+            features=str(record.get("visible_features", "")),
+        )
+    return verified
 
 
 def _walkway_end(grid: OccupancyGrid, room: Room) -> Cell:

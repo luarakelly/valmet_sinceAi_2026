@@ -15,6 +15,7 @@ from api.controllers import (
     maintenance_controller as maintenance,
     navigation_controller as navigation,
     scene_controller as scene,
+    verification_controller as verification,
     vision_controller as vision,
     work_order_controller as work_orders,
 )
@@ -55,6 +56,10 @@ post("/scene/extract-assets")(scene.extract_scene_assets)
 get("/scene/boiler-room.ply")(scene.get_boiler_room_ply)
 get("/scene/boiler-room-mesh.ply")(scene.get_boiler_room_mesh)
 get("/scene/boiler-room.splat")(scene.get_boiler_room_splat)
+get("/scene/objects/{id}/geometry")(scene.get_object_geometry)
+post("/scene/objects/{id}/verification")(verification.verify_object)
+get("/scene/verification")(verification.list_verification)
+post("/scene/verification/reset")(verification.reset_verification)
 
 # Navigation
 get("/navigation/path", response_model=NavigationPathResponse)(navigation.get_navigation_path)

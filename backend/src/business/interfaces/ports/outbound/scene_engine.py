@@ -35,6 +35,10 @@ class SceneEngine(Protocol):
         """
         ...
 
+    def get_object_geometry(self, identifier: str) -> Optional[bytes]:
+        """The object's own points (float32 x, y, z triples) for highlighting; None if unknown."""
+        ...
+
     def walkable_grid(self) -> Dict[str, Any]:
         """Occupancy grid: origin, cell size, nx × nz, and base64 layers `reachable` / `blocked`."""
         ...

@@ -1,6 +1,14 @@
-"""Procedural binding of builder-pack assets to extracted scene objects.
+"""Binding of builder-pack assets to extracted scene objects.
 
-The brief allows non-physical mapping; this one is still plausible and explainable:
+The workbook has no real positions (Scene_Anchors are placeholders on a 30 x 15 m grid; the scan
+room is about 8 x 3 m), so identity has to come from evidence in the scan:
+- camera-verified: a vision-language model looked at a render of the object and said what it is
+  (see VerificationService). Only objects verified as the asset's class are eligible, best first;
+- proposed: objects nobody has looked at yet fall back to shape-based guessing, with low confidence;
+- an asset with no verified or unverified candidate stays unlocated, except the inspection target,
+  which is placed on the nearest reachable object ("assumed") so the route demo can still run.
+
+The shape-based guess works like this:
 - each asset class prefers geometric labels that look like it (pumps → floor machines, ...);
 - only objects with a free standing spot within REACH_M are eligible, so every asset is serviceable;
 - the inspection target is placed first, on the best-matching object with the longest walk from
@@ -32,10 +40,31 @@ CONFIDENCE_BY_RANK = (0.85, 0.7, 0.55)
 CLASS_ORDER = ("PROCESS_PUMP", "ELECTRIC_MOTOR", "PRESSURE_TRANSMITTER", "VIBRATION_SENSOR", "CONTROL_VALVE")
 
 
+CAMERA_VERIFIED = "camera_verified"
+PROPOSED = "proposed"
+ASSUMED = "assumed"
+
+MAX_VERIFIED_CONFIDENCE = 0.95
+PROPOSED_CONFIDENCE_CAP = 0.45  # once camera evidence exists, an unlooked-at object is only a guess
+ASSUMED_CONFIDENCE = 0.2
+
+
+@dataclass(frozen=True)
+class Verified:
+    """What the camera check said an object is. asset_class None = visible but not a pack asset class."""
+
+    category: str
+    asset_class: Optional[str]
+    confidence: float
+    features: str = ""
+
+
 @dataclass(frozen=True)
 class Binding:
     asset: Dict[str, Any]
     confidence: float
+    status: str = PROPOSED
+    evidence: str = ""
 
 
 def choose_target(assets: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -49,14 +78,22 @@ def bind_assets(
     target_asset_id: str,
     reach: Dict[str, float],
     walk: Dict[str, float],
+    verified: Optional[Dict[str, Verified]] = None,
 ) -> Dict[str, Binding]:
     """Return object_id → Binding.
 
     reach: object_id → metres from the object to its nearest reachable standing cell.
     walk:  object_id → walking metres from the entry to that standing cell.
+    verified: object_id → camera verification result (empty/None = nothing verified yet).
     """
+    verified = verified or {}
     eligible = [o for o in objects if reach.get(o.object_id, math.inf) <= REACH_M]
     taken: Dict[str, Binding] = {}
+
+    def looks_like(obj: SceneObject, asset_class: str) -> Optional[bool]:
+        """True/False once the camera has looked at the object, None if it has not."""
+        seen = verified.get(obj.object_id)
+        return None if seen is None else seen.asset_class == asset_class
 
     def rank(obj: SceneObject, asset_class: str) -> int:
         preferences = PREFERENCES.get(asset_class, ())
@@ -74,28 +111,45 @@ def bind_assets(
             for oid in taken
         )
 
-    def place(asset: Dict[str, Any], far_first: bool) -> None:
+    def place(asset: Dict[str, Any], far_first: bool, is_target: bool = False) -> None:
         asset_class = asset.get("asset_class", "")
         free = [o for o in eligible if o.object_id not in taken]
-        if not free:
-            return
+        confirmed = [o for o in free if looks_like(o, asset_class) is True]
+        unseen = [o for o in free if looks_like(o, asset_class) is None]
+        if confirmed:
+            pool, status = confirmed, CAMERA_VERIFIED
+        elif unseen:
+            pool, status = unseen, PROPOSED
+        elif is_target and free:
+            pool, status = free, ASSUMED
+        else:
+            return  # no object that is, or might be, this asset: leave it unlocated
 
         def sort_key(obj: SceneObject):
+            certainty = -round(verified[obj.object_id].confidence, 1) if status == CAMERA_VERIFIED else 0.0
             if far_first:
-                return (rank(obj, asset_class), -walk.get(obj.object_id, 0.0), obj.object_id)
-            return (rank(obj, asset_class), -round(spread(obj), 2), obj.object_id)
+                return (certainty, rank(obj, asset_class), -walk.get(obj.object_id, 0.0), obj.object_id)
+            return (certainty, rank(obj, asset_class), -round(spread(obj), 2), obj.object_id)
 
-        best = min(free, key=sort_key)
-        best_rank = rank(best, asset_class)
-        if best_rank < len(CONFIDENCE_BY_RANK):
-            confidence = CONFIDENCE_BY_RANK[best_rank]
+        best = min(pool, key=sort_key)
+        if status == CAMERA_VERIFIED:
+            seen = verified[best.object_id]
+            confidence = min(MAX_VERIFIED_CONFIDENCE, seen.confidence)
+            evidence = "Camera check: looks like {} ({:.2f})".format(seen.features or seen.category, seen.confidence)
+        elif status == PROPOSED:
+            best_rank = rank(best, asset_class)
+            confidence = CONFIDENCE_BY_RANK[best_rank] if best_rank < len(CONFIDENCE_BY_RANK) else FALLBACK_CONFIDENCE
+            if verified:
+                confidence = min(confidence, PROPOSED_CONFIDENCE_CAP)
+            evidence = "Shape-based guess, not verified by camera"
         else:
-            confidence = FALLBACK_CONFIDENCE
-        taken[best.object_id] = Binding(asset=asset, confidence=confidence)
+            confidence = ASSUMED_CONFIDENCE
+            evidence = "No camera-verified match; placed on the nearest reachable object so the route can run"
+        taken[best.object_id] = Binding(asset=asset, confidence=round(confidence, 2), status=status, evidence=evidence)
 
     target = _find(assets, target_asset_id)
     if target is not None:
-        place(target, far_first=True)
+        place(target, far_first=True, is_target=True)
 
     for asset_class in CLASS_ORDER:
         for asset in assets:

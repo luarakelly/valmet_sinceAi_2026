@@ -4,6 +4,7 @@ from .dashboard_service import DashboardService
 from .maintenance_service import MaintenanceService
 from .navigation_service import NavigationService
 from .scene_service import SceneService
+from .verification_service import VerificationService
 from .vision_service import VisionService
 from .work_order_service import WorkOrderService
 
@@ -14,6 +15,7 @@ __all__ = [
     "MaintenanceService",
     "NavigationService",
     "SceneService",
+    "VerificationService",
     "VisionService",
     "WorkOrderService",
     "detect_drift",

@@ -8,7 +8,7 @@ Pipeline (pure NumPy/SciPy, < 1 s):
 4. Each box is labelled from geometry (size, elongation, height) and dominant colour.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterator, List, Tuple
 
 import numpy as np
@@ -55,6 +55,8 @@ class SceneObject:
     size: Tuple[float, float, float]
     point_count: int
     color: Tuple[float, float, float]
+    # The object's own points (its voxels, not its box): drawn as the x-ray highlight.
+    points: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), dtype=np.float32), compare=False, repr=False)
 
 
 def detect_room(cloud: PointCloud) -> Room:
@@ -87,13 +89,17 @@ def extract_objects(cloud: PointCloud, room: Room) -> List[SceneObject]:
 
     objects: List[SceneObject] = []
     for layer in layers:
-        for lo, hi, points in _segment_layer(xyz[layer], cloud.rgb[layer]):
-            objects.append(_describe(len(objects) + 1, lo, hi, points))
+        for lo, hi, member_rgb, member_xyz in _segment_layer(xyz[layer], cloud.rgb[layer]):
+            objects.append(_describe(len(objects) + 1, lo, hi, member_rgb, member_xyz))
     return objects
 
 
-def _segment_layer(xyz: np.ndarray, rgb: np.ndarray) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
-    """Yield (box_min, box_max, member_rgb) per object found in one height layer."""
+def _segment_layer(xyz: np.ndarray, rgb: np.ndarray) -> Iterator[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+    """Yield (box_min, box_max, member_rgb, own_xyz) per object found in one height layer.
+
+    member_rgb: every point inside the box (labels and colour, as before).
+    own_xyz: only points in the object's own voxels, so a pipe's highlight is the pipe.
+    """
     if len(xyz) == 0:
         return
     origin = xyz.min(axis=0)
@@ -103,14 +109,22 @@ def _segment_layer(xyz: np.ndarray, rgb: np.ndarray) -> Iterator[Tuple[np.ndarra
 
     occupied = ndimage.binary_closing(counts >= MIN_POINTS_PER_VOXEL)
     labels, _ = ndimage.label(occupied, NEIGHBOURS_26)
+    parts = []
     for label, region in enumerate(ndimage.find_objects(labels), start=1):
         offset = np.array([s.start for s in region])
         for mask, part_offset in _split(labels[region] == label, offset):
-            voxels = np.argwhere(mask) + part_offset
-            lo = origin + voxels.min(axis=0) * VOXEL
-            hi = origin + (voxels.max(axis=0) + 1) * VOXEL
-            members = ((xyz >= lo) & (xyz <= hi)).all(axis=1)
-            yield lo, hi, rgb[members]
+            parts.append(np.argwhere(mask) + part_offset)
+
+    part_of_voxel = np.zeros(counts.shape, dtype=np.int32)
+    for number, voxels in enumerate(parts, start=1):
+        part_of_voxel[tuple(voxels.T)] = number
+    part_of_point = part_of_voxel[tuple(index.T)]
+
+    for number, voxels in enumerate(parts, start=1):
+        lo = origin + voxels.min(axis=0) * VOXEL
+        hi = origin + (voxels.max(axis=0) + 1) * VOXEL
+        members = ((xyz >= lo) & (xyz <= hi)).all(axis=1)
+        yield lo, hi, rgb[members], xyz[part_of_point == number]
 
 
 def _split(mask: np.ndarray, offset: np.ndarray) -> Iterator[Tuple[np.ndarray, np.ndarray]]:
@@ -176,7 +190,7 @@ def _split_at_sparsest_plane(mask: np.ndarray):
     return parts, 2
 
 
-def _describe(number: int, lo: np.ndarray, hi: np.ndarray, member_rgb: np.ndarray) -> SceneObject:
+def _describe(number: int, lo: np.ndarray, hi: np.ndarray, member_rgb: np.ndarray, own_xyz: np.ndarray) -> SceneObject:
     size = hi - lo
     center = (lo + hi) / 2.0
     if len(member_rgb):
@@ -190,6 +204,7 @@ def _describe(number: int, lo: np.ndarray, hi: np.ndarray, member_rgb: np.ndarra
         size=tuple(round(float(v), 3) for v in size),
         point_count=len(member_rgb),
         color=tuple(round(float(v), 3) for v in color),
+        points=own_xyz.astype(np.float32),
     )
 
 

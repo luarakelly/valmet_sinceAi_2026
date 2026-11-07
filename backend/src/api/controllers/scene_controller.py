@@ -1,7 +1,7 @@
 from typing import Any, Dict, List
 
 from fastapi import Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from api.container import Container, get_container
 from api.controllers.errors import http_errors
@@ -53,3 +53,10 @@ def get_boiler_room_mesh(app: Container = Depends(get_container)) -> FileRespons
     with http_errors():
         path = app.scene.viewer_mesh()
     return FileResponse(path=str(path), media_type="application/octet-stream", filename=path.name)
+
+
+def get_object_geometry(id: str, app: Container = Depends(get_container)) -> Response:
+    """The object's own points as float32 x, y, z triples (x-ray highlight of the selected part)."""
+    with http_errors():
+        geometry = app.scene.object_geometry(id)
+    return Response(content=geometry, media_type="application/octet-stream")

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol
 
 
 class LanguageModel(Protocol):
@@ -12,5 +12,6 @@ class LanguageModel(Protocol):
     def is_available(self) -> bool:
         ...
 
-    def complete_json(self, prompt: str) -> Optional[Dict[str, Any]]:
+    def complete_json(self, prompt: str, images: Optional[List[bytes]] = None) -> Optional[Dict[str, Any]]:
+        """images: optional JPEG bytes shown to the model with the prompt."""
         ...
