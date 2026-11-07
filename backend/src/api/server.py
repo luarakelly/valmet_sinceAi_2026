@@ -10,6 +10,7 @@ Hosts:
 
 from contextlib import asynccontextmanager
 import logging
+import uuid
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -25,13 +26,22 @@ from api import container as container_module
 from api.controllers.health_controller import health_check
 from dto.common_dto import HealthResponse
 from api.routes import router as api_router
+from business.errors import NotFoundError
 from infra.paths import FRONTEND_DIR
+
+# Changes on every (re)start; the page reloads itself when it changes (development only).
+BOOT_ID = uuid.uuid4().hex
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Build the container (database seed + scene pipeline) before the first request."""
-    container_module.get_container()
+    """Build the container (database seed + scene pipeline) and the photoreal splat before serving."""
+    container = container_module.get_container()
+    try:
+        # First run converts the raw scan (minutes, once); later runs find the cached file.
+        logger.info("Photoreal scene ready: %s", container.scene.viewer_splat().name)
+    except NotFoundError as error:
+        logger.warning("Photoreal scene unavailable, viewer falls back to points: %s", error)
     yield
 
     logger.info("Shutting down Ask Your Factory backend.")
@@ -97,6 +107,13 @@ async def root_index():
 </body>
 </html>"""
     )
+
+
+@app.get("/api/dev/version", include_in_schema=False)
+async def dev_version():
+    """Server boot id + newest frontend file time; the viewer polls this on localhost to auto-reload."""
+    newest = max((p.stat().st_mtime for p in FRONTEND_DIR.rglob("*") if p.is_file()), default=0.0)
+    return {"boot_id": BOOT_ID, "frontend_mtime": newest}
 
 
 app.get("/health", tags=["System"], response_model=HealthResponse)(health_check)
