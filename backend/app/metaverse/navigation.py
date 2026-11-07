@@ -26,6 +26,11 @@ ROBOT_RADIUS = 0.22
 MIN_OBSTACLE_POINTS = 3
 SEGMENT_SAMPLE_STEP = 0.02
 WALK_SPEED_M_S = 0.8
+PROXIMITY_RADIUS_M = 1.0  # box-edge distance at which an asset counts as "near" the robot
+
+CELL_WALKABLE = 0
+CELL_BLOCKED = 1
+CELL_TOO_TIGHT = 2
 
 Cell = Tuple[int, int]
 NEIGHBOURS_8 = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
@@ -55,6 +60,13 @@ class OccupancyGrid:
 
     def clearance_at(self, x: float, z: float) -> float:
         return float(self.clearance[self.to_cell(x, z)])
+
+    def cell_classes(self) -> np.ndarray:
+        """CELL_* class per cell: what the robot may enter, what is solid, what is merely too narrow."""
+        classes = np.full(self.clearance.shape, CELL_TOO_TIGHT, dtype=np.int8)
+        classes[self.clearance < CELL / 2] = CELL_BLOCKED
+        classes[self.reachable] = CELL_WALKABLE
+        return classes
 
 
 @dataclass(frozen=True)
@@ -87,6 +99,13 @@ def build_grid(cloud: PointCloud, room: Room) -> OccupancyGrid:
         sizes = np.bincount(regions.ravel())[1:]
         reachable = regions == int(np.argmax(sizes)) + 1
     return OccupancyGrid(x_min=room.x_min, z_min=room.z_min, clearance=clearance, reachable=reachable)
+
+
+def box_edge_distance_m(x: float, z: float, center: List[float], size: List[float]) -> float:
+    """Floor-plane distance from (x, z) to the edge of a box; 0 when the point is inside it."""
+    beyond_x = max(abs(x - center[0]) - size[0] / 2, 0.0)
+    beyond_z = max(abs(z - center[2]) - size[2] / 2, 0.0)
+    return math.hypot(beyond_x, beyond_z)
 
 
 def nearest_free(grid: OccupancyGrid, x: float, z: float) -> Optional[Cell]:

@@ -43,6 +43,11 @@ def test_industrial_metaverse_acceptance_flow():
     assert route_data["collision_free"] is True
     assert route_data["min_clearance_m"] >= route_data["robot_radius_m"] - 0.04
 
+    briefings = client.get("/api/navigation/briefings", params={"target_id": asset_id})
+    assert briefings.status_code == 200
+    assert asset_id in {briefing["asset_id"] for briefing in briefings.json()}
+    assert client.get("/api/navigation/grid").json()["cells"]
+
     diagnosis = client.post(
         "/api/copilot/query",
         json={"asset_id": asset_id, "query": "What should I inspect first?"},
@@ -53,3 +58,4 @@ def test_industrial_metaverse_acceptance_flow():
     assert diagnosis_data["evidence_citations"]
     assert diagnosis_data["recommended_actions"]
     assert diagnosis_data["safety_checks"]
+    assert diagnosis_data["answer"]  # "What should I inspect first?" is answered without Gemini

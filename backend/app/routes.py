@@ -2,13 +2,14 @@
 
 Assets & evidence: /assets, /assets/{id}, /assets/{id}/telemetry|events|documents|work-orders
 Scene:             /scene/frames, /scene/summary, /scene/anchors, /scene/proximity,
-                   /scene/extract-assets, /scene/boiler-room.ply, /navigation/path
+                   /scene/extract-assets, /scene/boiler-room.ply,
+                   /navigation/path, /navigation/briefings, /navigation/grid
 AI & workflow:     /copilot/query, /work-orders/draft (draft only, never a control action),
                    /vision/analyze, /metaverse/dashboard
 """
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
@@ -46,7 +47,9 @@ from app.schemas import (
     CopilotQueryRequest,
     CopilotQueryResponse,
 )
+from app.metaverse.briefings import build_briefings
 from app.metaverse.copilot import get_copilot
+from app.metaverse.dataset import get_dataset
 from app.metaverse.scene_processor import RouteNotFound, get_scene, reset_scene
 from app.metaverse.vision import analyze_image
 
@@ -535,12 +538,7 @@ def extract_scene_assets():
     return {**scene.summary(), "all_frames": scene.get_semantic_frames()}
 
 
-@router.get("/navigation/path")
-def get_navigation_path(
-    target_id: Optional[str] = Query(None, description="Asset ID, tag or object ID; defaults to the faulty target"),
-    start_x: Optional[float] = Query(None),
-    start_z: Optional[float] = Query(None),
-):
+def planned_route(target_id: Optional[str], start_x: Optional[float], start_z: Optional[float]) -> Dict[str, Any]:
     """Collision-free route from the entry (or start_x/start_z) to a standing spot beside the target."""
     start = None
     if start_x is not None and start_z is not None:
@@ -551,6 +549,32 @@ def get_navigation_path(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No scene object matches '{target_id}'.")
     except RouteNotFound:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"No collision-free route to '{target_id}'.")
+
+
+@router.get("/navigation/path")
+def get_navigation_path(
+    target_id: Optional[str] = Query(None, description="Asset ID, tag or object ID; defaults to the faulty target"),
+    start_x: Optional[float] = Query(None),
+    start_z: Optional[float] = Query(None),
+):
+    return planned_route(target_id, start_x, start_z)
+
+
+@router.get("/navigation/briefings")
+def get_navigation_briefings(
+    target_id: Optional[str] = Query(None, description="Asset ID, tag or object ID; defaults to the faulty target"),
+    start_x: Optional[float] = Query(None),
+    start_z: Optional[float] = Query(None),
+):
+    """Briefing per mapped asset the route passes, with the route progress (0..1) at which to play it."""
+    route = planned_route(target_id, start_x, start_z)
+    return build_briefings(get_scene().frames, route["waypoints"], get_dataset().get_assets(), get_copilot())
+
+
+@router.get("/navigation/grid")
+def get_navigation_grid():
+    """Occupancy grid behind the planner: walkable, blocked and too-narrow cells."""
+    return get_scene().get_obstacle_grid()
 
 
 @router.get("/scene/boiler-room.ply")

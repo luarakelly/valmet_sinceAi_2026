@@ -63,6 +63,14 @@
             <div class="asset-list" id="asset-list-container"></div>
           </div>
 
+          <div class="panel-box route-log-panel">
+            <div class="heading">
+              <span>Route log</span>
+              <span id="route-log-count" style="color: var(--muted)">0 / 0</span>
+            </div>
+            <ul class="route-log" id="route-log"></ul>
+          </div>
+
           <div class="panel-box" style="flex-shrink: 0">
             <div class="heading">
               <span>Drone Nav Controller</span>
@@ -150,11 +158,18 @@
             <button class="tool-btn" id="btn-cam-free" title="Free Camera">
               ⌖ Free <span style="opacity: 0.6">Shift+F</span>
             </button>
-            <button class="tool-btn" id="btn-semantic-extract" title="Extract 3D semantic asset frames from point cloud">
+            <button
+              class="tool-btn"
+              id="btn-semantic-extract"
+              title="Extract 3D semantic asset frames from point cloud"
+            >
               ⚡ 3D Extract
             </button>
           </div>
-          <div class="render-mode-toolbar" aria-label="Gaussian splat render modes">
+          <div
+            class="render-mode-toolbar"
+            aria-label="Gaussian splat render modes"
+          >
             <span class="render-mode-label">Render</span>
             <button
               class="render-mode-btn active"
@@ -176,6 +191,14 @@
               aria-pressed="false"
             >
               Heat
+            </button>
+            <button
+              class="render-mode-btn"
+              id="btn-obstacles"
+              aria-pressed="false"
+              title="Show what the route planner treats as blocked or too narrow"
+            >
+              Obstacles
             </button>
             <button
               class="render-mode-btn"

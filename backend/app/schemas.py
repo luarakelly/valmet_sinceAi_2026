@@ -208,8 +208,8 @@ class CopilotQueryRequest(BaseModel):
     """Diagnostic query command directed to an asset."""
     asset_id: str = Field(description="Target asset identifier or tag (e.g. ASSET-017 or P-005)")
     query: Optional[str] = Field(
-        default="Diagnose current condition and provide recommended next checks",
-        description="Technician question or diagnostic intent"
+        default=None,
+        description="Technician question; omit for a general status diagnosis"
     )
     prompt: Optional[str] = None  # Compatibility alias for query
     user_role: Optional[str] = Field(default="field_technician", description="Role of requesting user")

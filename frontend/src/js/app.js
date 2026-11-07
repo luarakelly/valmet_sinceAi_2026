@@ -16,10 +16,20 @@ let pointSize = 0.070;
 let renderMode = "splat";
 let sidebarOpen = true;
 let copilotOpen = true;
+let proximityRadius = 0; // metres to a box edge; the server owns the value (scene summary)
+let routeBriefings = [];
+let nextBriefingIndex = 0;
+let obstacleOverlay = null;
 
 // Canonical scene frame from the backend: Y up, floor at y = 0, room centred on x = z = 0.
 const ROBOT_GROUND_OFFSET = 0.15;
-const PROXIMITY_RADIUS = 1.5;
+const OBSTACLE_OVERLAY_Y = 0.03;
+const CELL_WALKABLE = 0;
+const CELL_BLOCKED = 1;
+const OBSTACLE_BLOCKED_RGBA = "rgba(239, 68, 68, 0.5)";
+const OBSTACLE_TIGHT_RGBA = "rgba(245, 158, 11, 0.22)";
+const MAX_NEARBY_ASSETS = 4;
+const MAX_NEARBY_STRUCTURES = 2;
 const ROBOT_SPEED_M_S = 0.8;
 const ORBIT_VIEW = { position: [-5.5, 3.2, 4.5], target: [0, 0.8, 0] };
 const TOP_VIEW = { position: [0, 9, 0.01], target: [0, 0, 0] };
@@ -648,6 +658,7 @@ async function fetchAssetsAndFrames() {
     const frames = await framesRes.json();
     const summary = await summaryRes.json();
     currentSelectedAsset = summary.target_asset_id;
+    proximityRadius = summary.proximity_radius_m;
     robotAvatar.position.set(summary.entry.x, ROBOT_GROUND_OFFSET, summary.entry.z);
 
     renderAssetList(assetsData);
@@ -658,6 +669,7 @@ async function fetchAssetsAndFrames() {
         frames.length + " Objects · " + summary.mapped_asset_count + " Assets";
     }
     loadNavigationPath(currentSelectedAsset);
+    loadObstacleOverlay();
   } catch (e) {
     console.error("Error fetching assets", e);
   }
@@ -779,6 +791,7 @@ function build3DBoundingBoxes(frames) {
       labelSprite: labelSprite,
       baseColor: colorHex,
       isMapped: !!frame.asset_id,
+      context: frame.context,
     };
 
     boundingFramesGroup.add(boxMesh);
@@ -799,9 +812,119 @@ async function loadNavigationPath(targetId) {
     document.getElementById("hud-dist").innerText = data.total_distance_m + "m";
 
     renderPathRibbon(currentPath);
+    loadBriefings(targetId);
   } catch (err) {
     console.error("Path error", err);
   }
+}
+
+async function loadBriefings(targetId) {
+  try {
+    const res = await fetch(
+      "/api/navigation/briefings?target_id=" + encodeURIComponent(targetId),
+    );
+    routeBriefings = await res.json();
+    resetRouteLog();
+  } catch (err) {
+    console.error("Briefings error", err);
+  }
+}
+
+function resetRouteLog() {
+  nextBriefingIndex = 0;
+  document.getElementById("route-log").replaceChildren();
+  updateRouteLogCount();
+}
+
+function updateRouteLogCount() {
+  document.getElementById("route-log-count").innerText =
+    nextBriefingIndex + " / " + routeBriefings.length;
+}
+
+// Event-based: a briefing plays when the robot reaches the route progress of its closest approach.
+function playDueBriefings() {
+  while (
+    nextBriefingIndex < routeBriefings.length &&
+    routeBriefings[nextBriefingIndex].progress <= navProgress
+  ) {
+    appendRouteLogEntry(routeBriefings[nextBriefingIndex]);
+    nextBriefingIndex++;
+  }
+  updateRouteLogCount();
+}
+
+function appendRouteLogEntry(briefing) {
+  const item = document.createElement("li");
+  item.className = "route-log-item route-log-" + briefing.state;
+
+  const tag = document.createElement("b");
+  tag.textContent = briefing.tag;
+  const meta = document.createElement("span");
+  meta.className = "route-log-meta";
+  meta.textContent = briefing.health + "% · " + briefing.distance_m + " m";
+  item.append(tag, meta);
+
+  if (briefing.is_generated) {
+    const badge = document.createElement("span");
+    badge.className = "route-log-ai";
+    badge.textContent = "AI";
+    item.append(badge);
+  }
+
+  const text = document.createElement("p");
+  text.textContent = briefing.text;
+  item.append(text);
+
+  item.onclick = function () {
+    openCopilotForAsset(briefing.asset_id);
+  };
+  document.getElementById("route-log").prepend(item);
+}
+
+async function loadObstacleOverlay() {
+  try {
+    const res = await fetch("/api/navigation/grid");
+    const grid = await res.json();
+    const canvas = document.createElement("canvas");
+    canvas.width = grid.cols;
+    canvas.height = grid.rows;
+    const ctx = canvas.getContext("2d");
+    grid.cells.forEach(function (cellClass, index) {
+      if (cellClass === CELL_WALKABLE) {
+        return;
+      }
+      ctx.fillStyle = OBSTACLE_TIGHT_RGBA;
+      if (cellClass === CELL_BLOCKED) {
+        ctx.fillStyle = OBSTACLE_BLOCKED_RGBA;
+      }
+      ctx.fillRect(index % grid.cols, Math.floor(index / grid.cols), 1, 1);
+    });
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    const width = grid.cols * grid.cell_m;
+    const depth = grid.rows * grid.cell_m;
+    obstacleOverlay = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }),
+    );
+    obstacleOverlay.rotation.x = -Math.PI / 2; // canvas row j then lies at z = z_min + j * cell
+    obstacleOverlay.position.set(grid.x_min + width / 2, OBSTACLE_OVERLAY_Y, grid.z_min + depth / 2);
+    obstacleOverlay.visible = false;
+    scene.add(obstacleOverlay);
+  } catch (err) {
+    console.error("Obstacle grid error", err);
+  }
+}
+
+function setObstacleOverlay(isVisible) {
+  if (obstacleOverlay) {
+    obstacleOverlay.visible = isVisible;
+  }
+  const button = document.getElementById("btn-obstacles");
+  button.classList.toggle("active", isVisible);
+  button.setAttribute("aria-pressed", String(isVisible));
 }
 
 function cumulativeLengths(waypoints) {
@@ -1438,6 +1561,7 @@ function toggleCopilotDrawer() {
 function toggleDroneNavigation() {
   if (navProgress >= 1.0) {
     navProgress = 0;
+    resetRouteLog();
   }
   isNavigating = !isNavigating;
 
@@ -1503,6 +1627,7 @@ function animate() {
     document.getElementById("hud-nav-fill").style.width =
       (navProgress * 100).toFixed(1) + "%";
 
+    playDueBriefings();
     checkProximityEvents(curX, curZ);
 
     if (cameraMode === "drone") {
@@ -1518,14 +1643,19 @@ function animate() {
   renderer.render(scene, camera);
 }
 
+function boxEdgeDistance(rx, rz, pos, size) {
+  const beyondX = Math.max(Math.abs(rx - pos[0]) - size[0] / 2, 0);
+  const beyondZ = Math.max(Math.abs(rz - pos[2]) - size[2] / 2, 0);
+  return Math.hypot(beyondX, beyondZ);
+}
+
 function checkProximityEvents(rx, rz) {
   const nearby = [];
 
   boundingFramesGroup.children.forEach(function (c) {
     if (c.userData && c.userData.pos) {
-      const [ax, ay, az] = c.userData.pos;
-      const dist = Math.sqrt((rx - ax) ** 2 + (rz - az) ** 2);
-      const isNear = dist < PROXIMITY_RADIUS;
+      const dist = boxEdgeDistance(rx, rz, c.userData.pos, c.userData.size);
+      const isNear = dist <= proximityRadius;
 
       if (c.userData.lineMat && c.userData.fillMat && c.userData.labelSprite) {
         if (isNear) {
@@ -1569,7 +1699,16 @@ function renderNearbyAssets(nearby) {
     .sort(function (a, b) {
       return a.dist - b.dist;
     });
+  const structures = nearby
+    .filter(function (n) {
+      return !n.data.isMapped;
+    })
+    .sort(function (a, b) {
+      return a.dist - b.dist;
+    })
+    .slice(0, MAX_NEARBY_STRUCTURES);
   const key = assets
+    .concat(structures)
     .map(function (n) {
       return n.data.id;
     })
@@ -1585,19 +1724,15 @@ function renderNearbyAssets(nearby) {
   }
   alertEl.style.display = "flex";
   document.getElementById("nearby-count").innerText =
-    assets.length + " assets · " + (nearby.length - assets.length) + " structures in " + PROXIMITY_RADIUS + " m";
+    assets.length + " assets · " + (nearby.length - assets.length) + " structures within " + proximityRadius + " m";
 
   const list = document.getElementById("nearby-list");
   list.innerHTML = "";
-  assets.slice(0, 5).forEach(function (n) {
-    let dotClass = n.data.state;
-    if (dotClass === "attention_required") {
-      dotClass = "attention";
-    }
+  assets.slice(0, MAX_NEARBY_ASSETS).forEach(function (n) {
     const li = document.createElement("li");
     li.className = "nearby-item";
     li.innerHTML =
-      '<span class="status-dot status-' + dotClass + '"></span>' +
+      '<span class="status-dot status-' + statusDotClass(n.data.state) + '"></span>' +
       "<b>" + n.data.tag + "</b>" +
       "<span>" + n.data.assetClass + " · " + n.data.state + " · " + n.data.health + "%</span>" +
       "<span>" + n.dist.toFixed(1) + " m</span>";
@@ -1606,6 +1741,32 @@ function renderNearbyAssets(nearby) {
     };
     list.appendChild(li);
   });
+  structures.forEach(function (n) {
+    list.appendChild(structureListItem(n));
+  });
+}
+
+function statusDotClass(state) {
+  if (state === "attention_required") {
+    return "attention";
+  }
+  return state;
+}
+
+function structureListItem(n) {
+  const context = n.data.context;
+  const li = document.createElement("li");
+  li.className = "nearby-item";
+  li.style.opacity = "0.7";
+  const dot = document.createElement("span");
+  dot.className = "status-dot status-" + statusDotClass(context.state);
+  const label = document.createElement("span");
+  label.style.gridColumn = "2 / 4";
+  label.textContent = context.summary;
+  const distance = document.createElement("span");
+  distance.textContent = n.dist.toFixed(1) + " m";
+  li.append(dot, label, distance);
+  return li;
 }
 window.appCheckProximityEvents = checkProximityEvents;
 
@@ -1739,6 +1900,7 @@ function setCameraMode(mode, targetBtn) {
   if (mode === "top") {
     camera.position.set(...TOP_VIEW.position);
     controls.target.set(...TOP_VIEW.target);
+    setObstacleOverlay(true);
   } else if (mode === "orbit") {
     camera.position.set(...ORBIT_VIEW.position);
     controls.target.set(...ORBIT_VIEW.target);
@@ -1790,6 +1952,7 @@ document.getElementById("btn-reset-nav").onclick = function () {
   document.getElementById("nav-badge").innerText = "Ready";
   document.getElementById("nav-badge").style.color = "var(--green)";
   document.getElementById("hud-nav-fill").style.width = "0%";
+  resetRouteLog();
   if (currentPath.length > 0) {
     robotAvatar.position.set(currentPath[0].x, ROBOT_GROUND_OFFSET, currentPath[0].z);
   }
@@ -1819,6 +1982,9 @@ document
     };
   });
 document.getElementById("btn-vision-analyze").onclick = analyzeCurrentView;
+document.getElementById("btn-obstacles").onclick = function () {
+  setObstacleOverlay(!(obstacleOverlay && obstacleOverlay.visible));
+};
 
 function askCopilot() {
   const input = document.getElementById("copilot-question");

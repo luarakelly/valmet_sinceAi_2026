@@ -15,13 +15,24 @@ import numpy as np
 
 from app.metaverse.asset_mapping import Binding, bind_assets, choose_target
 from app.metaverse.dataset import get_dataset
-from app.metaverse.navigation import ROBOT_RADIUS, WALK_SPEED_M_S, Cell, OccupancyGrid, build_grid, nearest_free, plan_route, travel_distances
+from app.metaverse.navigation import CELL, PROXIMITY_RADIUS_M, ROBOT_RADIUS, WALK_SPEED_M_S, Cell, OccupancyGrid, box_edge_distance_m, build_grid, nearest_free, plan_route, travel_distances
 from app.metaverse.point_cloud import PointCloud, VIEWER_PLY_PATH, load_scene_cloud
 from app.metaverse.segmentation import Room, SceneObject, detect_room, extract_objects
 
 logger = logging.getLogger("ask_your_factory.scene")
 
 ALGORITHM = "Voxel connected components + recursive thin-link / sparse-plane splitting"
+
+STRUCTURE_ROLES = {
+    "OVERHEAD_PIPE_RUN": "Overhead pipe run",
+    "OVERHEAD_PIPE_FITTING": "Pipe fitting",
+    "HORIZONTAL_PIPE_RUN": "Pipe run",
+    "VERTICAL_PIPE_RISER": "Pipe riser",
+    "VALVE_ASSEMBLY": "Valve assembly",
+    "FIELD_INSTRUMENT": "Field instrument",
+    "FLOOR_MOUNTED_MACHINE": "Floor machine",
+}
+DEFAULT_STRUCTURE_ROLE = "Structure"
 
 
 class RouteNotFound(Exception):
@@ -44,6 +55,7 @@ class BoilerRoomScene:
     def __init__(self) -> None:
         self.result = run_pipeline()
         self.frames = [self._frame(obj) for obj in self.result.objects]
+        self._attach_context()
 
     @property
     def target_asset_id(self) -> str:
@@ -70,6 +82,7 @@ class BoilerRoomScene:
             "room": {"x": [room.x_min, room.x_max], "z": [room.z_min, room.z_max], "ceiling": room.ceiling},
             "entry": {"x": self.result.entry[0], "y": 0.0, "z": self.result.entry[1]},
             "target_asset_id": self.target_asset_id,
+            "proximity_radius_m": PROXIMITY_RADIUS_M,
             "processing_seconds": self.result.seconds,
         }
 
@@ -81,11 +94,11 @@ class BoilerRoomScene:
                 return frame
         return None
 
-    def nearby(self, x: float, z: float, radius_m: float) -> List[Dict[str, Any]]:
-        """Frames whose centre lies within radius_m of (x, z) on the floor plane, nearest first."""
+    def nearby(self, x: float, z: float, radius_m: float = PROXIMITY_RADIUS_M) -> List[Dict[str, Any]]:
+        """Frames whose box edge lies within radius_m of (x, z) on the floor plane, nearest first."""
         hits = []
         for frame in self.frames:
-            distance = math.dist((x, z), (frame["pos"][0], frame["pos"][2]))
+            distance = box_edge_distance_m(x, z, frame["pos"], frame["size"])
             if distance <= radius_m:
                 hits.append({**frame, "distance_m": round(distance, 2)})
         return sorted(hits, key=lambda f: f["distance_m"])
@@ -118,6 +131,39 @@ class BoilerRoomScene:
             "algorithm": "A* on inflated 2D occupancy grid + line-of-sight smoothing",
         }
 
+    def get_obstacle_grid(self) -> Dict[str, Any]:
+        """Occupancy grid for the viewer: row-major cells, index = j * cols + i (see navigation.CELL_*)."""
+        grid = self.result.grid
+        cols, rows = grid.clearance.shape
+        return {
+            "x_min": grid.x_min,
+            "z_min": grid.z_min,
+            "cell_m": CELL,
+            "cols": cols,
+            "rows": rows,
+            "cells": grid.cell_classes().T.ravel().tolist(),
+        }
+
+    def _attach_context(self) -> None:
+        """Give every structure without its own Excel row the context of the nearest bound asset."""
+        bound = [f for f in self.frames if f["asset_id"]]
+        if not bound:
+            return
+        for frame in self.frames:
+            if frame["asset_id"]:
+                continue
+            anchor = min(bound, key=lambda b: math.dist(frame["pos"], b["pos"]))
+            role = STRUCTURE_ROLES.get(frame["label"], DEFAULT_STRUCTURE_ROLE)
+            frame["context"] = {
+                "asset_id": anchor["asset_id"],
+                "tag": anchor["tag"],
+                "area_name": anchor["mapped_asset"]["area_name"],
+                "state": anchor["state"],
+                "health": anchor["health"],
+                "distance_m": round(math.dist(frame["pos"], anchor["pos"]), 2),
+                "summary": f"{role} near {anchor['tag']} ({anchor['state']})",
+            }
+
     def _frame(self, obj: SceneObject) -> Dict[str, Any]:
         binding = self.result.bindings.get(obj.object_id)
         frame: Dict[str, Any] = {
@@ -132,6 +178,7 @@ class BoilerRoomScene:
             "asset_id": None,
             "mapped_asset": None,
             "mapping_confidence": None,
+            "context": None,
             "state": None,
             "health": None,
             "issue_code": None,

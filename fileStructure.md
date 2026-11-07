@@ -17,6 +17,7 @@ valmet_sinceAi_2026/
 │   │       ├── navigation.py              # Occupancy grid, A*, measured clearance
 │   │       ├── asset_mapping.py           # Builder-pack assets → extracted objects (+confidence)
 │   │       ├── scene_processor.py         # Orchestrates the scene pipeline, serves frames/routes
+│   │       ├── briefings.py               # Route briefings: one line per mapped asset passed, keyed to route progress
 │   │       ├── vision.py                  # Open-vocabulary YOLO-World visual detector
 │   │       └── copilot.py                 # Evidence engine + citation-verified Gemini layer
 │   ├── database.db                        # SQLite local runtime database
@@ -25,6 +26,8 @@ valmet_sinceAi_2026/
 │   ├── test_routes.py                     # API contract tests
 │   ├── test_scene.py                      # Extraction density, canonical frame, navigation guarantees
 │   ├── test_copilot.py                    # Drift detection, citation grounding, confidence
+│   ├── test_briefings.py                  # Briefings, box-edge proximity, context for unmapped frames
+│   ├── test_narration.py                  # Question routing, Gemini citation retry, narration filter
 │   └── test_acceptance.py                 # End-to-end demo flow
 │
 ├── frontend/                              # Frontend single-page application

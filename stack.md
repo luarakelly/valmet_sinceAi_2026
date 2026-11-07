@@ -25,13 +25,14 @@ FastAPI (Python 3.11+, Uvicorn, SQLModel / SQLite WAL)
 | `navigation.py` | 2D obstacle map between ankle and robot height, Euclidean-distance inflation by the robot radius, largest connected free region, A* with no corner cutting, string-pulling, and per-route `min_clearance_m` / `collision_free` measured on the final segments. |
 | `asset_mapping.py` | Binds the 30 builder-pack assets to compatible, reachable objects (pumps → floor machines, sensors → instruments …) with a `mapping_confidence`; the lowest-health asset becomes the inspection target at the far end of the walk. |
 | `scene_processor.py` | Orchestrates the above once per process and serves frames, anchors, proximity and routes. |
-| `copilot.py` | Evidence engine + optional Gemini layer (see above). |
+| `copilot.py` | Evidence engine: routes each question (cause, next steps, safety, history) to a grounded answer; optional Gemini layer retries once when it cites an unknown ID. |
+| `briefings.py` | Event-based route briefings: one line per mapped asset the route passes within 1 m (box edge), played when the robot reaches that point; Gemini only rephrases the pack's own fields. |
 | `dataset.py` | Loads the builder pack (JSON cache or Excel). |
 
 ## Configuration (`.env`)
 
 - `GEMINI_API_KEY` (optional): enables the LLM narrative; without it the deterministic evidence engine answers.
-- `GEMINI_MODEL` (optional, default `gemini-2.5-flash`).
+- `GEMINI_MODEL` (optional, default `gemini-3.6-flash`).
 - `DATABASE_URL` (optional, default `backend/database.db`).
 
 ## Quick Start
