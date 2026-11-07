@@ -179,12 +179,18 @@
         top: 0;
         left: 0;
         bottom: 0;
+        width: 340px;
+        max-width: 86vw;
         height: 100%;
         z-index: 20;
         pointer-events: none;
+        transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .sidebar-container.collapsed {
+        transform: translateX(-100%);
       }
       .sidebar {
-        width: 340px;
+        width: 100%;
         height: 100%;
         background: rgba(12, 20, 34, 0.94);
         backdrop-filter: blur(16px);
@@ -197,18 +203,16 @@
         gap: 12px;
         pointer-events: auto;
         box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
-        transition:
-          transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-          opacity 0.2s ease;
+        transition: opacity 0.2s ease;
       }
-      .sidebar.collapsed {
-        transform: translateX(-100%);
+      .sidebar.collapsed,
+      .sidebar-container.collapsed .sidebar {
         pointer-events: none;
         opacity: 0;
       }
       .sidebar-toggle-pill {
         position: absolute;
-        top: 14px;
+        top: 72px;
         right: -24px;
         width: 24px;
         height: 38px;
@@ -269,12 +273,18 @@
         top: 0;
         right: 0;
         bottom: 0;
+        width: 380px;
+        max-width: 86vw;
         height: 100%;
         z-index: 20;
         pointer-events: none;
+        transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .copilot-container.collapsed {
+        transform: translateX(100%);
       }
       .copilot-drawer {
-        width: 380px;
+        width: 100%;
         height: 100%;
         background: rgba(12, 20, 34, 0.94);
         backdrop-filter: blur(16px);
@@ -284,18 +294,16 @@
         flex-direction: column;
         pointer-events: auto;
         box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
-        transition:
-          transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-          opacity 0.2s ease;
+        transition: opacity 0.2s ease;
       }
-      .copilot-drawer.collapsed {
-        transform: translateX(100%);
+      .copilot-drawer.collapsed,
+      .copilot-container.collapsed .copilot-drawer {
         pointer-events: none;
         opacity: 0;
       }
       .copilot-toggle-pill {
         position: absolute;
-        top: 14px;
+        top: 72px;
         left: -24px;
         width: 24px;
         height: 38px;
@@ -846,68 +854,6 @@
       .nearby-item b {
         color: #fff;
       }
-      .route-log-panel {
-        flex-shrink: 0;
-        max-height: 30vh;
-        min-height: 0;
-      }
-      .route-log {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        overflow-y: auto;
-        font-size: 11px;
-      }
-      .route-log:empty::after {
-        content: "Start the drone: every asset it passes is briefed here.";
-        color: var(--muted);
-      }
-      .route-log-item {
-        border-left: 3px solid var(--green);
-        background: rgba(255, 255, 255, 0.03);
-        border-radius: 3px;
-        padding: 4px 8px;
-        cursor: pointer;
-        color: #cbd5e1;
-        animation: slide-up 0.25s ease;
-      }
-      .route-log-item.route-log-healthy {
-        opacity: 0.65;
-      }
-      .route-log-item.route-log-watch {
-        border-left-color: var(--yellow);
-      }
-      .route-log-item.route-log-degraded {
-        border-left-color: var(--orange);
-      }
-      .route-log-item.route-log-attention_required {
-        border-left-color: var(--red);
-        background: rgba(239, 68, 68, 0.1);
-      }
-      .route-log-item b {
-        color: #fff;
-        font-family: var(--font-mono);
-      }
-      .route-log-item .route-log-meta {
-        color: var(--muted);
-        font-family: var(--font-mono);
-        margin-left: 6px;
-      }
-      .route-log-item p {
-        margin: 2px 0 0;
-        line-height: 1.35;
-      }
-      .route-log-ai {
-        color: var(--accent);
-        border: 1px solid var(--accent);
-        border-radius: 3px;
-        font-size: 9px;
-        padding: 0 3px;
-        margin-left: 6px;
-      }
       .copilot-section-title {
         font-size: 10px;
         font-weight: 700;
@@ -1118,7 +1064,6 @@
         }
         .sidebar-container.collapsed,
         .copilot-container.collapsed {
-          width: 24px;
           pointer-events: none;
         }
         .sidebar-container.collapsed .sidebar-toggle-pill,
@@ -1158,395 +1103,169 @@
         }
       }
 
-      /* Hero Mission Launcher */
-      .hero-mission-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        background: linear-gradient(135deg, #0284c7 0%, #06b6d4 50%, #8b5cf6 100%);
-        color: #ffffff;
-        font-family: var(--font-sans);
-        font-size: 12px;
-        font-weight: 700;
-        padding: 6px 14px;
-        border-radius: 9999px;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        cursor: pointer;
-        box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      }
-      .hero-mission-btn:hover {
-        transform: translateY(-1px) scale(1.02);
-        box-shadow: 0 6px 22px rgba(6, 182, 212, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5);
-      }
-      .hero-mission-btn:active {
-        transform: translateY(0) scale(0.98);
-      }
-      .pulse-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #22d3ee;
-        box-shadow: 0 0 10px #22d3ee;
-        animation: pulseAnimation 1.6s infinite;
-      }
-      @keyframes pulseAnimation {
-        0% { transform: scale(0.9); opacity: 0.8; box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.7); }
-        70% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 0 6px rgba(34, 211, 238, 0); }
-        100% { transform: scale(0.9); opacity: 0.8; box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); }
-      }
+/* ===================== Guided UI (fix/guided-ui) ===================== */
+.mono { font-family: var(--font-mono); }
+.accent { color: var(--accent); }
+.muted { color: var(--muted); }
+.small { font-size: 10px; }
+.row-between { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.card-title { font-size: 13px; font-weight: 700; color: var(--accent); }
+.card-meta { font-size: 11px; color: var(--muted); text-transform: capitalize; }
+.mapping-note { font-size: 10px; color: #a5b4c8; font-family: var(--font-mono); line-height: 1.4; }
 
-      /* Omnibar Gemini Pill */
-      .omnibar-gemini-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        background: linear-gradient(135deg, rgba(6, 182, 212, 0.18), rgba(139, 92, 246, 0.28));
-        border: 1px solid rgba(6, 182, 212, 0.45);
-        color: #e0f2fe;
-        font-family: var(--font-sans);
-        font-size: 11px;
-        font-weight: 600;
-        padding: 4px 10px;
-        border-radius: 9999px;
-        white-space: nowrap;
-        cursor: pointer;
-        transition: all 0.2s;
-        flex-shrink: 0;
-      }
-      .omnibar-gemini-pill:hover {
-        background: linear-gradient(135deg, rgba(6, 182, 212, 0.3), rgba(139, 92, 246, 0.4));
-        border-color: var(--accent);
-        box-shadow: 0 0 12px rgba(6, 182, 212, 0.3);
-      }
-      .gemini-sparkle {
-        font-size: 12px;
-        animation: rotateSparkle 3s linear infinite;
-      }
-      @keyframes rotateSparkle {
-        0% { transform: rotate(0deg) scale(1); }
-        50% { transform: rotate(180deg) scale(1.2); }
-        100% { transform: rotate(360deg) scale(1); }
-      }
+header { gap: 16px; }
+.steps { list-style: none; display: flex; gap: 6px; margin: 0 auto; }
+.step {
+  display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 14px;
+  font-size: 11px; color: var(--muted); border: 1px solid var(--border); white-space: nowrap;
+}
+.step b {
+  width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.08); font-size: 10px;
+}
+.step.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.step.active b { background: var(--accent); color: #031018; }
+.step.done { color: var(--green); border-color: rgba(16, 185, 129, 0.4); }
+.step.done b { background: var(--green); color: #031018; }
+.header-right .btn, .header-right .btn-secondary { padding: 6px 12px; font-size: 12px; white-space: nowrap; }
+.speed { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.speed input { width: 80px; }
+.api-link { color: var(--muted); font-size: 12px; text-decoration: none; }
+.api-link:hover { color: var(--accent); }
 
-      /* Omnibar Suggestion Types */
-      .omnibar-suggestion-item.gemini-prompt-item {
-        background: linear-gradient(90deg, rgba(6, 182, 212, 0.12), rgba(139, 92, 246, 0.18));
-        border-bottom: 1px solid rgba(6, 182, 212, 0.3);
-        padding: 10px 14px;
-      }
-      .omnibar-suggestion-item.gemini-prompt-item:hover {
-        background: linear-gradient(90deg, rgba(6, 182, 212, 0.25), rgba(139, 92, 246, 0.32));
-      }
+.floating-top-bar { left: 14px; flex-wrap: wrap; justify-content: flex-end; }
+.render-mode-btn.active { background: rgba(0, 210, 255, 0.14); color: var(--accent); }
+.more-menu { position: relative; }
+.more-dropdown {
+  display: none; position: absolute; right: 0; top: calc(100% + 6px); min-width: 230px; z-index: 40;
+  background: var(--panel-solid); border: 1px solid var(--border); border-radius: 8px; padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); flex-direction: column;
+}
+.more-dropdown.open { display: flex; }
+.more-dropdown button {
+  background: transparent; border: none; color: var(--text); text-align: left; padding: 8px 10px;
+  border-radius: 6px; font-size: 12px; cursor: pointer;
+}
+.more-dropdown button:hover { background: var(--accent-dim); color: var(--accent); }
+#btn-vision-analyze { color: inherit; }
 
-      /* Multivariate Telemetry Signal Selector */
-      .telem-signal-selector {
-        display: flex;
-        gap: 4px;
-        overflow-x: auto;
-        padding-bottom: 4px;
-        margin-bottom: 4px;
-      }
-      .telem-pill {
-        background: rgba(15, 23, 42, 0.6);
-        border: 1px solid var(--border);
-        color: var(--muted);
-        font-family: var(--font-mono);
-        font-size: 9px;
-        padding: 2px 7px;
-        border-radius: 4px;
-        cursor: pointer;
-        white-space: nowrap;
-        transition: all 0.15s;
-      }
-      .telem-pill:hover {
-        color: #fff;
-        border-color: rgba(255, 255, 255, 0.3);
-      }
-      .telem-pill.active {
-        background: rgba(0, 210, 255, 0.2);
-        border-color: var(--accent);
-        color: #38bdf8;
-        font-weight: 700;
-      }
+.legend {
+  position: absolute; left: 14px; bottom: 84px; z-index: 15; display: flex; gap: 10px; flex-wrap: wrap;
+  font-size: 10px; color: var(--muted); background: rgba(15, 23, 42, 0.75); padding: 5px 10px; border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.legend span { display: inline-flex; align-items: center; gap: 4px; }
+.legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; animation: none; }
+.status-structure { background: #5eead4; box-shadow: 0 0 6px #5eead4; }
 
-      /* ============================================================
-         PROCESS FLOW TOPOLOGY & CONNECTED CIRCUIT STYLING
-         ============================================================ */
-      .topology-card {
-        background: var(--card);
-        border: 1px solid rgba(0, 210, 255, 0.25);
-        border-radius: 8px;
-        padding: 12px;
-        margin-bottom: 12px;
-      }
+.help-card {
+  display: none; position: absolute; top: 70px; left: 50%; transform: translateX(-50%); z-index: 30;
+  width: min(560px, calc(100% - 32px)); background: rgba(12, 20, 34, 0.97); border: 1px solid var(--accent);
+  border-radius: 12px; padding: 16px 18px; font-size: 13px; line-height: 1.5; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  flex-direction: column; gap: 10px;
+}
+.help-card.open { display: flex; }
+.help-title { font-weight: 800; color: var(--accent); font-size: 14px; }
+.help-card ol { padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.help-mouse { font-size: 11px; color: var(--muted); }
+.help-card .btn { align-self: flex-end; padding: 6px 16px; }
 
-      .topology-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 8px;
-      }
+.asset-group summary {
+  cursor: pointer; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.5px; padding: 6px 2px; list-style: revert;
+}
+.asset-group { display: flex; flex-direction: column; gap: 4px; }
+.asset-group > .asset-card { margin-bottom: 4px; }
+.asset-card-main {
+  display: grid !important; grid-template-columns: 12px auto 1fr auto; gap: 6px; align-items: center;
+}
+.asset-card-main b { color: #fff; font-size: 13px; }
+.asset-class { font-size: 11px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
+.asset-health { font-family: var(--font-mono); font-weight: 700; font-size: 12px; }
+.proximity-alert { min-width: 420px; }
+.nearby-item { grid-template-columns: 10px 64px 1fr auto; cursor: pointer; }
+.nearby-item:hover { color: #fff; }
+.safety-card b { display: block; margin-bottom: 3px; }
+#btn-submit-wo { padding: 10px; font-size: 12px; }
 
-      .topology-title {
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--accent);
-        letter-spacing: 0.02em;
-      }
+/* Side-panel toggles sit below the floating toolbar so they never cover its buttons. */
+.sidebar-toggle-pill,
+.copilot-toggle-pill { top: 72px; }
 
-      .topology-flow-rate {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        padding: 2px 6px;
-        border-radius: 4px;
-        background: rgba(0, 210, 255, 0.12);
-        color: #38bdf8;
-        border: 1px solid rgba(0, 210, 255, 0.3);
-      }
+/* "Near the robot" group in the Equipment list (replaces the floating panel). */
+.asset-group.near-group summary { color: var(--accent); }
+.asset-group.near-group { border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 6px; }
 
-      .flow-chain-container {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        overflow-x: auto;
-        padding: 8px 4px;
-        margin: 6px 0;
-        scrollbar-width: thin;
-      }
+/* ===================== Slice 1: clean first impression ===================== */
+.debug-only { display: none; }
+body.debug .debug-only { display: block; }
+.more-dropdown button.active { color: var(--accent); }
 
-      .flow-node-btn {
-        background: rgba(15, 23, 42, 0.85);
-        border: 1px solid var(--border);
-        color: var(--text-secondary);
-        font-family: var(--font-mono);
-        font-size: 10px;
-        padding: 4px 8px;
-        border-radius: 6px;
-        cursor: pointer;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 2px;
-        white-space: nowrap;
-        transition: all 0.15s ease;
-      }
+/* Loading screen: the photoreal room is the first thing you see. */
+.loading-screen {
+  position: absolute; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 50% 40%, #0d1a2b 0%, #050910 75%); transition: opacity 0.6s ease;
+}
+.loading-screen.done { opacity: 0; pointer-events: none; }
+.loading-box { width: min(420px, 80%); text-align: center; }
+.loading-title { font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 14px; }
+.loading-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.loading-fill { height: 100%; width: 2%; background: var(--accent); transition: width 0.25s ease; }
+.loading-text { margin-top: 10px; font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
 
-      .flow-node-btn:hover {
-        border-color: var(--accent);
-        color: #fff;
-        background: rgba(0, 210, 255, 0.15);
-      }
+/* Left column: pinned target, group dots, detected objects. */
+.target-card { margin: 8px 0 10px; }
+.target-card:empty { display: none; }
+.target-card > * { cursor: default; }
+.target-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--red); font-weight: 700; margin-bottom: 4px; }
+.target-card {
+  border: 1px solid rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.08); border-radius: 10px; padding: 8px 10px;
+}
+.target-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.target-row:first-of-type { cursor: pointer; }
+.target-row + .target-row { margin-top: 6px; justify-content: space-between; }
+.target-row b { color: #fff; }
+.target-row .asset-health { margin-left: auto; font-weight: 700; }
+.target-row .btn { padding: 4px 12px; font-size: 12px; }
+.asset-group summary::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.asset-group.near-group summary::before { background: var(--accent); }
+.asset-group.attention-group summary::before { background: var(--red); }
+.asset-group.healthy-group summary::before { background: var(--green); }
+.asset-group.detected-group summary::before { background: #5eead4; }
+.detected-body { padding: 4px 6px 8px; font-size: 12px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 6px; }
+.detected-line b { color: #fff; }
+.detected-counts { list-style: none; margin: 0; padding: 0 0 0 4px; display: grid; gap: 2px; }
+.detected-counts li { display: flex; justify-content: space-between; color: var(--muted); }
+.detected-counts li b { color: var(--text-secondary); }
+.detected-body .action-pill { align-self: flex-start; }
 
-      .flow-node-btn.active {
-        border-color: var(--accent);
-        background: rgba(0, 210, 255, 0.25);
-        color: #fff;
-        box-shadow: 0 0 10px rgba(0, 210, 255, 0.3);
-      }
+/* Right column: asset · diagnosis · why · conversation · footer. */
+.copilot-body { display: flex; flex-direction: column; gap: 12px; }
+.cp-asset .card-meta { margin-top: 4px; }
+.cp-diagnosis { border: 1px solid var(--border); border-left-width: 3px; border-radius: 10px; padding: 10px 12px; background: var(--card); display: flex; flex-direction: column; gap: 8px; }
+.cp-row { display: grid; grid-template-columns: 104px 1fr; gap: 8px; font-size: 13px; line-height: 1.4; }
+.cp-key { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 700; padding-top: 2px; }
+.cp-val { color: var(--text); }
+.cp-conf { display: grid; grid-template-columns: 104px 1fr 40px; gap: 8px; align-items: center; }
+.conf-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.conf-fill { height: 100%; width: 0; background: var(--accent); }
+.cp-note { font-size: 11px; color: var(--muted); }
+.cp-note:empty { display: none; }
+.cp-why summary { cursor: pointer; font-size: 12px; color: var(--accent); }
+.why-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.why-list li { display: grid; grid-template-columns: auto 1fr; gap: 8px; font-size: 12px; color: var(--text-secondary); align-items: start; }
+.why-list .evidence-chip { white-space: nowrap; }
+.cp-thread-title { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.cp-thread { display: flex; flex-direction: column; gap: 8px; max-height: 38vh; overflow-y: auto; padding-right: 2px; }
+.msg { font-size: 13px; line-height: 1.45; padding: 8px 10px; border-radius: 10px; max-width: 92%; white-space: pre-wrap; }
+.msg-user { align-self: flex-end; background: var(--accent-dim); border: 1px solid var(--border-accent); color: var(--text); }
+.msg-ai { align-self: flex-start; background: var(--card); border: 1px solid var(--border); color: var(--text-secondary); }
+.msg-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.cp-footer { margin-top: auto; border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.cp-safety { font-size: 11px; color: var(--yellow); }
+.cp-engine { font-size: 10px; color: var(--muted); font-family: var(--font-mono); }
 
-      .flow-node-btn.fault-node {
-        border-color: var(--red);
-        background: rgba(239, 68, 68, 0.2);
-        color: #fca5a5;
-      }
-
-      .flow-arrow {
-        color: var(--accent);
-        font-size: 11px;
-        opacity: 0.7;
-        flex-shrink: 0;
-      }
-
-      .flow-arrow.warning-arrow {
-        color: var(--red);
-        animation: pulseWarning 1.5s infinite;
-      }
-
-      @keyframes pulseWarning {
-        0%, 100% { opacity: 0.5; transform: scale(1); }
-        50% { opacity: 1; transform: scale(1.2); }
-      }
-
-      .fault-propagation-alert {
-        background: rgba(239, 68, 68, 0.12);
-        border: 1px solid rgba(239, 68, 68, 0.35);
-        border-radius: 6px;
-        padding: 8px 10px;
-        font-size: 11px;
-        color: #fca5a5;
-        line-height: 1.4;
-        margin-top: 6px;
-        display: flex;
-        align-items: flex-start;
-        gap: 6px;
-      }
-
-      /* ============================================================
-         FIRST-PERSON DRONE HUD & INSPECTION OVERLAY
-         ============================================================ */
-      .drone-hud-overlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        z-index: 35;
-        display: none;
-      }
-
-      .drone-hud-overlay.active {
-        display: block;
-      }
-
-      .drone-avionics-card {
-        position: absolute;
-        top: 65px;
-        left: 20px;
-        background: rgba(7, 12, 20, 0.85);
-        border: 1px solid rgba(0, 210, 255, 0.3);
-        border-radius: 8px;
-        padding: 8px 12px;
-        backdrop-filter: blur(10px);
-        font-family: var(--font-mono);
-        font-size: 11px;
-        display: flex;
-        flex-direction: column;
-        gap: 3px;
-        color: #cbd5e1;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-      }
-
-      .drone-avionics-header {
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--accent);
-        margin-bottom: 2px;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-      }
-
-      .drone-hud-reticle {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        width: 72px;
-        height: 72px;
-        border: 1px dashed rgba(0, 210, 255, 0.4);
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        pointer-events: none;
-      }
-
-      .drone-hud-crosshair {
-        width: 6px;
-        height: 6px;
-        background: rgba(0, 210, 255, 0.85);
-        border-radius: 50%;
-        box-shadow: 0 0 8px var(--accent);
-      }
-
-      .drone-hud-range {
-        position: absolute;
-        bottom: -20px;
-        font-family: var(--font-mono);
-        font-size: 10px;
-        color: var(--accent);
-        white-space: nowrap;
-      }
-
-      /* Target Arrival Holographic Modal */
-      .target-arrival-card {
-        position: absolute;
-        bottom: 80px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: min(600px, calc(100% - 40px));
-        background: rgba(12, 20, 34, 0.94);
-        border: 1px solid var(--border-accent);
-        border-radius: 12px;
-        padding: 16px 20px;
-        backdrop-filter: blur(16px);
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 20px rgba(0, 210, 255, 0.2);
-        z-index: 45;
-        display: none;
-        pointer-events: auto;
-        animation: slideUpArrival 0.3s ease-out;
-      }
-
-      .target-arrival-card.active {
-        display: block;
-      }
-
-      @keyframes slideUpArrival {
-        from { opacity: 0; transform: translate(-50%, 20px); }
-        to { opacity: 1; transform: translate(-50%, 0); }
-      }
-
-      .arrival-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 10px;
-      }
-
-      .arrival-title-group {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .arrival-title {
-        font-size: 14px;
-        font-weight: 800;
-        color: #fff;
-      }
-
-      .arrival-badge {
-        font-size: 10px;
-        font-weight: 700;
-        padding: 3px 8px;
-        border-radius: 4px;
-        background: rgba(239, 68, 68, 0.2);
-        color: #f87171;
-        border: 1px solid rgba(239, 68, 68, 0.4);
-        font-family: var(--font-mono);
-      }
-
-      .arrival-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-        margin-bottom: 12px;
-      }
-
-      .arrival-box {
-        background: rgba(18, 29, 48, 0.7);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 8px 10px;
-        font-size: 11px;
-        line-height: 1.4;
-      }
-
-      .arrival-box-title {
-        font-size: 10px;
-        font-weight: 700;
-        text-transform: uppercase;
-        color: var(--muted);
-        margin-bottom: 4px;
-        letter-spacing: 0.04em;
-      }
-
-      .arrival-actions {
-        display: flex;
-        gap: 8px;
-      }
+/* ===================== Slice 2: click to explore ===================== */
+.hint-line { flex: 1; text-align: center; font-size: 12px; color: var(--muted); padding: 0 16px; }
+.hint-line b { color: var(--text-secondary); }
+#canvas-container canvas { cursor: crosshair; }

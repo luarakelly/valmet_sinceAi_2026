@@ -11,4 +11,4 @@ if not exist "%PYTHON%" (
 )
 
 cd /d "%BACKEND_DIR%"
-"%PYTHON%" -m uvicorn app.main:app --reload
+"%PYTHON%" -m uvicorn api.server:app --app-dir src --reload --reload-dir src

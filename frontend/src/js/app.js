@@ -1,170 +1,175 @@
+// Ask Your Factory — guided boiler-room digital twin.
+// Flow: 1) scene + faulty target  2) robot walks, nearby frames light up  3) AI diagnosis on arrival.
+// Scene frame from the backend: Y up, floor at y = 0, room centred on x = z = 0.
+// Loaded by bootstrap.js after THREE (r180, with OrbitControls/PLYLoader) and Spark are on window.
+
 let scene, camera, renderer, controls;
-let pointCloud = null;
-let boundingFramesGroup = new THREE.Group();
+let sceneModel = null; // SplatMesh (photoreal), THREE.Points (scan) or THREE.Mesh (surface)
+let pointCloud = null; // alias kept for the shaders/resize helpers
+let viewKind = "splat"; // "splat" (photoreal Gaussian splat) | "points" | "mesh"
+let sparkRenderer = null;
+let gridHelper = null;
+let loadToken = 0; // ignores late loads after the user switched view
+let renderMode = "splat"; // "splat" | "heat"
+const boundingFramesGroup = new THREE.Group();
 let pathLineMesh = null;
 let robotAvatar = null;
+
 let assetsData = [];
+let framesData = [];
+const framesById = new Map(); // frame id (asset id when mapped, else OBJ-xxx) -> frame
+let sceneSummary = null;
+let roomBounds = { x: [-5, 5], z: [-3, 3], ceiling: 3 };
+
+let routeTargetId = null; // where the robot is (or was last) heading: an asset id, or "POINT"
+let faultTargetId = null; // the pre-determined faulty device (pinned card); never changes
+let goalMarker = null;
+let selectedId = null; // what the copilot panel shows
+let nearbyIds = new Set();
+let nearLabelIds = new Set(); // the few nearest assets that get a label (keeps the view readable)
+let nearbyAssets = []; // [{assetId, dist}] nearest first, shown in the left list
+const groupOpen = { near: true, attention: true, healthy: false, detected: false }; // remembers what the user expanded
+let showAllFrames = false;
+
 let currentPath = [];
-let navProgress = 0;
 let pathLengths = [0];
-let lastFrameTime = performance.now();
+let navProgress = 0;
 let isNavigating = false;
-let navSpeed = 1.5;
-let cameraMode = "orbit";
-let currentSelectedAsset = "ASSET-017";
-let pointSize = 0.070;
-let renderMode = "splat";
+const navSpeed = 1.5; // fixed, comfortable walking pace
+let lastFrameTime = performance.now();
+let cameraMode = "follow"; // "follow" (orbit around the robot) | "top" | "free" (debug)
+let walkGrid = null; // {x_min, z_min, cell, nx, nz, reachable: Uint8Array, blocked: Uint8Array}
+let lastRobotPos = null;
+let camTween = null;
 let sidebarOpen = true;
-let copilotOpen = true;
-let denseFramesVisible = false;
-let followCameraMode = false;
-let currentTelemetryRecords = [];
-let currentTelemetrySignal = "primary";
-let robotScannerRing = null;
-let allSceneFrames = [];
-let proximityRadius = 0; // metres to a box edge; the server owns the value (scene summary)
-let routeBriefings = [];
-let nextBriefingIndex = 0;
-let obstacleOverlay = null;
-let processTopologyGroup = new THREE.Group();
-let processTopologyData = [];
-let activeTopologyLoopId = null;
-let lidarScanCone = null;
-let topologyTubes = [];
+let copilotOpen = false;
 
-// Canonical scene frame from the backend: Y up, floor at y = 0, room centred on x = z = 0.
 const ROBOT_GROUND_OFFSET = 0.15;
-const OBSTACLE_OVERLAY_Y = 0.03;
-const CELL_WALKABLE = 0;
-const CELL_BLOCKED = 1;
-const OBSTACLE_BLOCKED_RGBA = "rgba(239, 68, 68, 0.5)";
-const OBSTACLE_TIGHT_RGBA = "rgba(245, 158, 11, 0.22)";
-const MAX_NEARBY_ASSETS = 4;
-const MAX_NEARBY_STRUCTURES = 2;
+const PROXIMITY_RADIUS = 1.5;
+const MAX_NEAR_LABELS = 4;
+const XRAY_POINT_SIZE = 0.035;
+const XRAY_BASE_OPACITY = 0.75;
+const XRAY_PULSE_AMPLITUDE = 0.2;
+const XRAY_PULSE_HZ = 1.1;
+const XRAY_RENDER_ORDER = 20;
+const xrayGeometryCache = new Map(); // frame id -> Float32Array of x, y, z
+let xrayPoints = null;
+let xrayRequest = 0; // ignores a late response after the selection changed
+let xraySprite = null;
+// Labels keep a fixed on-screen size (not world size), so they never fill the screen up close.
+const LABEL_SCREEN_HEIGHT = 0.045; // fraction of the view height
+// Follow camera: eye height behind the robot, on the path it already walked (always free space).
+// The splat was captured at standing height, so this is where it looks sharp.
+const FOLLOW_BACK = 2.2; // default distance behind the robot
+const FOLLOW_EYE = 1.6; // camera height when placed behind the robot
+const ROBOT_HEAD = 0.9; // the follow camera orbits around this point on the robot
+const FOLLOW_LIMITS = { min: 0.8, max: 4.0, minPolar: Math.PI * 0.12, maxPolar: Math.PI * 0.47 };
+const DEBUG = new URLSearchParams(window.location.search).has("debug");
+const LABEL_PRIORITY = { target: 4, selected: 3, fault: 2, near: 1 };
 const ROBOT_SPEED_M_S = 0.8;
-const DRONE_CAMERA_HEIGHT_M = 0.42;
-const TOPOLOGY_TUBE_RADIUS_M = 0.024;
-const SCAN_PULSE_SPEED = 0.005;
-const ORBIT_VIEW = { position: [-5.5, 3.2, 4.5], target: [0, 0.8, 0] };
-const TOP_VIEW = { position: [0, 9, 0.01], target: [0, 0, 0] };
-
-const freeCam = {
-  active: false,
-  keys: new Set(),
-  yaw: 0,
-  pitch: 0,
-  speed: 2.8,
-  lastTime: 0,
+const ORBIT_VIEW = { position: [-5.5, 3.6, 5.0], target: [0, 0.8, 0] };
+const TOP_VIEW = { position: [0, 10, 0.01], target: [0, 0, 0] };
+const STATE_COLORS = {
+  attention_required: 0xef4444,
+  degraded: 0xf97316,
+  watch: 0xf59e0b,
+  healthy: 0x10b981,
+  structure: 0x5eead4,
 };
+const STATE_CSS = {
+  attention_required: "#ef4444",
+  degraded: "#f97316",
+  watch: "#f59e0b",
+  healthy: "#10b981",
+  structure: "#5eead4",
+};
+
+const freeCam = { active: false, keys: new Set(), yaw: 0, pitch: 0, speed: 2.8, lastTime: 0 };
+
+// ---------------------------------------------------------------- setup
 
 function init3D() {
   const container = document.getElementById("canvas-container");
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x06090e);
-  scene.fog = new THREE.FogExp2(0x06090e, 0.038);
+  scene.background = new THREE.Color(0x070b12);
 
-  camera = new THREE.PerspectiveCamera(
-    60,
-    container.clientWidth / container.clientHeight,
-    0.05,
-    120,
-  );
+  camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.03, 200);
   camera.position.set(...ORBIT_VIEW.position);
 
-  renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    powerPreference: "high-performance",
-  });
-  renderer.outputEncoding = THREE.sRGBEncoding;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  // antialias off: recommended by Spark (no benefit for splats, large cost).
+  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.NoToneMapping; // keep the scan's real colours
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
 
+  if (window.Spark) {
+    sparkRenderer = new window.Spark.SparkRenderer({ renderer: renderer });
+  }
+
   controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
+  controls.dampingFactor = 0.08;
+  controls.rotateSpeed = 0.6;
+  controls.zoomSpeed = 0.9;
+  controls.panSpeed = 0.8;
+  controls.screenSpacePanning = true;
+  controls.minDistance = 0.4;
+  controls.maxDistance = 18;
+  controls.maxPolarAngle = Math.PI * 0.495; // never go below the floor
   controls.target.set(...ORBIT_VIEW.target);
 
-  const ambLight = new THREE.AmbientLight(0xffffff, 0.9);
-  scene.add(ambLight);
-  const dirLight = new THREE.DirectionalLight(0x00d2ff, 0.65);
+  // r155+ uses physically based light units: these values match the old r128 look.
+  scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+  const dirLight = new THREE.DirectionalLight(0xbfe9ff, 1.8);
   dirLight.position.set(5, 10, 5);
   scene.add(dirLight);
 
-  const grid = new THREE.GridHelper(16, 16, 0x183040, 0x0b1722);
-  grid.position.y = 0;
-  grid.material.transparent = true;
-  grid.material.opacity = 0.42;
-  scene.add(grid);
+  gridHelper = new THREE.GridHelper(20, 40, 0x183040, 0x0b1722);
+  gridHelper.material.transparent = true;
+  gridHelper.material.opacity = 0.35;
+  scene.add(gridHelper);
+  if (sparkRenderer) scene.add(sparkRenderer);
 
-  boundingFramesGroup.visible = true;
   scene.add(boundingFramesGroup);
-
-  processTopologyGroup.visible = true;
-  scene.add(processTopologyGroup);
-
   createRobotAvatar();
-  setupTargetArrivalCard();
-  loadBoilerRoomPLY();
-  fetchAssetsAndFrames();
 
   window.addEventListener("resize", onWindowResize);
   setupFreeCamera();
+  setupViewportPicking();
   setupOmnibar();
-  setupPanelCollapses();
-  setupViewportRaycaster();
-  // Collapse left and right panels by default for clean open viewport
-  toggleLeftSidebar();
-  toggleCopilotDrawer();
+  setupPanels();
+  setupToolbar();
+  setupHelp();
 
+  document.body.classList.toggle("debug", DEBUG);
+  loadSceneModel(sparkRenderer ? "splat" : "points");
+  fetchSceneData();
+  showVerifyReport();
   animate();
+  startDevAutoReload();
 }
 
-function setupViewportRaycaster() {
-  const raycaster = new THREE.Raycaster();
-  const mouse = new THREE.Vector2();
-  let mouseDownTime = 0;
-  let mouseDownPos = { x: 0, y: 0 };
-
-  renderer.domElement.addEventListener("mousedown", (e) => {
-    mouseDownTime = Date.now();
-    mouseDownPos = { x: e.clientX, y: e.clientY };
-  });
-
-  renderer.domElement.addEventListener("mouseup", (e) => {
-    const dt = Date.now() - mouseDownTime;
-    const dx = Math.abs(e.clientX - mouseDownPos.x);
-    const dy = Math.abs(e.clientY - mouseDownPos.y);
-    if (dt > 300 || dx > 4 || dy > 4) return;
-
-    const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(
-      boundingFramesGroup.children,
-      true,
-    );
-    if (intersects.length > 0) {
-      let topObj = intersects[0].object;
-      while (
-        topObj &&
-        (!topObj.userData || !topObj.userData.id) &&
-        topObj.parent
-      ) {
-        topObj = topObj.parent;
-      }
-      if (topObj && topObj.userData && topObj.userData.id) {
-        const targetId = topObj.userData.id;
-        selectAsset(targetId);
-        showToast("Selected " + (topObj.userData.tag || targetId) + " in 3D");
-      }
+// Development only: reload the page when the server restarts or a frontend file changes.
+function startDevAutoReload() {
+  if (!/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) return;
+  let known = null;
+  setInterval(async function () {
+    try {
+      const res = await fetch("/api/dev/version", { cache: "no-store" });
+      if (!res.ok) return;
+      const v = await res.json();
+      const key = v.boot_id + ":" + v.frontend_mtime;
+      if (known && key !== known) window.location.reload();
+      known = key;
+    } catch (e) {
+      /* server restarting: try again on the next tick */
     }
-  });
+  }, 2000);
 }
+
+// ---------------------------------------------------------------- scene geometry
 
 function createRobotAvatar() {
   robotAvatar = new THREE.Group();
@@ -225,37 +230,22 @@ function createRobotAvatar() {
   robotAvatar.add(light);
   robotAvatar.add(light.target);
 
-  const ringGeo = new THREE.RingGeometry(1.8, 1.95, 48);
+  const ringGeo = new THREE.RingGeometry(0.34, 0.42, 40); // small marker under the robot
   ringGeo.rotateX(-Math.PI / 2);
   const ringMat = new THREE.MeshBasicMaterial({
     color: 0x00d2ff,
     transparent: true,
-    opacity: 0.45,
+    opacity: 0.35,
     side: THREE.DoubleSide,
   });
-  robotScannerRing = new THREE.Mesh(ringGeo, ringMat);
-  robotScannerRing.position.y = -0.1;
-  robotAvatar.add(robotScannerRing);
-
-  const coneGeo = new THREE.ConeGeometry(0.85, 2.4, 16, 1, true);
-  coneGeo.rotateX(-Math.PI / 2);
-  const coneMat = new THREE.MeshBasicMaterial({
-    color: 0x00d2ff,
-    transparent: true,
-    opacity: 0.14,
-    wireframe: true,
-  });
-  lidarScanCone = new THREE.Mesh(coneGeo, coneMat);
-  lidarScanCone.position.set(0, 0.38, -1.2);
-  robotAvatar.add(lidarScanCone);
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.position.y = -0.1;
+  robotAvatar.add(ring);
 
   robotAvatar.position.set(0, ROBOT_GROUND_OFFSET, 0);
   scene.add(robotAvatar);
 }
 
-/**
- * Prepares the point cloud geometry with guaranteed bounding volumes and vertex colors.
- */
 function preparePointGeometry(geometry) {
   if (!geometry.hasAttribute("color")) {
     const count = geometry.attributes.position.count;
@@ -270,10 +260,6 @@ function preparePointGeometry(geometry) {
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
-}
-
-function cleanAndPreparePointGeometry(rawGeometry) {
-  return preparePointGeometry(rawGeometry);
 }
 
 function createPointMaterial(geometry) {
@@ -413,6 +399,7 @@ function createPointMaterial(geometry) {
         }
 
         gl_FragColor = vec4(outputColor, splatAlpha);
+        #include <colorspace_fragment>
       }
     `,
     transparent: true,
@@ -422,114 +409,6 @@ function createPointMaterial(geometry) {
   });
 }
 
-function applyRenderMode(mode) {
-  renderMode = mode;
-  let modeIndex = 0;
-  if (mode === "studio") {
-    modeIndex = 1;
-  } else if (mode === "heat") {
-    modeIndex = 2;
-  }
-
-  document
-    .querySelectorAll(".render-mode-btn[data-render-mode]")
-    .forEach(function (button) {
-      let active = false;
-      if (button.dataset.renderMode === mode) {
-        active = true;
-      }
-      button.classList.toggle("active", active);
-      if (active) {
-        button.setAttribute("aria-pressed", "true");
-      } else {
-        button.setAttribute("aria-pressed", "false");
-      }
-    });
-
-  if (pointCloud && pointCloud.material && pointCloud.material.uniforms) {
-    if (pointCloud.material.uniforms.uMode) {
-      pointCloud.material.uniforms.uMode.value = modeIndex;
-    }
-    if (pointCloud.material.uniforms.uPointSize) {
-      if (mode === "splat") {
-        pointCloud.material.uniforms.uPointSize.value = 0.088;
-      } else {
-        pointCloud.material.uniforms.uPointSize.value = 0.065;
-      }
-    }
-    if (pointCloud.material.uniforms.uOpacity) {
-      if (mode === "heat") {
-        pointCloud.material.uniforms.uOpacity.value = 0.92;
-      } else {
-        pointCloud.material.uniforms.uOpacity.value = 0.98;
-      }
-    }
-  }
-
-  showToast("Render mode: " + mode.charAt(0).toUpperCase() + mode.slice(1));
-}
-
-function renderVisionDetections(result) {
-  const overlay = document.getElementById("vision-overlay");
-  overlay.innerHTML = "";
-  const imageWidth = result.image.width;
-  const imageHeight = result.image.height;
-  result.detections.forEach(function (detection) {
-    const box = document.createElement("div");
-    box.className = "vision-detection";
-    box.style.left = (detection.box.x / imageWidth) * 100 + "%";
-    box.style.top = (detection.box.y / imageHeight) * 100 + "%";
-    box.style.width = (detection.box.width / imageWidth) * 100 + "%";
-    box.style.height = (detection.box.height / imageHeight) * 100 + "%";
-
-    const label = document.createElement("span");
-    label.className = "vision-detection-label";
-    label.innerText =
-      detection.label + " " + Math.round(detection.confidence * 100) + "%";
-    box.appendChild(label);
-    overlay.appendChild(box);
-  });
-}
-
-async function analyzeCurrentView() {
-  const button = document.getElementById("btn-vision-analyze");
-  const canvas = renderer.domElement;
-  button.disabled = true;
-  button.innerText = "Scanning...";
-  try {
-    const blob = await new Promise(function (resolve) {
-      canvas.toBlob(resolve, "image/jpeg", 0.82);
-    });
-    if (!blob) {
-      throw new Error("Could not capture the 3D view.");
-    }
-    const form = new FormData();
-    form.append("file", blob, "ask-your-factory-view.jpg");
-    form.append(
-      "classes",
-      "person, worker, safety helmet, pump, valve, pipe, tank, boiler, motor, industrial machine, pressure gauge, ladder, fire extinguisher",
-    );
-    const response = await fetch("/api/vision/analyze", {
-      method: "POST",
-      body: form,
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(result.detail || "YOLO-World analysis failed.");
-    }
-    renderVisionDetections(result);
-    showToast("YOLO-World found " + result.detections.length + " object(s)");
-  } catch (error) {
-    console.error("YOLO-World analysis error", error);
-    showToast(error.message);
-  } finally {
-    button.disabled = false;
-    button.innerText = "AI Scan";
-  }
-}
-
-// Surface mesh reconstructed from the Gaussian splat (see backend splat_mesh.py).
-// Modes: 0 = scan colours, 1 = studio (height-tinted clay), 2 = heat (height ramp).
 function createMeshMaterial(geometry) {
   geometry.computeBoundingBox();
   const bounds = geometry.boundingBox;
@@ -585,126 +464,228 @@ function createMeshMaterial(geometry) {
           base = heatColor(vHeight);
         }
         gl_FragColor = vec4(base * light, uOpacity);
+        #include <colorspace_fragment>
       }
     `,
     side: THREE.DoubleSide,
   });
 }
 
-function loadBoilerRoomPLY() {
-  showToast("Loading boiler room mesh...");
-  const loader = new THREE.PLYLoader();
-  loader.load(
-    "/api/scene/boiler-room-mesh.ply",
-    function (geometry) {
-      if (pointCloud) {
-        scene.remove(pointCloud);
-      }
-      geometry.computeVertexNormals();
-      pointCloud = new THREE.Mesh(geometry, createMeshMaterial(geometry));
-      scene.add(pointCloud);
-      applyRenderMode(renderMode);
-      const faces = geometry.index ? geometry.index.count / 3 : geometry.attributes.position.count / 3;
-      const pointCountEl = document.getElementById("engine-point-count");
-      if (pointCountEl) {
-        pointCountEl.innerText = "Boiler room mesh · " + Math.round(faces / 1000) + "k triangles";
-      }
-    },
-    undefined,
-    function (err) {
-      console.warn("Mesh unavailable, falling back to point cloud", err);
-      loadBoilerRoomPointCloud();
-    },
-  );
-}
-
-function loadBoilerRoomPointCloud() {
-  const loader = new THREE.PLYLoader();
-
-  loader.load(
-    "/api/scene/boiler-room.ply",
-    function (rawGeometry) {
-      if (pointCloud) {
-        scene.remove(pointCloud);
-      }
-
-      const geometry = cleanAndPreparePointGeometry(rawGeometry, 0.12, 4);
-      const material = createPointMaterial(geometry);
-
-      pointCloud = new THREE.Points(geometry, material);
-      scene.add(pointCloud);
-
-      applyRenderMode(renderMode);
-
-      const finalCount = geometry.attributes.position.count;
-      const pointCountEl = document.getElementById("engine-point-count");
-      if (pointCountEl) {
-        pointCountEl.innerText = finalCount.toLocaleString() + " splats verified";
-      }
-      showToast("Boiler Room loaded (" + finalCount.toLocaleString() + " splats)");
-    },
-    undefined,
-    function (err) {
-      console.warn("Falling back to procedural cloud", err);
-      generateProceduralPointcloud();
-    }
-  );
-}
-
-function generateProceduralPointcloud() {
-  const pCount = 80000;
-  const positions = new Float32Array(pCount * 3);
-  const colors = new Float32Array(pCount * 3);
-  for (let i = 0; i < pCount; i++) {
-    const x = (Math.random() - 0.5) * 8.0;
-    const y = (Math.random() - 0.5) * 3.0;
-    const z = (Math.random() - 0.5) * 8.0 - 1.5;
-    positions[i * 3] = x;
-    positions[i * 3 + 1] = y;
-    positions[i * 3 + 2] = z;
-
-    colors[i * 3] = 0.5 + Math.sin(x) * 0.2;
-    colors[i * 3 + 1] = 0.5 + Math.cos(z) * 0.2;
-    colors[i * 3 + 2] = 0.6;
+function removeSceneModel() {
+  if (!sceneModel) return;
+  scene.remove(sceneModel);
+  if (window.Spark && sceneModel instanceof window.Spark.SplatMesh) {
+    sceneModel.dispose();
+  } else if (sceneModel.geometry) {
+    sceneModel.geometry.dispose();
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geo.computeBoundingBox();
-  const mat = createPointMaterial(geo);
-  pointCloud = new THREE.Points(geo, mat);
-  scene.add(pointCloud);
-  applyRenderMode(renderMode);
+  sceneModel = null;
+  pointCloud = null;
 }
 
-async function fetchAssetsAndFrames() {
+function markViewButtons(kind) {
+  document.querySelectorAll(".render-mode-btn[data-view]").forEach(function (b) {
+    b.classList.toggle("active", b.dataset.view === kind);
+  });
+  setText("view-name", { splat: "Photoreal", points: "Points", mesh: "Mesh" }[kind] || kind);
+}
+
+function setLoading(fraction, text) {
+  const screen = document.getElementById("loading-screen");
+  if (fraction === null) {
+    screen.classList.add("done");
+    return;
+  }
+  screen.classList.remove("done");
+  document.getElementById("loading-fill").style.width = Math.round(fraction * 100) + "%";
+  if (text) setText("loading-text", text);
+}
+
+// fetch() with download progress (the splat is ~13 MB).
+async function fetchBytes(url, onProgress, timeoutMs) {
+  // Never wait forever: a stalled request aborts, and the caller falls back to the point cloud.
+  const controller = new AbortController();
+  const timer = setTimeout(function () { controller.abort(); }, timeoutMs || 60000);
   try {
-    const [assetsRes, framesRes, summaryRes] = await Promise.all([
-      fetch("/api/assets"),
-      fetch("/api/scene/frames"),
-      fetch("/api/scene/summary"),
-    ]);
-    assetsData = await assetsRes.json();
-    const frames = await framesRes.json();
-    const summary = await summaryRes.json();
-    currentSelectedAsset = summary.target_asset_id;
-    proximityRadius = summary.proximity_radius_m;
-    robotAvatar.position.set(summary.entry.x, ROBOT_GROUND_OFFSET, summary.entry.z);
-
-    renderAssetList(assetsData);
-    build3DBoundingBoxes(frames);
-    const assetCountEl = document.getElementById("asset-count");
-    if (assetCountEl) {
-      assetCountEl.innerText =
-        frames.length + " Objects · " + summary.mapped_asset_count + " Assets";
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      let detail = res.status + " " + res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch (e) { /* not JSON */ }
+      throw new Error(detail);
     }
-    loadNavigationPath(currentSelectedAsset);
-    loadObstacleOverlay();
-    loadProcessTopology();
-  } catch (e) {
-    console.error("Error fetching assets", e);
+    const total = Number(res.headers.get("Content-Length")) || 0;
+    if (!res.body || !total) return await res.arrayBuffer();
+    const reader = res.body.getReader();
+    const out = new Uint8Array(total);
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out.set(value, received);
+      received += value.length;
+      onProgress(received / total);
+    }
+    return out.buffer;
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error("the scan download timed out");
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
+
+function loadSceneModel(kind) {
+  if (kind === "splat" && !sparkRenderer) {
+    showToast("Photoreal view unavailable (splat renderer did not load) — showing scan points");
+    kind = "points";
+  }
+  viewKind = kind;
+  markViewButtons(kind);
+  const token = ++loadToken;
+  if (kind === "splat") {
+    loadSplatModel(token);
+    return;
+  }
+  const loader = new THREE.PLYLoader();
+  const url = kind === "mesh" ? "/api/scene/boiler-room-mesh.ply" : "/api/scene/boiler-room.ply";
+  showToast(kind === "mesh" ? "Loading surface mesh…" : "Loading scan points…");
+  loader.load(
+    url,
+    function (geometry) {
+      if (token !== loadToken) return;
+      removeSceneModel();
+      if (kind === "mesh") {
+        geometry.computeVertexNormals();
+        sceneModel = new THREE.Mesh(geometry, createMeshMaterial(geometry));
+      } else {
+        preparePointGeometry(geometry);
+        sceneModel = new THREE.Points(geometry, createPointMaterial(geometry));
+      }
+      pointCloud = sceneModel;
+      scene.add(sceneModel);
+      gridHelper.visible = true;
+      applyRenderMode(renderMode);
+      setLoading(null);
+      const count = kind === "mesh"
+        ? Math.round((geometry.index ? geometry.index.count : geometry.attributes.position.count) / 3)
+        : geometry.attributes.position.count;
+      showToast((kind === "mesh" ? "Mesh: " : "Scan: ") + count.toLocaleString() + (kind === "mesh" ? " triangles" : " points"));
+    },
+    undefined,
+    function (err) {
+      console.warn("Could not load " + url, err);
+      if (token !== loadToken) return;
+      if (kind === "mesh") {
+        showToast("Mesh not available — showing scan points");
+        loadSceneModel("points");
+      } else {
+        showToast("Scan could not be loaded — is the backend running?");
+      }
+    },
+  );
+}
+
+// Photoreal: the real Gaussian splat (already in the scene frame), rendered by Spark.
+// The first request can take ~10–30 s while the server converts the raw scan once.
+// Photoreal: the real Gaussian splat (already in the scene frame), rendered by Spark.
+// The server prepares the file at startup, so this is a plain ~13 MB download.
+async function loadSplatModel(token) {
+  setLoading(0.02, "Loading the photoreal scan…");
+  try {
+    const bytes = await fetchBytes("/api/scene/boiler-room.splat", function (f) {
+      setLoading(0.05 + f * 0.85, "Loading the photoreal scan… " + Math.round(f * 100) + "%");
+    });
+    if (token !== loadToken) return;
+    setLoading(0.95, "Preparing the 3D view…");
+    const splat = new window.Spark.SplatMesh({ fileBytes: bytes, fileType: "splat", fileName: "boiler-room.splat" });
+    await splat.initialized;
+    if (token !== loadToken) {
+      splat.dispose();
+      return;
+    }
+    removeSceneModel();
+    sceneModel = splat;
+    scene.add(splat);
+    gridHelper.visible = false; // the real floor is in the splat
+    if (renderMode === "heat") applyRenderMode("splat");
+    setLoading(null);
+  } catch (err) {
+    console.warn("Photoreal scene unavailable", err);
+    if (token !== loadToken) return;
+    showToast("Photoreal scene unavailable (" + err.message + ") — showing scan points");
+    setLoading(0.5, "Loading the point cloud instead…");
+    loadSceneModel("points");
+  }
+}
+
+function applyRenderMode(mode) {
+  renderMode = mode;
+  document.getElementById("btn-heat").classList.toggle("active", mode === "heat");
+  if (sceneModel && sceneModel.material && sceneModel.material.uniforms && sceneModel.material.uniforms.uMode) {
+    sceneModel.material.uniforms.uMode.value = mode === "heat" ? 2 : 0;
+  }
+}
+
+// ---------------------------------------------------------------- data
+
+async function fetchJson(url, options) {
+  const res = await fetch(url, options);
+  let body = null;
+  try {
+    body = await res.json();
+  } catch (e) {
+    body = null;
+  }
+  if (!res.ok) {
+    const detail = body && body.detail ? body.detail : res.status + " " + res.statusText;
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return body;
+}
+
+async function fetchSceneData() {
+  try {
+    const [assets, frames, summary] = await Promise.all([
+      fetchJson("/api/assets"),
+      fetchJson("/api/scene/frames"),
+      fetchJson("/api/scene/summary"),
+    ]);
+    assetsData = assets;
+    framesData = frames;
+    sceneSummary = summary;
+    if (summary.room) {
+      roomBounds = summary.room;
+    }
+    framesById.clear();
+    frames.forEach(function (f) {
+      framesById.set(f.id, f);
+    });
+
+    faultTargetId = summary.target_asset_id;
+    routeTargetId = faultTargetId;
+    selectedId = faultTargetId;
+    robotAvatar.position.set(summary.entry.x, ROBOT_GROUND_OFFSET, summary.entry.z);
+    lastRobotPos = robotAvatar.position.clone();
+
+    document.getElementById("asset-count").innerText =
+      frames.length + " objects · " + (summary.mapped_asset_count || 0) + " mapped";
+
+    buildFrames(frames);
+    renderAssetList(assetsData);
+    await previewRoute(faultTargetId);
+    if (currentPath.length > 1) {
+      robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
+    }
+    setCameraMode("follow");
+    showSelection(faultTargetId);
+    loadWalkableGrid();
+  } catch (e) {
+    console.error("Scene data error", e);
+    showToast("Could not load the scene data: " + e.message);
+  }
+}
+
+// ---------------------------------------------------------------- 3D frames
 
 function createFloatingLabelSprite(tag, stateText, colorHex) {
   const canvas = document.createElement("canvas");
@@ -730,546 +711,248 @@ function createFloatingLabelSprite(tag, stateText, colorHex) {
   ctx.fillText(stateText.toUpperCase(), 128, 58);
 
   const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   const spriteMat = new THREE.SpriteMaterial({
     map: texture,
     transparent: true,
     opacity: 0.0,
     depthTest: false,
+    sizeAttenuation: false,
   });
   const sprite = new THREE.Sprite(spriteMat);
-  sprite.scale.set(0.9, 0.28, 1);
+  sprite.scale.set(LABEL_SCREEN_HEIGHT * (256 / 72), LABEL_SCREEN_HEIGHT, 1);
+  sprite.renderOrder = 10;
   return sprite;
 }
 
-function build3DBoundingBoxes(frames) {
-  allSceneFrames = frames || [];
-  while (boundingFramesGroup.children.length > 0) {
-    boundingFramesGroup.remove(boundingFramesGroup.children[0]);
-  }
+function frameState(frame) {
+  return frame.asset_id ? frame.state || "healthy" : "structure";
+}
 
-  frames.forEach((frame) => {
+function buildFrames(frames) {
+  while (boundingFramesGroup.children.length > 0) {
+    const child = boundingFramesGroup.children[0];
+    boundingFramesGroup.remove(child);
+  }
+  frames.forEach(function (frame) {
     const [w, h, d] = frame.size;
     const [x, y, z] = frame.pos;
-
-    let colorHex = 0x10b981;
-    let colorCss = "#10b981";
-    if (frame.state === "watch") {
-      colorHex = 0xf59e0b;
-      colorCss = "#f59e0b";
-    } else if (frame.state === "degraded") {
-      colorHex = 0xf97316;
-      colorCss = "#f97316";
-    } else if (frame.state === "attention_required") {
-      colorHex = 0xef4444;
-      colorCss = "#ef4444";
-    } else if (frame.asset_id) {
-      colorHex = 0x10b981;
-      colorCss = "#10b981";
-    } else {
-      // Unmapped structural infrastructure (Pipes, Vessels, Risers, Fittings)
-      const lbl = (frame.label || "").toUpperCase();
-      if (lbl.includes("PIPE")) {
-        colorHex = 0xa855f7; // Purple for piping networks
-        colorCss = "#a855f7";
-      } else if (lbl.includes("VALVE")) {
-        colorHex = 0x3b82f6; // Blue for valve assemblies
-        colorCss = "#3b82f6";
-      } else if (lbl.includes("INSTRUMENT")) {
-        colorHex = 0x14b8a6; // Teal for field instruments
-        colorCss = "#14b8a6";
-      } else {
-        colorHex = 0x06b6d4; // Cyan for industrial machines & structures
-        colorCss = "#06b6d4";
-      }
-    }
-
-    let isSelected = false;
-    if (frame.id === currentSelectedAsset || frame.asset_id === currentSelectedAsset) {
-      isSelected = true;
-    }
-
-    let boxLineWidth = 1;
-    let boxLineOpacity = 0.08;
-    let boxFillOpacity = 0.0;
-    let boxLabelOpacity = 0.0;
-
-    if (denseFramesVisible) {
-      boxLineOpacity = 0.65;
-      boxFillOpacity = 0.06;
-      boxLabelOpacity = 0.85;
-    }
-
-    if (isSelected) {
-      boxLineWidth = 2;
-      boxLineOpacity = 0.95;
-      boxFillOpacity = 0.20;
-      boxLabelOpacity = 1.0;
-    }
+    const state = frameState(frame);
+    const colorHex = STATE_COLORS[state] || STATE_COLORS.structure;
 
     const boxGeo = new THREE.BoxGeometry(w, h, d);
-    const edges = new THREE.EdgesGeometry(boxGeo);
-    const lineMat = new THREE.LineBasicMaterial({
-      color: colorHex,
-      linewidth: boxLineWidth,
-      transparent: true,
-      opacity: boxLineOpacity,
-    });
-    const boxMesh = new THREE.LineSegments(edges, lineMat);
-    boxMesh.position.set(x, y, z);
+    const lineMat = new THREE.LineBasicMaterial({ color: colorHex, transparent: true, opacity: 0, depthTest: true });
+    const box = new THREE.LineSegments(new THREE.EdgesGeometry(boxGeo), lineMat);
+    box.position.set(x, y, z);
 
-    const fillMat = new THREE.MeshBasicMaterial({
-      color: colorHex,
-      transparent: true,
-      opacity: boxFillOpacity,
-      depthWrite: false,
-    });
-    const fillMesh = new THREE.Mesh(boxGeo, fillMat);
-    boxMesh.add(fillMesh);
+    const fillMat = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0, depthWrite: false });
+    const fill = new THREE.Mesh(boxGeo, fillMat);
+    box.add(fill);
 
-    const labelSprite = createFloatingLabelSprite(
-      frame.tag || frame.id,
-      frame.state || (frame.label || "").replace(/_/g, " "),
-      colorCss,
-    );
-    labelSprite.position.set(0, h / 2 + 0.35, 0);
-    labelSprite.material.opacity = boxLabelOpacity;
-    boxMesh.add(labelSprite);
+    let label = null;
+    if (frame.asset_id) {
+      label = createFloatingLabelSprite(frame.tag || frame.id, (frame.state || "").replace(/_/g, " "), STATE_CSS[state]);
+      label.position.set(0, h / 2 + 0.12, 0);
+      label.material.opacity = 0;
+      box.add(label);
+    }
 
-    boxMesh.userData = {
-      id: frame.id,
-      tag: frame.tag,
-      state: frame.state,
-      health: frame.health,
-      label: frame.label,
-      assetClass: frame.class,
-      assetId: frame.asset_id,
-      pos: [x, y, z],
-      size: [w, h, d],
-      lineMat: lineMat,
-      fillMat: fillMat,
-      labelSprite: labelSprite,
-      baseColor: colorHex,
-      isMapped: !!frame.asset_id,
-      context: frame.context,
-    };
+    box.userData = { id: frame.id, frame: frame, lineMat: lineMat, fillMat: fillMat, label: label, shown: false };
+    boundingFramesGroup.add(box);
+  });
+  refreshFrameStyles();
+}
 
-    boundingFramesGroup.add(boxMesh);
+// Which frames are drawn, and how strongly:
+//   target / selected: full + label;  nearest few assets: full + label;
+//   other nearby assets: outline only;  other mapped assets: faint;
+//   unmapped structure: hidden unless "All frames" is on.
+function refreshFrameStyles() {
+  boundingFramesGroup.children.forEach(function (box) {
+    const u = box.userData;
+    const f = u.frame;
+    const isTarget = f.id === faultTargetId || f.id === routeTargetId;
+    const isSelected = f.id === selectedId;
+    const isNear = nearbyIds.has(f.id);
+    let line = 0;
+    let fill = 0;
+    let label = 0;
+    if (isTarget || isSelected) {
+      line = 1;
+      fill = isTarget ? 0.16 : 0.1;
+      label = 1;
+    } else if (isNear && f.asset_id) {
+      line = 0.9;
+      fill = nearLabelIds.has(f.id) ? 0.06 : 0;
+      label = nearLabelIds.has(f.id) ? 1 : 0;
+    } else if (isNear && showAllFrames) {
+      line = 0.5;
+    } else if (f.asset_id) {
+      line = showAllFrames ? 0.55 : 0.28;
+    } else if (showAllFrames) {
+      line = 0.35;
+    }
+    u.lineMat.opacity = line;
+    u.fillMat.opacity = fill;
+    if (u.label) {
+      u.label.material.opacity = label;
+    }
+    u.shown = line > 0;
+    box.visible = u.shown;
+    u.priority = isTarget ? LABEL_PRIORITY.target
+      : isSelected ? LABEL_PRIORITY.selected
+      : f.asset_id && frameState(f) !== "healthy" ? LABEL_PRIORITY.fault
+      : LABEL_PRIORITY.near;
   });
 }
 
-function toggleDenseSemanticFrames() {
-  denseFramesVisible = !denseFramesVisible;
-  const btn = document.getElementById("btn-semantic-extract");
-  if (btn) {
-    btn.classList.toggle("active", denseFramesVisible);
-    btn.innerHTML = denseFramesVisible ? "<span>⚡ 144 Frames (Dense)</span>" : "<span>⚡ Dense 3D Frames</span>";
-  }
-
-  boundingFramesGroup.children.forEach(function (c) {
-    if (c.userData && c.userData.lineMat) {
-      const isSel = c.userData.id === currentSelectedAsset || c.userData.assetId === currentSelectedAsset;
-      if (isSel) {
-        c.userData.lineMat.opacity = 1.0;
-        if (c.userData.fillMat) c.userData.fillMat.opacity = 0.25;
-        if (c.userData.labelSprite) c.userData.labelSprite.material.opacity = 1.0;
-      } else {
-        c.userData.lineMat.opacity = denseFramesVisible ? 0.65 : 0.08;
-        if (c.userData.fillMat) c.userData.fillMat.opacity = denseFramesVisible ? 0.06 : 0.0;
-        if (c.userData.labelSprite) c.userData.labelSprite.material.opacity = denseFramesVisible ? 0.85 : 0.0;
-      }
-    }
+// Hide a label when it would overlap a more important one on screen.
+const _labelPos = new THREE.Vector3();
+let lastDeclutter = 0;
+function declutterLabels() {
+  const w = renderer.domElement.clientWidth;
+  const h = renderer.domElement.clientHeight;
+  const labelH = (LABEL_SCREEN_HEIGHT * h) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  const labelW = labelH * (256 / 72);
+  const candidates = [];
+  boundingFramesGroup.children.forEach(function (box) {
+    const u = box.userData;
+    if (!u.label) return;
+    u.label.visible = false;
+    if (!box.visible || u.label.material.opacity <= 0) return;
+    u.label.getWorldPosition(_labelPos);
+    const dist = _labelPos.distanceTo(camera.position);
+    _labelPos.project(camera);
+    if (_labelPos.z > 1 || Math.abs(_labelPos.x) > 1.1 || Math.abs(_labelPos.y) > 1.1) return;
+    candidates.push({ u: u, x: (_labelPos.x + 1) * 0.5 * w, y: (1 - _labelPos.y) * 0.5 * h, dist: dist });
   });
-
-  showToast(
-    denseFramesVisible
-      ? "⚡ Dense 3D Semantic Mode Active: 144 industrial structures & assets framed"
-      : "3D Semantic Mode: Focus view restored"
-  );
-}
-
-async function loadNavigationPath(targetId) {
-  try {
-    const res = await fetch(
-      "/api/navigation/path?target_id=" + encodeURIComponent(targetId),
-    );
-    const data = await res.json();
-    currentPath = data.waypoints;
-    pathLengths = cumulativeLengths(currentPath);
-
-    document.getElementById("hud-target-name").innerText =
-      "Target: " + data.target_tag;
-    document.getElementById("hud-dist").innerText = data.total_distance_m + "m";
-
-    renderPathRibbon(currentPath);
-    loadBriefings(targetId);
-  } catch (err) {
-    console.error("Path error", err);
-  }
-}
-
-async function loadBriefings(targetId) {
-  try {
-    const res = await fetch(
-      "/api/navigation/briefings?target_id=" + encodeURIComponent(targetId),
-    );
-    routeBriefings = await res.json();
-    resetRouteLog();
-  } catch (err) {
-    console.error("Briefings error", err);
-  }
-}
-
-function resetRouteLog() {
-  nextBriefingIndex = 0;
-  document.getElementById("route-log").replaceChildren();
-  updateRouteLogCount();
-}
-
-function updateRouteLogCount() {
-  document.getElementById("route-log-count").innerText =
-    nextBriefingIndex + " / " + routeBriefings.length;
-}
-
-// Event-based: a briefing plays when the robot reaches the route progress of its closest approach.
-function playDueBriefings() {
-  while (
-    nextBriefingIndex < routeBriefings.length &&
-    routeBriefings[nextBriefingIndex].progress <= navProgress
-  ) {
-    appendRouteLogEntry(routeBriefings[nextBriefingIndex]);
-    nextBriefingIndex++;
-  }
-  updateRouteLogCount();
-}
-
-function appendRouteLogEntry(briefing) {
-  const item = document.createElement("li");
-  item.className = "route-log-item route-log-" + briefing.state;
-
-  const tag = document.createElement("b");
-  tag.textContent = briefing.tag;
-  const meta = document.createElement("span");
-  meta.className = "route-log-meta";
-  meta.textContent = briefing.health + "% · " + briefing.distance_m + " m";
-  item.append(tag, meta);
-
-  if (briefing.is_generated) {
-    const badge = document.createElement("span");
-    badge.className = "route-log-ai";
-    badge.textContent = "AI";
-    item.append(badge);
-  }
-
-  const text = document.createElement("p");
-  text.textContent = briefing.text;
-  item.append(text);
-
-  item.onclick = function () {
-    openCopilotForAsset(briefing.asset_id);
-  };
-  document.getElementById("route-log").prepend(item);
-
-  // Voice route briefings aloud
-  if (window.speechSynthesis && !window.speechSynthesis.speaking) {
-    try {
-      const u = new SpeechSynthesisUtterance(briefing.tag + ": " + (briefing.text || ""));
-      u.rate = 1.1;
-      u.volume = 0.8;
-      window.speechSynthesis.speak(u);
-    } catch (e) {}
-  }
-}
-
-async function loadObstacleOverlay() {
-  try {
-    const res = await fetch("/api/navigation/grid");
-    const grid = await res.json();
-    const canvas = document.createElement("canvas");
-    canvas.width = grid.cols;
-    canvas.height = grid.rows;
-    const ctx = canvas.getContext("2d");
-    grid.cells.forEach(function (cellClass, index) {
-      if (cellClass === CELL_WALKABLE) {
-        return;
-      }
-      ctx.fillStyle = OBSTACLE_TIGHT_RGBA;
-      if (cellClass === CELL_BLOCKED) {
-        ctx.fillStyle = OBSTACLE_BLOCKED_RGBA;
-      }
-      ctx.fillRect(index % grid.cols, Math.floor(index / grid.cols), 1, 1);
-    });
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-    const width = grid.cols * grid.cell_m;
-    const depth = grid.rows * grid.cell_m;
-    obstacleOverlay = new THREE.Mesh(
-      new THREE.PlaneGeometry(width, depth),
-      new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }),
-    );
-    obstacleOverlay.rotation.x = -Math.PI / 2; // canvas row j then lies at z = z_min + j * cell
-    obstacleOverlay.position.set(grid.x_min + width / 2, OBSTACLE_OVERLAY_Y, grid.z_min + depth / 2);
-    obstacleOverlay.visible = false;
-    scene.add(obstacleOverlay);
-  } catch (err) {
-    console.error("Obstacle grid error", err);
-  }
-}
-
-function setObstacleOverlay(isVisible) {
-  if (obstacleOverlay) {
-    obstacleOverlay.visible = isVisible;
-  }
-  const button = document.getElementById("btn-obstacles");
-  button.classList.toggle("active", isVisible);
-  button.setAttribute("aria-pressed", String(isVisible));
-}
-
-async function loadProcessTopology() {
-  try {
-    const res = await fetch("/api/scene/topology");
-    if (!res.ok) {
-      return;
-    }
-    processTopologyData = await res.json();
-    build3DProcessTopology(processTopologyData);
-  } catch (err) {
-    console.warn("Failed to load process flow topology:", err);
-  }
-}
-
-function build3DProcessTopology(loops) {
-  while (processTopologyGroup.children.length > 0) {
-    processTopologyGroup.remove(processTopologyGroup.children[0]);
-  }
-  topologyTubes = [];
-
-  loops.forEach(function (loop) {
-    if (!loop.path_3d || loop.path_3d.length < 2) {
-      return;
-    }
-
-    const vectors = loop.path_3d.map(function (pt) {
-      return new THREE.Vector3(pt[0], pt[1], pt[2]);
-    });
-
-    const curve = new THREE.CatmullRomCurve3(vectors, false, "centripetal", 0.5);
-    const tubeGeo = new THREE.TubeGeometry(curve, 48, TOPOLOGY_TUBE_RADIUS_M, 8, false);
-
-    let colorHex = 0x00d2ff;
-    if (loop.has_fault) {
-      colorHex = 0xef4444;
-    }
-
-    const tubeMat = new THREE.MeshStandardMaterial({
-      color: colorHex,
-      emissive: colorHex,
-      emissiveIntensity: 0.7,
-      transparent: true,
-      opacity: 0.85,
-      roughness: 0.35,
-      metalness: 0.25,
-    });
-
-    const tubeMesh = new THREE.Mesh(tubeGeo, tubeMat);
-    tubeMesh.userData = {
-      loopId: loop.loop_id,
-      name: loop.name,
-      hasFault: loop.has_fault,
-      colorHex: colorHex,
-    };
-
-    processTopologyGroup.add(tubeMesh);
-    topologyTubes.push(tubeMesh);
-  });
-}
-
-function updateTopologyUI(flowContext) {
-  const card = document.getElementById("topology-card");
-  if (!card) {
-    return;
-  }
-
-  if (!flowContext) {
-    card.style.display = "none";
-    return;
-  }
-
-  card.style.display = "block";
-  activeTopologyLoopId = flowContext.loop_id;
-
-  const loopNameEl = document.getElementById("topology-loop-name");
-  if (loopNameEl) {
-    loopNameEl.innerText = flowContext.loop_name;
-  }
-
-  const badgeEl = document.getElementById("topology-flow-badge");
-  if (badgeEl) {
-    badgeEl.innerText = "Flow: " + flowContext.flow_rate_pct + "% · " + flowContext.loop_status;
-    if (flowContext.loop_status === "NORMAL") {
-      badgeEl.style.color = "var(--green)";
-      badgeEl.style.borderColor = "var(--green)";
-      badgeEl.style.background = "rgba(16, 185, 129, 0.12)";
-    } else {
-      badgeEl.style.color = "var(--red)";
-      badgeEl.style.borderColor = "var(--red)";
-      badgeEl.style.background = "rgba(239, 68, 68, 0.15)";
-    }
-  }
-
-  const faultAlert = document.getElementById("topology-fault-alert");
-  const faultText = document.getElementById("topology-fault-text");
-  if (faultAlert && faultText) {
-    if (flowContext.fault_summary) {
-      faultAlert.style.display = "flex";
-      faultText.innerText = flowContext.fault_summary;
-    } else {
-      faultAlert.style.display = "none";
-    }
-  }
-
-  const chainContainer = document.getElementById("flow-chain-container");
-  if (chainContainer) {
-    chainContainer.innerHTML = "";
-
-    let fullLoop = null;
-    for (let i = 0; i < processTopologyData.length; i++) {
-      if (processTopologyData[i].loop_id === flowContext.loop_id) {
-        fullLoop = processTopologyData[i];
-        break;
-      }
-    }
-
-    let nodes = [];
-    if (fullLoop && fullLoop.nodes) {
-      nodes = fullLoop.nodes;
-    }
-
-    nodes.forEach(function (node, idx) {
-      const btn = document.createElement("button");
-      btn.className = "flow-node-btn";
-      if (node.asset_id === currentSelectedAsset) {
-        btn.classList.add("active");
-      }
-      if (node.is_impacted) {
-        btn.classList.add("fault-node");
-      }
-
-      const tagSpan = document.createElement("span");
-      tagSpan.style.fontWeight = "700";
-      tagSpan.innerText = node.tag;
-
-      const roleSpan = document.createElement("span");
-      roleSpan.style.fontSize = "8px";
-      roleSpan.style.opacity = "0.75";
-      roleSpan.innerText = node.health + "% · " + node.role_in_loop;
-
-      btn.append(tagSpan, roleSpan);
-      btn.onclick = function () {
-        selectAsset(node.asset_id);
-        focusAssetIn3D(node.asset_id);
-      };
-
-      chainContainer.appendChild(btn);
-
-      if (idx < nodes.length - 1) {
-        const arrow = document.createElement("span");
-        arrow.className = "flow-arrow";
-        if (node.is_impacted) {
-          arrow.classList.add("warning-arrow");
-        }
-        arrow.innerText = "➔";
-        chainContainer.appendChild(arrow);
-      }
-    });
-  }
-
-  topologyTubes.forEach(function (tube) {
-    if (tube.userData.loopId === activeTopologyLoopId) {
-      tube.material.opacity = 1.0;
-      tube.material.emissiveIntensity = 0.95;
-    } else {
-      tube.material.opacity = 0.22;
-      tube.material.emissiveIntensity = 0.25;
+  candidates.sort(function (a, b) { return b.u.priority - a.u.priority || a.dist - b.dist; });
+  const placed = [];
+  candidates.forEach(function (c) {
+    const hit = placed.some(function (p) { return Math.abs(p.x - c.x) < labelW && Math.abs(p.y - c.y) < labelH; });
+    if (!hit) {
+      c.u.label.visible = true;
+      placed.push(c);
     }
   });
 }
 
-function setupTargetArrivalCard() {
-  const btnWo = document.getElementById("arrival-btn-wo");
-  if (btnWo) {
-    btnWo.onclick = function () {
-      const card = document.getElementById("target-arrival-card");
-      if (card) {
-        card.classList.remove("active");
-      }
-      const submitBtn = document.getElementById("btn-submit-wo");
-      if (submitBtn) {
-        submitBtn.click();
-      }
-    };
-  }
+// ---------------------------------------------------------------- walkable floor
 
-  const btnClose = document.getElementById("arrival-btn-close");
-  if (btnClose) {
-    btnClose.onclick = function () {
-      const card = document.getElementById("target-arrival-card");
-      if (card) {
-        card.classList.remove("active");
-      }
-    };
+// The navigation grid: drawn as a faint floor overlay (where clicks can send the robot)
+// and used to keep the follow camera inside the room.
+async function loadWalkableGrid() {
+  try {
+    const g = await fetchJson("/api/navigation/walkable");
+    const decode = function (b64) { return Uint8Array.from(atob(b64), function (c) { return c.charCodeAt(0); }); };
+    walkGrid = { x_min: g.x_min, z_min: g.z_min, cell: g.cell, nx: g.nx, nz: g.nz, reachable: decode(g.reachable), blocked: decode(g.blocked) };
+    buildWalkableOverlay();
+  } catch (err) {
+    console.warn("Walkable grid unavailable", err);
   }
 }
 
-function showTargetArrivalHUD(assetId, diag) {
-  const card = document.getElementById("target-arrival-card");
-  if (!card) {
-    return;
-  }
-
-  const titleEl = document.getElementById("arrival-asset-title");
-  if (titleEl) {
-    let titleTag = assetId;
-    if (diag && diag.tag) {
-      titleTag = diag.tag;
+function buildWalkableOverlay() {
+  const g = walkGrid;
+  const data = new Uint8Array(g.nx * g.nz * 4);
+  for (let i = 0; i < g.nx; i++) {
+    for (let j = 0; j < g.nz; j++) {
+      if (!g.reachable[i * g.nz + j]) continue;
+      const row = g.nz - 1 - j; // plane v runs towards -z after the rotation
+      const k = (row * g.nx + i) * 4;
+      data[k] = 0; data[k + 1] = 210; data[k + 2] = 255; data[k + 3] = 255;
     }
-    titleEl.innerText = "Target Reached: " + titleTag;
   }
+  const tex = new THREE.DataTexture(data, g.nx, g.nz, THREE.RGBAFormat);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  const geo = new THREE.PlaneGeometry(g.nx * g.cell, g.nz * g.cell);
+  geo.rotateX(-Math.PI / 2);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.16, depthWrite: false }));
+  mesh.position.set(g.x_min + (g.nx * g.cell) / 2, 0.012, g.z_min + (g.nz * g.cell) / 2);
+  mesh.renderOrder = 1;
+  scene.add(mesh);
+}
 
-  const subtitleEl = document.getElementById("arrival-asset-subtitle");
-  if (subtitleEl) {
-    let classText = "PROCESS EQUIPMENT";
-    if (diag && diag.asset_class) {
-      classText = diag.asset_class;
+function gridValue(layer, x, z, outside) {
+  const g = walkGrid;
+  const i = Math.floor((x - g.x_min) / g.cell);
+  const j = Math.floor((z - g.z_min) / g.cell);
+  if (i < 0 || j < 0 || i >= g.nx || j >= g.nz) return outside;
+  return g[layer][i * g.nz + j] === 1;
+}
+
+// Game-style camera: if a wall or machine stands between the robot and the camera,
+// pull the camera in front of it; never above the ceiling or below the floor.
+function keepCameraInside() {
+  if (!walkGrid) return;
+  const t = controls.target;
+  const offset = new THREE.Vector3().subVectors(camera.position, t);
+  const length = offset.length();
+  const dir = offset.clone().normalize();
+  const step = 0.04;
+  for (let s = 0.25; s <= length; s += step) {
+    const x = t.x + dir.x * s;
+    const z = t.z + dir.z * s;
+    const y = t.y + dir.y * s;
+    // Outside the room = wall. Obstacle cells only block below ~1.25 m (machines are lower;
+    // the camera may look over them), so the view is not pulled in at every pump.
+    const outside = gridValue("blocked", x, z, null) === null;
+    if (outside || (y < 1.25 && gridValue("blocked", x, z, true))) {
+      camera.position.copy(t).addScaledVector(dir, Math.max(0.3, s - 0.12));
+      break;
     }
-    subtitleEl.innerText = classText + " · Criticality A Inspection";
   }
+  const ceiling = (roomBounds.ceiling || 3) - 0.15;
+  camera.position.y = THREE.MathUtils.clamp(camera.position.y, 0.35, ceiling);
+}
 
-  const badgeEl = document.getElementById("arrival-health-badge");
-  if (badgeEl && diag) {
-    badgeEl.innerText = "HEALTH: " + diag.health_score + "/100 ⚠️ " + diag.condition_state.toUpperCase();
+// ---------------------------------------------------------------- route & robot
+
+// Fetch a collision-free route. dest = {assetId} or {goal: [x, z]}; from the robot unless atEntry.
+async function fetchRoute(dest, atEntry) {
+  const params = new URLSearchParams();
+  if (dest.goal) {
+    params.set("goal_x", dest.goal[0].toFixed(3));
+    params.set("goal_z", dest.goal[1].toFixed(3));
+  } else {
+    params.set("target_id", dest.assetId);
   }
-
-  const visualEl = document.getElementById("arrival-visual-text");
-  if (visualEl) {
-    visualEl.innerText =
-      "Visual scan: Packing gland exhibits mineral precipitate crystallization and glaze. Casing integrity intact. Vibration harmonics confirm impeller fouling / cavitation signature.";
+  if (!atEntry) {
+    params.set("start_x", robotAvatar.position.x.toFixed(3));
+    params.set("start_z", robotAvatar.position.z.toFixed(3));
   }
+  return fetchJson("/api/navigation/path?" + params.toString());
+}
 
-  const lotoEl = document.getElementById("arrival-loto-text");
-  if (lotoEl && diag && diag.safety_guardrails) {
-    let lotoText = "Apply site lockout/tagout and zero-energy permits before touching equipment.";
-    for (let i = 0; i < diag.safety_guardrails.length; i++) {
-      if (diag.safety_guardrails[i].includes("LOTO Safety:")) {
-        lotoText = diag.safety_guardrails[i].replace("LOTO Safety:", "").trim();
-        break;
-      }
-    }
-    lotoEl.innerText = lotoText;
+function useRoute(data) {
+  currentPath = data.waypoints;
+  pathLengths = cumulativeLengths(currentPath);
+  routeTargetId = data.target_id;
+  navProgress = 0;
+  renderPathRibbon(currentPath);
+  setHud(data.target_id === "POINT" ? "Walking to a floor point" : "Target: " + (data.target_tag || data.target_id),
+    data.total_distance_m + " m");
+  refreshFrameStyles();
+  renderTargetCard();
+}
+
+function setHud(name, dist) {
+  setText("hud-target-name", name);
+  setText("hud-dist", dist);
+  document.getElementById("hud-nav-fill").style.width = "0%";
+}
+
+// Route from the door to an asset, drawn on the floor; the robot does not move yet.
+async function previewRoute(assetId) {
+  try {
+    useRoute(await fetchRoute({ assetId: assetId }, true));
+    return true;
+  } catch (err) {
+    showToast("No collision-free route: " + err.message);
+    return false;
   }
-
-  card.classList.add("active");
 }
 
 function cumulativeLengths(waypoints) {
@@ -1301,1151 +984,692 @@ function renderPathRibbon(waypoints) {
   scene.add(pathLineMesh);
 }
 
-function renderAssetList(assets) {
-  const listEl = document.getElementById("asset-list-container");
-  listEl.innerHTML = "";
-
-  assets.forEach(function (a) {
-    const card = document.createElement("div");
-    card.id = "asset-card-" + a.asset_id;
-
-    let cardClass = "asset-card";
-    if (a.asset_id === currentSelectedAsset) {
-      cardClass = "asset-card active";
-    }
-    card.className = cardClass;
-    if (a.asset_id === currentSelectedAsset) {
-      card.style.background = "rgba(0, 210, 255, 0.16)";
-      card.style.border = "1px solid #00d2ff";
-    } else {
-      card.style.background = "#0c1524";
-      card.style.border = "1px solid rgba(255,255,255,0.12)";
-    }
-    card.style.borderRadius = "6px";
-    card.style.marginBottom = "4px";
-
-    let stateClass = "healthy";
-    let health = 100;
-    if (a.state) {
-      stateClass = a.state.condition_state;
-      health = a.state.health_score;
-    }
-
-    let dotClass = stateClass;
-    if (stateClass === "attention_required") {
-      dotClass = "attention";
-    }
-
-    let healthColor = "#10b981";
-    if (health < 50) {
-      healthColor = "#ef4444";
-    } else if (health < 75) {
-      healthColor = "#f59e0b";
-    }
-
-    let assetClassLabel = "EQUIPMENT";
-    if (a.asset_class) {
-      assetClassLabel = a.asset_class.replace(/_/g, " ");
-    }
-
-    const mainRow = document.createElement("div");
-    mainRow.className = "asset-card-main";
-    mainRow.style.cssText =
-      "display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;user-select:none;min-height:38px;";
-    mainRow.innerHTML =
-      '<div style="display:flex;align-items:center;gap:8px;min-width:0;">' +
-      '<span class="status-dot status-' +
-      dotClass +
-      '" style="width:9px;height:9px;border-radius:50%;flex-shrink:0;"></span>' +
-      '<span style="font-weight:700;color:#ffffff;font-size:13px;letter-spacing:0.3px;">' +
-      a.tag +
-      "</span>" +
-      '<span style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
-      assetClassLabel +
-      "</span>" +
-      "</div>" +
-      '<span style="font-family:var(--font-mono);font-weight:700;font-size:12px;color:' +
-      healthColor +
-      ';flex-shrink:0;margin-left:8px;">' +
-      Math.round(health) +
-      "%</span>";
-
-    mainRow.onclick = function () {
-      selectAsset(a.asset_id);
-    };
-
-    const actionsRow = document.createElement("div");
-    actionsRow.className = "asset-actions";
-
-    const focusBtn = document.createElement("button");
-    focusBtn.className = "action-pill";
-    focusBtn.innerHTML = "📍 Focus 3D";
-    focusBtn.onclick = function (e) {
-      e.stopPropagation();
-      focusAssetIn3D(a.asset_id);
-    };
-
-    const navBtn = document.createElement("button");
-    navBtn.className = "action-pill";
-    navBtn.innerHTML = "🚀 Navigate";
-    navBtn.onclick = function (e) {
-      e.stopPropagation();
-      startNavigationTo(a.asset_id);
-    };
-
-    const copilotBtn = document.createElement("button");
-    copilotBtn.className = "action-pill";
-    copilotBtn.innerHTML = "📋 Dossier";
-    copilotBtn.onclick = function (e) {
-      e.stopPropagation();
-      openCopilotForAsset(a.asset_id);
-    };
-
-    actionsRow.appendChild(focusBtn);
-    actionsRow.appendChild(navBtn);
-    actionsRow.appendChild(copilotBtn);
-
-    card.appendChild(mainRow);
-    card.appendChild(actionsRow);
-    listEl.appendChild(card);
-  });
-}
-
-function focusAssetIn3D(assetId) {
-  let targetPos = null;
-  boundingFramesGroup.children.forEach(function (child) {
-    if (child.userData && child.userData.id === assetId && child.userData.pos) {
-      targetPos = child.userData.pos;
-    }
-  });
-
-  if (targetPos) {
-    if (cameraMode !== "orbit") {
-      setCameraMode("orbit", document.getElementById("btn-cam-orbit"));
-    }
-    const [tx, ty, tz] = targetPos;
-    controls.target.set(tx, ty + 0.4, tz);
-    camera.position.set(tx + 2.2, ty + 1.6, tz + 2.5);
-    controls.update();
-    showToast("Camera routed to 3D equipment " + assetId);
+// Reset: robot back at the door, route to the faulty device previewed again.
+function resetRobot() {
+  isNavigating = false;
+  navProgress = 0;
+  if (sceneSummary) {
+    robotAvatar.position.set(sceneSummary.entry.x, ROBOT_GROUND_OFFSET, sceneSummary.entry.z);
   }
-}
-
-async function selectAsset(assetId, question = null) {
-  currentSelectedAsset = assetId;
-
-  document.querySelectorAll(".asset-card").forEach(function (el) {
-    el.classList.remove("active");
-  });
-  const currentCard = document.getElementById("asset-card-" + assetId);
-  if (currentCard) {
-    currentCard.classList.add("active");
-  }
-
-  boundingFramesGroup.children.forEach(function (c) {
-    if (c.userData && c.userData.lineMat) {
-      const isSel = c.userData.id === assetId || c.userData.assetId === assetId;
-      if (isSel) {
-        c.userData.lineMat.opacity = 1.0;
-        if (c.userData.fillMat) {
-          c.userData.fillMat.opacity = 0.25;
-        }
-        if (c.userData.labelSprite) {
-          c.userData.labelSprite.material.opacity = 1.0;
-        }
-      } else {
-        const baseLineOp = denseFramesVisible ? 0.65 : 0.08;
-        const baseFillOp = denseFramesVisible ? 0.06 : 0.0;
-        const baseLblOp = denseFramesVisible ? 0.85 : 0.0;
-        c.userData.lineMat.opacity = baseLineOp;
-        if (c.userData.fillMat) {
-          c.userData.fillMat.opacity = baseFillOp;
-        }
-        if (c.userData.labelSprite) {
-          c.userData.labelSprite.material.opacity = baseLblOp;
-        }
+  lastRobotPos = robotAvatar.position.clone();
+  nearbyIds = new Set();
+  nearLabelIds = new Set();
+  if (goalMarker) goalMarker.visible = false;
+  renderNearby([]);
+  if (faultTargetId) {
+    previewRoute(faultTargetId).then(function () {
+      if (currentPath.length > 1) {
+        robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
       }
+      if (cameraMode === "follow") placeBehindRobot();
+    });
+  }
+}
+
+// Start walking along the current route (from where the robot stands).
+function startWalking() {
+  if (currentPath.length < 2) {
+    onArrival();
+    return;
+  }
+  navProgress = 0;
+  isNavigating = true;
+  groupOpen.near = true;
+  hideHelp();
+}
+
+// "Go" (target card), "Route here" (any asset) and chat "take me to …": walk there now.
+async function goTo(assetId) {
+  try {
+    useRoute(await fetchRoute({ assetId: assetId }, false));
+  } catch (err) {
+    showToast("No collision-free route: " + err.message);
+    return false;
+  }
+  if (goalMarker) goalMarker.visible = false;
+  renderAssetList(filteredAssets());
+  showSelection(assetId);
+  startWalking();
+  return true;
+}
+
+// Click on the floor: walk to that point (snapped to walkable space by the backend).
+async function walkToPoint(x, z) {
+  try {
+    useRoute(await fetchRoute({ goal: [x, z] }, false));
+  } catch (err) {
+    showToast("Can't walk there: " + err.message);
+    return;
+  }
+  showGoalMarker(routeTargetId === "POINT" && currentPath.length ? currentPath[currentPath.length - 1] : { x: x, z: z });
+  startWalking();
+}
+
+function showGoalMarker(p) {
+  if (!goalMarker) {
+    const geo = new THREE.RingGeometry(0.12, 0.18, 32);
+    geo.rotateX(-Math.PI / 2);
+    goalMarker = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+    scene.add(goalMarker);
+  }
+  goalMarker.position.set(p.x, 0.03, p.z);
+  goalMarker.visible = true;
+}
+
+function onArrival() {
+  isNavigating = false;
+  document.getElementById("hud-nav-fill").style.width = "100%";
+  if (routeTargetId === "POINT") return; // walked to a floor point: nothing to diagnose
+  const frame = framesById.get(routeTargetId);
+  showToast("Arrived at " + (frame ? frame.tag : routeTargetId));
+  showSelection(routeTargetId);
+  if (frame) lookAtAsset(frame);
+}
+
+// ---------------------------------------------------------------- proximity
+
+function distanceToFootprint(rx, rz, frame) {
+  const [x, , z] = frame.pos;
+  const [w, , d] = frame.size;
+  const dx = Math.max(Math.abs(rx - x) - w / 2, 0);
+  const dz = Math.max(Math.abs(rz - z) - d / 2, 0);
+  return Math.hypot(dx, dz);
+}
+
+function checkProximityEvents(rx, rz) {
+  const near = [];
+  framesData.forEach(function (f) {
+    const dist = distanceToFootprint(rx, rz, f);
+    if (dist <= PROXIMITY_RADIUS) {
+      near.push({ frame: f, dist: dist });
     }
   });
-
-  await loadNavigationPath(assetId);
-  return await runCopilotDiagnosis(assetId, question);
-}
-
-function startNavigationTo(assetId) {
-  selectAsset(assetId);
-  focusAssetIn3D(assetId);
-  if (!isNavigating) {
-    toggleDroneNavigation();
+  const ids = new Set(near.map(function (n) { return n.frame.id; }));
+  let changed = ids.size !== nearbyIds.size;
+  if (!changed) {
+    ids.forEach(function (id) {
+      if (!nearbyIds.has(id)) changed = true;
+    });
+  }
+  if (changed) {
+    nearbyIds = ids;
+    nearLabelIds = new Set(
+      near.filter(function (n) { return n.frame.asset_id; })
+        .sort(function (a, b) { return a.dist - b.dist; })
+        .slice(0, MAX_NEAR_LABELS)
+        .map(function (n) { return n.frame.id; }),
+    );
+    refreshFrameStyles();
+    renderNearby(near);
   }
 }
+window.appCheckProximityEvents = checkProximityEvents;
 
-function openCopilotForAsset(assetId) {
-  selectAsset(assetId);
-  if (!copilotOpen) {
-    toggleCopilotDrawer();
-  }
+// Nearby assets live in the left Equipment list as the "Near the robot" group (no floating panel).
+function renderNearby(near) {
+  nearbyAssets = near
+    .filter(function (n) { return n.frame.asset_id; })
+    .sort(function (a, b) { return a.dist - b.dist; })
+    .map(function (n) { return { assetId: n.frame.asset_id, dist: n.dist }; });
+  renderAssetList(filteredAssets());
 }
 
-async function runCopilotDiagnosis(assetId, question = null) {
-  const body = { asset_id: assetId };
-  if (question) {
-    body.query = question;
+// ---------------------------------------------------------------- selection & copilot panel
+
+function showSelection(id) {
+  selectedId = id;
+  refreshFrameStyles();
+  showXray(id);
+  document.querySelectorAll(".asset-card").forEach(function (el) {
+    el.classList.toggle("active", el.dataset.id === id);
+  });
+  const frame = framesById.get(id);
+  if (frame && !frame.asset_id) {
+    renderStructureCard(frame);
+    return;
+  }
+  runCopilotDiagnosis(id);
+}
+
+// How sure we are that this asset really is the 3D object it is attached to, and why.
+function mappingNote(frame) {
+  const status = frame.mapping_status;
+  const confidence = frame.mapping_confidence != null ? frame.mapping_confidence : "—";
+  const target = frame.id === routeTargetId ? " · inspection target" : "";
+  if (status === "camera_verified") {
+    return "Verified by camera → 3D object " + frame.scene_id + " · " + (frame.mapping_evidence || "") + target;
+  }
+  if (status === "assumed") {
+    return "Placement assumed, not verified → 3D object " + frame.scene_id + " · confidence " + confidence + target;
+  }
+  return "Proposed from shape, not verified → 3D object " + frame.scene_id + " · confidence " + confidence + target;
+}
+
+function renderStructureCard(frame) {
+  setText("card-asset-tag", frame.id + " · " + prettyClass(frame.label));
+  setText("card-asset-meta", "Detected 3D object · not linked to a builder-pack asset");
+  const seen = frame.seen_as
+    ? " · camera: " + (frame.seen_as.features || frame.seen_as.category.replace(/_/g, " ")) + " (" + frame.seen_as.confidence + ")"
+    : "";
+  setText("card-mapping-note", frame.point_count + " points · " + frame.size.map(function (s) { return s.toFixed(2); }).join(" × ") + " m" + seen);
+  const badge = document.getElementById("card-health-badge");
+  badge.innerText = "STRUCTURE";
+  badge.style.color = STATE_CSS.structure;
+  badge.style.borderColor = STATE_CSS.structure;
+  document.getElementById("diag-block").style.display = "none";
+}
+
+async function showXray(id) {
+  const request = ++xrayRequest;
+  clearXray();
+  const frame = framesById.get(id);
+  if (!frame) {
+    return;
+  }
+  const positions = await fetchXrayGeometry(id);
+  if (!positions || request !== xrayRequest) {
+    return;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color: STATE_COLORS[frameState(frame)] || STATE_COLORS.structure,
+    size: XRAY_POINT_SIZE,
+    sizeAttenuation: true,
+    map: xrayDotTexture(),
+    transparent: true,
+    opacity: XRAY_BASE_OPACITY,
+    depthTest: false, // the point of x-ray: visible through walls, pipes and the splat
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  xrayPoints = new THREE.Points(geometry, material);
+  xrayPoints.renderOrder = XRAY_RENDER_ORDER;
+  xrayPoints.frustumCulled = false;
+  scene.add(xrayPoints);
+}
+
+async function fetchXrayGeometry(id) {
+  if (xrayGeometryCache.has(id)) {
+    return xrayGeometryCache.get(id);
   }
   try {
-    const [assetRes, diagRes] = await Promise.all([
-      fetch("/api/assets/" + encodeURIComponent(assetId)),
-      fetch("/api/copilot/query", {
+    const res = await fetch("/api/scene/objects/" + encodeURIComponent(id) + "/geometry");
+    if (!res.ok) {
+      return null;
+    }
+    const positions = new Float32Array(await res.arrayBuffer());
+    xrayGeometryCache.set(id, positions);
+    return positions;
+  } catch (err) {
+    console.error("X-ray geometry error", err);
+    return null;
+  }
+}
+
+function clearXray() {
+  if (!xrayPoints) {
+    return;
+  }
+  scene.remove(xrayPoints);
+  xrayPoints.geometry.dispose();
+  xrayPoints.material.dispose();
+  xrayPoints = null;
+}
+
+function pulseXray(nowMs) {
+  if (!xrayPoints) {
+    return;
+  }
+  const phase = (nowMs / 1000) * XRAY_PULSE_HZ * 2 * Math.PI;
+  xrayPoints.material.opacity = XRAY_BASE_OPACITY + XRAY_PULSE_AMPLITUDE * Math.sin(phase);
+}
+
+// Soft round dot instead of square GL points; built once.
+function xrayDotTexture() {
+  if (xraySprite) {
+    return xraySprite;
+  }
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const glow = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  glow.addColorStop(0, "rgba(255,255,255,1)");
+  glow.addColorStop(0.4, "rgba(255,255,255,0.8)");
+  glow.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, size, size);
+  xraySprite = new THREE.CanvasTexture(canvas);
+  return xraySprite;
+}
+
+async function runCopilotDiagnosis(assetId, question) {
+  const body = { asset_id: assetId };
+  if (question) body.query = question;
+  document.getElementById("diag-block").style.display = "";
+  const thinking = question ? addMessage("ai", "Thinking…") : null;
+  try {
+    const [dossier, diag] = await Promise.all([
+      fetchJson("/api/assets/" + encodeURIComponent(assetId)),
+      fetchJson("/api/copilot/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
     ]);
-    const assetDossier = await assetRes.json();
-    const diag = await diagRes.json();
-
-    if (assetDossier.recent_telemetry) {
-      currentTelemetryRecords = assetDossier.recent_telemetry;
+    if (thinking) thinking.remove();
+    if (selectedId === assetId || question) updateCopilotDrawer(dossier, diag);
+    if (question) {
+      const ids = (diag.citations || []).filter(function (c) { return c.source_type !== "data_quality"; })
+        .map(function (c) { return c.source_id; }).slice(0, 6);
+      addMessage("ai", diag.answer || diag.diagnosis_summary || diag.diagnosis || "No answer.", ids);
     }
-
-    updateCopilotDrawer(assetDossier, diag);
-    return diag;
   } catch (err) {
     console.error("Copilot error", err);
-    return null;
+    if (thinking) thinking.remove();
+    if (question) addMessage("ai", "Sorry, that failed: " + err.message);
+    else showToast("Copilot: " + err.message);
   }
+}
+
+// Conversation thread in the right column; every answer stays here (never only in a toast).
+function addMessage(role, text, chips) {
+  const thread = document.getElementById("cp-thread");
+  const msg = document.createElement("div");
+  msg.className = "msg msg-" + role;
+  msg.textContent = text;
+  if (chips && chips.length) {
+    const row = document.createElement("div");
+    row.className = "msg-chips";
+    chips.forEach(function (id) {
+      const chip = document.createElement("span");
+      chip.className = "evidence-chip";
+      chip.textContent = id;
+      row.appendChild(chip);
+    });
+    msg.appendChild(row);
+  }
+  thread.appendChild(msg);
+  while (thread.children.length > 30) thread.removeChild(thread.firstChild);
+  thread.scrollTop = thread.scrollHeight;
+  return msg;
 }
 
 function updateCopilotDrawer(dossier, diag) {
-  document.getElementById("card-asset-tag").innerText =
-    "ASSET: " + diag.tag + " (" + diag.asset_id + ")";
-  document.getElementById("card-asset-class").innerText = diag.asset_class;
-
-  let areaText = "Boiler Room";
-  if (dossier.asset && dossier.asset.area_name) {
-    areaText = dossier.asset.area_name;
-  }
-  document.getElementById("card-asset-area").innerText = areaText;
-
-  const hBadge = document.getElementById("card-health-badge");
-  hBadge.innerText =
-    diag.health_score + "% " + diag.condition_state.toUpperCase();
-  if (diag.health_score < 50) {
-    hBadge.style.color = "var(--red)";
-    hBadge.style.borderColor = "var(--red)";
-  } else if (diag.health_score < 75) {
-    hBadge.style.color = "var(--orange)";
-    hBadge.style.borderColor = "var(--orange)";
-  } else {
-    hBadge.style.color = "var(--green)";
-    hBadge.style.borderColor = "var(--green)";
-  }
-
-  document.getElementById("diag-conf").innerText =
-    "Conf: " + diag.confidence_score;
-
-  let findingIcon = "⚠️";
-  let findingColor = "#fca5a5";
-  let findingBg = "rgba(239, 68, 68, 0.12)";
-  let findingBorder = "rgba(239, 68, 68, 0.35)";
-
-  if (diag.condition_state === "healthy") {
-    findingIcon = "✅";
-    findingColor = "#6ee7b7";
-    findingBg = "rgba(16, 185, 129, 0.12)";
-    findingBorder = "rgba(16, 185, 129, 0.35)";
-  } else if (diag.condition_state === "watch") {
-    findingIcon = "🔍";
-    findingColor = "#fde68a";
-    findingBg = "rgba(245, 158, 11, 0.12)";
-    findingBorder = "rgba(245, 158, 11, 0.35)";
-  }
-
-  const findingBox = document.getElementById("finding-box");
-  findingBox.style.background = findingBg;
-  findingBox.style.borderColor = findingBorder;
-  document.getElementById("finding-icon").innerText = findingIcon;
-
-  let findingTitle =
-    diag.issue_code + " Signature (" + diag.health_score + "% Health)";
-  if (diag.diagnosis_summary) {
-    const sentences = diag.diagnosis_summary.split(".");
-    for (let s of sentences) {
-      const clean = s.trim();
-      if (
-        clean.length > 5 &&
-        !clean.includes("/100") &&
-        !clean.includes("evaluated as")
-      ) {
-        findingTitle = clean;
-        break;
-      }
-    }
-  }
-  const findingEl = document.getElementById("primary-finding-text");
-  findingEl.innerText = findingTitle;
-  findingEl.style.color = findingColor;
-
-  const rootCauseList = document.getElementById("root-cause-list");
-  rootCauseList.innerHTML = "";
-
-  let rootCauses = diag.multivariate_evidence.slice(0, 4);
-  if (rootCauses.length === 0) {
-    rootCauses = ["No telemetry drift, alarms or similar cases found for this asset."];
-  }
-  rootCauses.forEach(function (cause) {
-    const li = document.createElement("li");
-    li.className = "root-cause-item";
-    const bullet = document.createElement("span");
-    bullet.className = "root-cause-bullet";
-    bullet.textContent = "•";
-    const text = document.createElement("span");
-    text.textContent = cause;
-    li.append(bullet, text);
-    rootCauseList.appendChild(li);
-  });
-
-  const actionList = document.getElementById("action-list");
-  actionList.innerHTML = "";
-  diag.recommended_actions.forEach(function (action) {
-    const li = document.createElement("li");
-    li.textContent = action;
-    actionList.appendChild(li);
-  });
-
-  const modelBadge = document.getElementById("copilot-model-badge");
-  if (modelBadge) {
-    modelBadge.innerText = diag.grounded_mode;
-    if (diag.grounded_mode && diag.grounded_mode.toLowerCase().includes("gemini")) {
-      modelBadge.style.background = "linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(139, 92, 246, 0.35))";
-      modelBadge.style.borderColor = "var(--accent)";
-      modelBadge.style.color = "#38bdf8";
-    } else {
-      modelBadge.style.background = "rgba(100, 116, 139, 0.15)";
-      modelBadge.style.borderColor = "var(--border)";
-      modelBadge.style.color = "var(--muted)";
-    }
-  }
-
-  let answer = diag.diagnosis;
-  if (diag.answer) {
-    answer = diag.answer;
-  }
-  document.getElementById("copilot-answer").textContent = answer;
-
-  const citBox = document.getElementById("evidence-citations-box");
-  citBox.innerHTML = "";
-  let chipSources = [];
-  if (diag.citations && diag.citations.length > 0) {
-    chipSources = diag.citations;
-  } else if (diag.evidence_citations && diag.evidence_citations.length > 0) {
-    chipSources = diag.evidence_citations.map(function (cid) {
-      return {
-        source_id: cid,
-        description: "Telemetry / Document Citation",
-      };
-    });
-  }
-
-  chipSources.forEach(function (c) {
-    const chip = document.createElement("button");
-    chip.className = "evidence-chip";
-    chip.innerText = "[" + c.source_id + "]";
-    chip.title = c.description;
-    chip.onclick = function () {
-      handleCitationClick(c.source_id, c.description);
-    };
-    citBox.appendChild(chip);
-  });
-
-  if (diag.safety_guardrails && diag.safety_guardrails.length > 0) {
-    document.getElementById("safety-text").innerText =
-      diag.safety_guardrails[0];
-  }
-
-  let telemRecords = [];
-  if (dossier.recent_telemetry) {
-    telemRecords = dossier.recent_telemetry;
-  }
-  currentTelemetryRecords = telemRecords;
-
-  // Setup signal selector buttons
-  const pillsBox = document.getElementById("telem-signal-selector");
-  if (pillsBox) {
-    pillsBox.querySelectorAll(".telem-pill").forEach(function(btn) {
-      btn.onclick = function() {
-        pillsBox.querySelectorAll(".telem-pill").forEach(b => b.classList.remove("active"));
-        btn.classList.add("active");
-        drawTelemetryTrend(currentTelemetryRecords, btn.dataset.signal);
-      };
-    });
-  }
-
-  drawTelemetryTrend(telemRecords, currentTelemetrySignal);
-
-  if (diag && diag.flow_topology) {
-    updateTopologyUI(diag.flow_topology);
-  } else {
-    updateTopologyUI(null);
-  }
-}
-
-function handleCitationClick(sourceId, description) {
-  if (!sourceId) return;
-  const upper = sourceId.toUpperCase();
-  if (upper.includes("TEL-") || upper.includes("FLOW") || upper.includes("DRIFT")) {
-    drawTelemetryTrend(currentTelemetryRecords, "flow");
-    showToast("Telemetry Citation: " + sourceId + " — Process Flow drift view");
-  } else if (upper.includes("PRESS")) {
-    drawTelemetryTrend(currentTelemetryRecords, "pressure");
-    showToast("Telemetry Citation: " + sourceId + " — Pressure telemetry view");
-  } else if (upper.includes("VIB")) {
-    drawTelemetryTrend(currentTelemetryRecords, "vibration");
-    showToast("Telemetry Citation: " + sourceId + " — Vibration telemetry view");
-  } else if (upper.includes("EVT-")) {
-    showToast("Alarm Event Citation: " + sourceId + " (Corroborated in event log)");
-  } else if (upper.includes("DOC-")) {
-    showToast("Knowledge Guidance: " + sourceId + " (RAG Verified Procedure)");
-  } else if (upper.includes("CASE-")) {
-    showToast("Historical Precedent: " + sourceId + " (Matching Service Case)");
-  } else {
-    showToast("Evidence Citation: " + sourceId);
-  }
-}
-
-function drawTelemetryTrend(records, signalKey = currentTelemetrySignal) {
-  currentTelemetrySignal = signalKey;
-  const canvas = document.getElementById("telem-canvas");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  canvas.width = canvas.clientWidth * window.devicePixelRatio;
-  canvas.height = canvas.clientHeight * window.devicePixelRatio;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!records || records.length < 2) {
-    ctx.fillStyle = "rgba(148, 163, 184, 0.7)";
-    ctx.font = "11px sans-serif";
-    ctx.fillText("Insufficient telemetry records", 12, canvas.height / 2);
-    return;
-  }
-
-  let signalName = "Primary Trend";
-  let pts = [];
-
-  for (let r of records) {
-    let val = null;
-    if (signalKey === "flow") {
-      val = r.process_flow_pct;
-      signalName = "Process Flow";
-    } else if (signalKey === "pressure") {
-      val = r.process_pressure_bar ?? r.pneumatic_supply_bar;
-      signalName = "Pressure";
-    } else if (signalKey === "vibration") {
-      val = r.vibration_mm_s;
-      signalName = "Vibration";
-    } else if (signalKey === "temp") {
-      val = r.bearing_temp_c;
-      signalName = "Bearing Temp";
-    } else {
-      if (r.process_flow_pct !== undefined && r.process_flow_pct !== null) {
-        val = r.process_flow_pct;
-        signalName = "Flow %";
-      } else if (r.position_actual_pct !== undefined && r.position_actual_pct !== null) {
-        val = r.position_actual_pct;
-        signalName = "Position";
-      } else if (r.vibration_mm_s !== undefined && r.vibration_mm_s !== null) {
-        val = r.vibration_mm_s;
-        signalName = "Vibration";
-      } else if (r.process_pressure_bar !== undefined && r.process_pressure_bar !== null) {
-        val = r.process_pressure_bar;
-        signalName = "Pressure";
-      }
-    }
-    pts.push(val !== null && val !== undefined ? Number(val) : 50.0);
-  }
-
-  const min = Math.min(...pts);
-  const max = Math.max(...pts) + 0.001;
-  const splitIdx = Math.floor(pts.length * (2 / 3));
-  const baseline = pts.slice(0, splitIdx);
-  const recent = pts.slice(splitIdx);
-  const baseAvg = baseline.reduce((a, b) => a + b, 0) / baseline.length;
-  const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
-  const deltaPct = ((recentAvg - baseAvg) / Math.max(Math.abs(baseAvg), 0.001)) * 100;
-
-  const driftBadge = document.getElementById("telem-drift-badge");
-  if (driftBadge) {
-    const sign = deltaPct >= 0 ? "+" : "";
-    const color = Math.abs(deltaPct) > 4 ? (deltaPct < 0 ? "var(--red)" : "var(--orange)") : "var(--green)";
-    driftBadge.innerHTML = `<span style="color:${color}; font-weight:700;">Δ ${sign}${deltaPct.toFixed(1)}%</span> (${signalName})`;
-  }
-
-  const W = canvas.width;
-  const H = canvas.height;
-
-  // Background grid lines
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, H * 0.25); ctx.lineTo(W, H * 0.25);
-  ctx.moveTo(0, H * 0.75); ctx.lineTo(W, H * 0.75);
-  ctx.stroke();
-
-  // Baseline reference dashed line
-  const baseY = H - ((baseAvg - min) / (max - min)) * (H * 0.72) - H * 0.14;
-  ctx.strokeStyle = "rgba(148, 163, 184, 0.5)";
-  ctx.setLineDash([4 * window.devicePixelRatio, 4 * window.devicePixelRatio]);
-  ctx.beginPath();
-  ctx.moveTo(0, baseY);
-  ctx.lineTo((splitIdx / (pts.length - 1)) * W, baseY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Split line between baseline and recent shift window
-  const splitX = (splitIdx / (pts.length - 1)) * W;
-  ctx.strokeStyle = "rgba(0, 210, 255, 0.35)";
-  ctx.beginPath();
-  ctx.moveTo(splitX, 0); ctx.lineTo(splitX, H);
-  ctx.stroke();
-
-  // Gradient curve for recent vs baseline
-  const grad = ctx.createLinearGradient(0, 0, W, 0);
-  grad.addColorStop(0, "#38bdf8");
-  grad.addColorStop(0.65, "#00d2ff");
-  grad.addColorStop(1, Math.abs(deltaPct) > 4 ? (deltaPct < 0 ? "#ef4444" : "#f59e0b") : "#10b981");
-
-  ctx.strokeStyle = grad;
-  ctx.lineWidth = 2.5 * window.devicePixelRatio;
-  ctx.beginPath();
-
-  pts.forEach(function (val, idx) {
-    const x = (idx / (pts.length - 1)) * W;
-    const y = H - ((val - min) / (max - min)) * (H * 0.72) - H * 0.14;
-    if (idx === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  // Current value dot
-  const lastX = W - 3;
-  const lastY = H - ((pts[pts.length - 1] - min) / (max - min)) * (H * 0.72) - H * 0.14;
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath();
-  ctx.arc(lastX, lastY, 3.5 * window.devicePixelRatio, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function setupOmnibar() {
-  const input = document.getElementById("omnibar-input");
-  const suggestionsBox = document.getElementById("omnibar-suggestions");
-  const submitBtn = document.getElementById("omnibar-submit");
-  const geminiBadge = document.getElementById("omnibar-gemini-badge");
-
-  // Fetch live copilot status on boot
-  fetch("/api/copilot/status")
-    .then((r) => r.json())
-    .then((status) => {
-      if (geminiBadge) {
-        if (status.gemini_enabled) {
-          geminiBadge.innerHTML = `<span class="gemini-sparkle">✨</span> <span>${status.active_model || status.model || "Gemini 3.6 Flash"}</span>`;
-          geminiBadge.style.display = "inline-flex";
-        } else {
-          geminiBadge.innerHTML = `<span>Deterministic Engine</span>`;
-        }
-      }
-    })
-    .catch(() => {});
-
-  function resolveTargetAsset(q) {
-    if (!assetsData || assetsData.length === 0) return null;
-    const lowerQ = q.toLowerCase();
-
-    // 1. Direct Tag/ID Match in Query
-    for (let a of assetsData) {
-      if (
-        lowerQ.includes(a.tag.toLowerCase()) ||
-        lowerQ.includes(a.asset_id.toLowerCase())
-      ) {
-        return a;
-      }
-    }
-
-    // 2. Criticality / degraded / issue keywords
-    if (
-      lowerQ.includes("degraded") ||
-      lowerQ.includes("foul") ||
-      lowerQ.includes("cavitation") ||
-      lowerQ.includes("critical") ||
-      lowerQ.includes("fail") ||
-      lowerQ.includes("alarm") ||
-      lowerQ.includes("issue") ||
-      lowerQ.includes("urgent") ||
-      lowerQ.includes("inspect first")
-    ) {
-      const urgent = assetsData.filter(
-        (a) =>
-          a.state &&
-          (a.state.condition_state === "attention_required" ||
-            a.state.condition_state === "degraded"),
-      );
-      if (urgent.length > 0) {
-        urgent.sort((a, b) => (a.state.health_score || 0) - (b.state.health_score || 0));
-        return urgent[0];
-      }
-    }
-
-    // 3. Equipment Class keywords
-    if (lowerQ.includes("pump")) {
-      const pumps = assetsData.filter((a) => a.asset_class === "PROCESS_PUMP");
-      const badPump = pumps.find(
-        (p) => p.state && p.state.condition_state !== "healthy",
-      );
-      return badPump || pumps[0] || null;
-    }
-    if (lowerQ.includes("valve")) {
-      const valves = assetsData.filter((a) => a.asset_class === "CONTROL_VALVE");
-      const badValve = valves.find(
-        (v) => v.state && v.state.condition_state !== "healthy",
-      );
-      return badValve || valves[0] || null;
-    }
-    if (lowerQ.includes("motor")) {
-      const motors = assetsData.filter((a) => a.asset_class === "ELECTRIC_MOTOR");
-      const badMotor = motors.find(
-        (m) => m.state && m.state.condition_state !== "healthy",
-      );
-      return badMotor || motors[0] || null;
-    }
-    if (lowerQ.includes("transmitter") || lowerQ.includes("pressure")) {
-      return (
-        assetsData.find((a) => a.asset_class === "PRESSURE_TRANSMITTER") || null
-      );
-    }
-    if (lowerQ.includes("vibration") || lowerQ.includes("sensor")) {
-      return (
-        assetsData.find((a) => a.asset_class === "VIBRATION_SENSOR") || null
-      );
-    }
-
-    // 4. Currently selected asset if exists
-    if (currentSelectedAsset) {
-      const current = assetsData.find((a) => a.asset_id === currentSelectedAsset);
-      if (current) return current;
-    }
-
-    // 5. Default to the most critical asset overall
-    const attention = assetsData.find(
-      (a) => a.state && a.state.condition_state === "attention_required",
-    );
-    return attention || assetsData[0];
-  }
-
-  function isQuestionPrompt(q) {
-    const text = q.trim().toLowerCase();
-    if (text.includes("?")) return true;
-    const qWords = [
-      "what",
-      "why",
-      "how",
-      "when",
-      "where",
-      "which",
-      "is",
-      "are",
-      "can",
-      "should",
-      "could",
-      "inspect",
-      "check",
-      "diagnose",
-      "diagnosis",
-      "recommend",
-      "safe",
-      "safety",
-      "fix",
-      "repair",
-      "cause",
-      "history",
-      "trend",
-      "drift",
-      "status",
-      "explain",
-      "gemini",
-      "first",
-      "tell",
-    ];
-    for (let word of qWords) {
-      const regex = new RegExp("\\b" + word + "\\b", "i");
-      if (regex.test(text)) return true;
-    }
-    return text.length > 15;
-  }
-
-  async function executeOmniQuery(query, forceGemini = false) {
-    const rawQuery = (query || "").trim();
-    if (!rawQuery) return;
-    suggestionsBox.style.display = "none";
-
-    const matched = resolveTargetAsset(rawQuery);
-    if (!matched) {
-      showToast("No equipment found matching: " + rawQuery);
-      return;
-    }
-
-    const isQuestion = forceGemini || isQuestionPrompt(rawQuery);
-
-    if (isQuestion) {
-      // Natural Language Gemini Copilot Query
-      focusAssetIn3D(matched.asset_id);
-      if (!copilotOpen) {
-        toggleCopilotDrawer();
-      }
-      const copilotInput = document.getElementById("copilot-question");
-      if (copilotInput) {
-        copilotInput.value = rawQuery;
-      }
-      const copilotAnswer = document.getElementById("copilot-answer");
-      if (copilotAnswer) {
-        copilotAnswer.textContent =
-          "✨ Thinking… Gemini is analyzing telemetry drift, alarms, and docs with verified citations";
-      }
-      showToast("✨ Asking Gemini Copilot about " + matched.tag + "…");
-
-      selectAsset(matched.asset_id, rawQuery);
-    } else {
-      // Pure Equipment Search / Select
-      input.value =
-        matched.tag + " (" + matched.asset_class.replace("_", " ") + ")";
-      selectAsset(matched.asset_id);
-      focusAssetIn3D(matched.asset_id);
-      if (!copilotOpen) {
-        toggleCopilotDrawer();
-      }
-      showToast("Omnibar matched: " + matched.tag + " — 3D Focus & Dossier activated");
-    }
-  }
-
-  if (geminiBadge) {
-    geminiBadge.onclick = function () {
-      const q = input.value.trim() || "What should I inspect first?";
-      input.value = q;
-      executeOmniQuery(q, true);
-    };
-  }
-
-  input.oninput = function () {
-    const rawVal = input.value.trim();
-    const q = rawVal.toLowerCase();
-    if (q.length === 0) {
-      suggestionsBox.style.display = "none";
-      return;
-    }
-
-    suggestionsBox.innerHTML = "";
-
-    // 1. Add "✨ Ask Gemini Copilot" Action Item
-    const geminiItem = document.createElement("div");
-    geminiItem.className = "omnibar-suggestion-item gemini-prompt-item";
-    geminiItem.innerHTML = `
-      <div style="display:flex; align-items:center; gap:8px;">
-        <span style="font-size:14px;">✨</span>
-        <div>
-          <b style="color:#e0f2fe;">Ask Gemini Copilot:</b> <span style="color:#38bdf8;">"${rawVal}"</span>
-          <div style="font-size:10px; color:var(--muted); margin-top:2px;">Evidence-grounded diagnosis with verified citations</div>
-        </div>
-      </div>
-      <span class="badge" style="background:rgba(0,210,255,0.2); color:var(--accent);">Gemini</span>
-    `;
-    geminiItem.onclick = function () {
-      executeOmniQuery(rawVal, true);
-    };
-    suggestionsBox.appendChild(geminiItem);
-
-    // 2. Equipment matches
-    const matches = assetsData
-      .filter(function (a) {
-        let matchedText =
-          a.tag.toLowerCase() +
-          " " +
-          a.asset_class.toLowerCase() +
-          " " +
-          a.area_name.toLowerCase();
-        if (a.state) {
-          matchedText +=
-            " " +
-            a.state.condition_state.toLowerCase() +
-            " " +
-            a.state.issue_summary.toLowerCase();
-        }
-        return matchedText.includes(q);
-      })
-      .slice(0, 4);
-
-    matches.forEach(function (m) {
-      const item = document.createElement("div");
-      item.className = "omnibar-suggestion-item";
-
-      let stClass = "healthy";
-      let hScore = 100;
-      if (m.state) {
-        stClass = m.state.condition_state;
-        hScore = m.state.health_score;
-      }
-
-      item.innerHTML = `
-        <div style="display:flex; align-items:center;">
-          <span class="status-dot status-${stClass}"></span>
-          <b style="color:#fff; margin-right:6px;">${m.tag}</b>
-          <span style="color:var(--muted); font-size:11px;">${m.asset_class.replace("_", " ")} (${m.area_name})</span>
-        </div>
-        <span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">${hScore}%</span>
-      `;
-
-      item.onclick = function () {
-        input.value = m.tag;
-        suggestionsBox.style.display = "none";
-        selectAsset(m.asset_id);
-        focusAssetIn3D(m.asset_id);
-        if (!copilotOpen) {
-          toggleCopilotDrawer();
-        }
-      };
-      suggestionsBox.appendChild(item);
-    });
-
-    suggestionsBox.style.display = "flex";
-  };
-
-  input.onkeydown = function (e) {
-    if (e.key === "Enter") {
-      executeOmniQuery(input.value);
-    }
-  };
-
-  submitBtn.onclick = function () {
-    executeOmniQuery(input.value);
-  };
-}
-
-function setupPanelCollapses() {
-  const sidebar = document.getElementById("sidebar-metaverse");
-  const leftToggle = document.getElementById("btn-toggle-left-sidebar");
-  const copilot = document.getElementById("copilot-drawer");
-  const rightToggle = document.getElementById("btn-toggle-copilot");
-
-  leftToggle.onclick = toggleLeftSidebar;
-  rightToggle.onclick = toggleCopilotDrawer;
-}
-
-function toggleLeftSidebar() {
-  const sidebar = document.getElementById("sidebar-metaverse");
-  const sidebarContainer = document.getElementById("left-sidebar-container");
-  const leftToggle = document.getElementById("btn-toggle-left-sidebar");
-
-  sidebarOpen = !sidebarOpen;
-  if (sidebarOpen) {
-    sidebarContainer.classList.remove("collapsed");
-    sidebar.classList.remove("collapsed");
-    leftToggle.innerText = "◀";
-    leftToggle.style.right = "-24px";
-    leftToggle.style.borderRadius = "0 6px 6px 0";
-    leftToggle.style.borderLeft = "none";
-    leftToggle.style.borderRight = "1px solid var(--border)";
-  } else {
-    sidebarContainer.classList.add("collapsed");
-    sidebar.classList.add("collapsed");
-    leftToggle.innerText = "▶";
-    leftToggle.style.right = "-24px";
-    leftToggle.style.borderRadius = "0 6px 6px 0";
-  }
-  setTimeout(onWindowResize, 310);
-}
-
-function toggleCopilotDrawer() {
-  const copilot = document.getElementById("copilot-drawer");
-  const copilotContainer = document.getElementById("right-copilot-container");
-  const rightToggle = document.getElementById("btn-toggle-copilot");
-
-  copilotOpen = !copilotOpen;
-  if (copilotOpen) {
-    copilotContainer.classList.remove("collapsed");
-    copilot.classList.remove("collapsed");
-    rightToggle.innerText = "▶";
-    rightToggle.style.left = "-24px";
-  } else {
-    copilotContainer.classList.add("collapsed");
-    copilot.classList.add("collapsed");
-    rightToggle.innerText = "◀";
-    rightToggle.style.left = "-24px";
-  }
-  setTimeout(onWindowResize, 310);
-}
-
-function toggleDroneNavigation() {
-  if (navProgress >= 1.0) {
-    navProgress = 0;
-    resetRouteLog();
-  }
-  isNavigating = !isNavigating;
-
-  const navBtnText = document.getElementById("nav-btn-text");
-  const navBadge = document.getElementById("nav-badge");
-
-  if (isNavigating) {
-    navBtnText.innerHTML = "❚❚ Pause Drone";
-    navBadge.innerText = "Active";
-    navBadge.style.color = "var(--accent)";
-  } else {
-    navBtnText.innerHTML = "▶ Start Drone";
-    navBadge.innerText = "Paused";
-    navBadge.style.color = "var(--yellow)";
-  }
-}
-
-function animate() {
-  requestAnimationFrame(animate);
-
-  const now = performance.now();
-  const frameSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
-  lastFrameTime = now;
-
-  // Pulse proximity scanner radar around the robot avatar
-  if (robotScannerRing) {
-    const pulse = 1.0 + Math.sin(now * 0.005) * 0.09;
-    robotScannerRing.scale.set(pulse, pulse, pulse);
-    robotScannerRing.material.opacity = 0.35 + Math.sin(now * 0.008) * 0.22;
-  }
-
-  // Active rotation and sweep of the holographic forward LIDAR scan cone
-  if (lidarScanCone) {
-    lidarScanCone.rotation.z += 0.025;
-    lidarScanCone.material.opacity = 0.12 + Math.sin(now * SCAN_PULSE_SPEED) * 0.05;
-  }
-
-  // Animate 3D process flow lines (fluid pulse effect)
-  topologyTubes.forEach(function (tube) {
-    if (tube.userData.hasFault) {
-      const pulse = 0.65 + Math.sin(now * 0.007) * 0.35;
-      tube.material.emissiveIntensity = pulse;
-    }
-  });
-
-  if (isNavigating && currentPath.length > 1) {
-    const totalLength = pathLengths[pathLengths.length - 1];
-    navProgress += (ROBOT_SPEED_M_S * navSpeed * frameSeconds) / totalLength;
-    if (navProgress >= 1.0) {
-      navProgress = 1.0;
-      isNavigating = false;
-      document.getElementById("nav-btn-text").innerHTML = "▶ Start Drone";
-      document.getElementById("nav-badge").innerText = "Arrived";
-      document.getElementById("nav-badge").style.color = "var(--green)";
-      showToast("Target Reached: " + currentSelectedAsset + " — Gemini evidence diagnosis active");
-      if (!copilotOpen) {
-        toggleCopilotDrawer();
-      }
-      runCopilotDiagnosis(
-        currentSelectedAsset,
-        "Diagnose current equipment condition, multivariate telemetry drift and next safe inspection check.",
-      ).then(function (diag) {
-        if (diag) {
-          showTargetArrivalHUD(currentSelectedAsset, diag);
-        }
-      });
-
-      // Voice announcement upon arrival
-      if (window.speechSynthesis) {
-        try {
-          const u = new SpeechSynthesisUtterance("Arrived at target asset " + currentSelectedAsset + ". Gemini diagnostics active.");
-          u.rate = 1.08;
-          window.speechSynthesis.speak(u);
-        } catch (e) {}
-      }
-    }
-
-    const travelled = navProgress * totalLength;
-    let segIdx = 0;
-    while (segIdx < currentPath.length - 2 && pathLengths[segIdx + 1] < travelled) {
-      segIdx++;
-    }
-    const segLength = pathLengths[segIdx + 1] - pathLengths[segIdx];
-    let subT = 0;
-    if (segLength > 0) {
-      subT = (travelled - pathLengths[segIdx]) / segLength;
-    }
-
-    const p1 = currentPath[segIdx];
-    const p2 = currentPath[segIdx + 1];
-
-    const curX = p1.x + (p2.x - p1.x) * subT;
-    const curZ = p1.z + (p2.z - p1.z) * subT;
-    const heading = Math.atan2(p2.x - p1.x, p2.z - p1.z);
-
-    robotAvatar.position.x = curX;
-    robotAvatar.position.z = curZ;
-    robotAvatar.rotation.y = heading;
-
-    document.getElementById("hud-nav-fill").style.width =
-      (navProgress * 100).toFixed(1) + "%";
-
-    playDueBriefings();
-    checkProximityEvents(curX, curZ);
-
-    if (cameraMode === "drone" || followCameraMode) {
-      camera.position.x = curX - Math.sin(heading) * 1.8;
-      camera.position.z = curZ - Math.cos(heading) * 1.8;
-      camera.position.y = 1.15;
-      controls.target.set(curX + Math.sin(heading) * 2.5, 0.45, curZ + Math.cos(heading) * 2.5);
-    }
-
-    if (cameraMode === "drone") {
-      const speedEl = document.getElementById("hud-flight-speed");
-      if (speedEl) {
-        speedEl.innerText = (ROBOT_SPEED_M_S * navSpeed).toFixed(1) + " m/s";
-      }
-      const headingEl = document.getElementById("hud-flight-heading");
-      if (headingEl) {
-        const deg = Math.round(((heading * 180 / Math.PI) + 360) % 360);
-        headingEl.innerText = deg + "°";
-      }
-      const rangeEl = document.getElementById("hud-reticle-range");
-      if (rangeEl) {
-        const remaining = Math.max(0, totalLength - travelled);
-        rangeEl.innerText = "LIDAR: " + remaining.toFixed(1) + " m";
-      }
-    }
-  }
-
-  updateFreeCamera();
-  controls.update();
-  renderer.render(scene, camera);
-}
-
-function boxEdgeDistance(rx, rz, pos, size) {
-  const beyondX = Math.max(Math.abs(rx - pos[0]) - size[0] / 2, 0);
-  const beyondZ = Math.max(Math.abs(rz - pos[2]) - size[2] / 2, 0);
-  return Math.hypot(beyondX, beyondZ);
-}
-
-function checkProximityEvents(rx, rz) {
-  const nearby = [];
-
-  boundingFramesGroup.children.forEach(function (c) {
-    if (c.userData && c.userData.pos) {
-      const dist = boxEdgeDistance(rx, rz, c.userData.pos, c.userData.size);
-      const isNear = dist <= proximityRadius;
-
-      if (c.userData.lineMat && c.userData.fillMat && c.userData.labelSprite) {
-        if (isNear) {
-          c.userData.lineMat.opacity = 1.0;
-          c.userData.fillMat.opacity = 0.28;
-          c.userData.labelSprite.material.opacity = 1.0;
-          c.userData.labelSprite.position.y =
-            c.userData.size[1] / 2 + 0.42 + Math.sin(Date.now() * 0.005) * 0.04;
-        } else {
-          const isSel = c.userData.id === currentSelectedAsset || c.userData.assetId === currentSelectedAsset;
-          if (isSel) {
-            c.userData.lineMat.opacity = 1.0;
-            c.userData.fillMat.opacity = 0.22;
-            c.userData.labelSprite.material.opacity = 1.0;
-          } else {
-            c.userData.lineMat.opacity = denseFramesVisible ? 0.65 : 0.08;
-            c.userData.fillMat.opacity = denseFramesVisible ? 0.06 : 0.0;
-            c.userData.labelSprite.material.opacity = denseFramesVisible ? 0.85 : 0.0;
-          }
-        }
-      }
-
-      if (isNear) {
-        nearby.push({ data: c.userData, dist: dist });
-      }
-    }
-  });
-
-  renderNearbyAssets(nearby);
-}
-
-// Rebuilt only when the set of nearby frames changes, not every animation frame.
-let nearbyKey = "";
-
-function renderNearbyAssets(nearby) {
-  const alertEl = document.getElementById("proximity-alert");
-  const assets = nearby
-    .filter(function (n) {
-      return n.data.isMapped;
-    })
-    .sort(function (a, b) {
-      return a.dist - b.dist;
-    });
-  const structures = nearby
-    .filter(function (n) {
-      return !n.data.isMapped;
-    })
-    .sort(function (a, b) {
-      return a.dist - b.dist;
-    })
-    .slice(0, MAX_NEARBY_STRUCTURES);
-  const key = assets
-    .concat(structures)
-    .map(function (n) {
-      return n.data.id;
-    })
-    .join("|") + "#" + nearby.length;
-  if (key === nearbyKey) {
-    return;
-  }
-  nearbyKey = key;
-
-  if (nearby.length === 0) {
-    alertEl.style.display = "none";
-    return;
-  }
-  alertEl.style.display = "flex";
-  document.getElementById("nearby-count").innerText =
-    assets.length + " assets · " + (nearby.length - assets.length) + " structures within " + proximityRadius + " m";
-
-  const list = document.getElementById("nearby-list");
+  const state = dossier.current_state || dossier.state || {};
+  const tag = diag.tag || dossier.tag || dossier.asset_id;
+  const health = diag.health_score != null ? diag.health_score : state.health_score;
+  const condition = diag.condition_state || state.condition_state || "unknown";
+  const css = STATE_CSS[condition] || STATE_CSS.healthy;
+
+  setText("card-asset-tag", tag);
+  setText("card-asset-meta", prettyClass(diag.asset_class || dossier.asset_class) + " · " + (dossier.area_name || "Boiler room"));
+  const frame = framesById.get(dossier.asset_id);
+  setText("card-mapping-note", frame && frame.asset_id ? mappingNote(frame) : "Not located in the scan: no object was verified as this asset.");
+  const badge = document.getElementById("card-health-badge");
+  badge.innerText = Math.round(health || 0) + "% " + condition.replace(/_/g, " ").toUpperCase();
+  badge.style.color = css;
+  badge.style.borderColor = css;
+
+  // Observation / hypothesis / next safe check, built from the grounded result.
+  const citations = diag.citations || [];
+  const evidence = citations.filter(function (c) { return ["telemetry", "event", "service_case", "work_order"].indexOf(c.source_type) >= 0; });
+  const docs = citations.filter(function (c) { return c.source_type === "doc"; });
+  const dq = citations.filter(function (c) { return c.source_type === "data_quality"; });
+  const healthy = condition === "healthy";
+  setText("dx-observation", "Health " + Math.round(health || 0) + "/100 · " + condition.replace(/_/g, " ") +
+    " · " + evidence.length + " piece" + (evidence.length === 1 ? "" : "s") + " of evidence");
+  const hypo = /Hypothesis:\s*([^.]*)/.exec(diag.diagnosis || "");
+  setText("dx-hypothesis", healthy ? "No significant deviation — routine monitoring" : hypo ? hypo[1] : prettyClass(diag.issue_code));
+  const actions = diag.recommended_actions || [];
+  setText("dx-next", actions[1] || actions[0] || "Continue routine monitoring.");
+  const confidence = diag.confidence_score != null ? diag.confidence_score : diag.model_confidence;
+  setText("dx-conf", confidence != null ? Number(confidence).toFixed(2) : "—");
+  const fill = document.getElementById("dx-conf-fill");
+  fill.style.width = Math.round((confidence || 0) * 100) + "%";
+  fill.style.background = css;
+  setText("dx-conf-note", dq.length ? "Lowered by " + dq.length + " data-quality issue" + (dq.length === 1 ? "" : "s") + " and the synthetic 3D mapping." : "");
+  document.getElementById("diag-block").style.borderColor = css;
+
+  // "Why?" — one row per evidence item: ID + short text. Documents last.
+  const list = document.getElementById("dx-why-list");
   list.innerHTML = "";
-  assets.slice(0, MAX_NEARBY_ASSETS).forEach(function (n) {
+  evidence.concat(docs).forEach(function (c) {
     const li = document.createElement("li");
-    li.className = "nearby-item";
-    li.innerHTML =
-      '<span class="status-dot status-' + statusDotClass(n.data.state) + '"></span>' +
-      "<b>" + n.data.tag + "</b>" +
-      "<span>" + n.data.assetClass + " · " + n.data.state + " · " + n.data.health + "%</span>" +
-      "<span>" + n.dist.toFixed(1) + " m</span>";
-    li.onclick = function () {
-      openCopilotForAsset(n.data.id);
-    };
+    const id = document.createElement("span");
+    id.className = "evidence-chip";
+    id.textContent = c.source_id;
+    const text = document.createElement("span");
+    const d = (c.description || "").replace(/\s*\[[^\]]*\]\s*$/, "");
+    text.textContent = d.length > 140 ? d.slice(0, 137) + "…" : d;
+    text.title = c.description || "";
+    li.appendChild(id);
+    li.appendChild(text);
     list.appendChild(li);
   });
-  structures.forEach(function (n) {
-    list.appendChild(structureListItem(n));
+  setText("dx-why-title", "Why? " + evidence.length + " evidence · " + docs.length + " document" + (docs.length === 1 ? "" : "s"));
+
+  const llm = diag.grounded_mode && diag.grounded_mode !== "deterministic-evidence-engine";
+  setText("copilot-model-badge", llm ? "Grounded answer · " + diag.grounded_mode + " (citations verified)" : "Grounded answer · evidence engine (no LLM)");
+}
+
+
+
+
+
+// ---------------------------------------------------------------- equipment list
+
+function assetState(a) {
+  return (a.state && a.state.condition_state) || "healthy";
+}
+
+function renderAssetList(assets) {
+  const list = document.getElementById("asset-list-container");
+  list.innerHTML = "";
+  const attention = assets.filter(function (a) { return assetState(a) !== "healthy"; })
+    .sort(function (a, b) { return (a.state ? a.state.health_score : 100) - (b.state ? b.state.health_score : 100); });
+  const healthy = assets.filter(function (a) { return assetState(a) === "healthy"; });
+  const byId = new Map(assets.map(function (a) { return [a.asset_id, a]; }));
+  const near = nearbyAssets
+    .filter(function (n) { return byId.has(n.assetId); })
+    .map(function (n) { return { asset: byId.get(n.assetId), dist: n.dist }; });
+
+  function group(key, title, items, card, extraClass) {
+    if (items.length === 0) return;
+    const details = document.createElement("details");
+    details.className = "asset-group" + (extraClass ? " " + extraClass : "");
+    details.open = groupOpen[key];
+    details.ontoggle = function () { groupOpen[key] = details.open; };
+    const summary = document.createElement("summary");
+    summary.innerText = title + " (" + items.length + ")";
+    details.appendChild(summary);
+    items.forEach(function (item) {
+      details.appendChild(card(item));
+    });
+    list.appendChild(details);
+  }
+  group("near", "Near the robot · " + PROXIMITY_RADIUS + " m", near, function (n) {
+    return assetCard(n.asset, n.dist.toFixed(1) + " m");
+  }, "near-group");
+  group("attention", "Needs attention", attention, assetCard, "attention-group");
+  group("healthy", "Healthy", healthy, assetCard, "healthy-group");
+  renderDetectedGroup(list);
+  renderTargetCard();
+}
+
+// "Detected objects": the extraction result (challenge criterion 1) in one place.
+function renderDetectedGroup(list) {
+  if (!framesData.length) return;
+  const mapped = framesData.filter(function (f) { return f.asset_id; }).length;
+  const counts = {};
+  framesData.filter(function (f) { return !f.asset_id; }).forEach(function (f) {
+    const k = prettyClass(f.label);
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  const details = document.createElement("details");
+  details.className = "asset-group detected-group";
+  details.open = groupOpen.detected;
+  details.ontoggle = function () { groupOpen.detected = details.open; };
+  const summary = document.createElement("summary");
+  summary.innerText = "Detected objects (" + framesData.length + ")";
+  details.appendChild(summary);
+  const body = document.createElement("div");
+  body.className = "detected-body";
+  const rows = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })
+    .map(function (k) { return "<li><span>" + escapeHtml(k) + "</span><b>" + counts[k] + "</b></li>"; }).join("");
+  body.innerHTML =
+    '<div class="detected-line"><b>' + mapped + "</b> mapped to builder-pack assets (synthetic mapping)</div>" +
+    '<div class="detected-line"><b>' + (framesData.length - mapped) + "</b> other structures, by shape:</div>" +
+    '<ul class="detected-counts">' + rows + "</ul>";
+  const btn = document.createElement("button");
+  btn.className = "action-pill" + (showAllFrames ? " active" : "");
+  btn.textContent = showAllFrames ? "Hide extra frames in 3D" : "Show all " + framesData.length + " in 3D";
+  btn.onclick = function () {
+    showAllFrames = !showAllFrames;
+    refreshFrameStyles();
+    renderAssetList(filteredAssets());
+  };
+  body.appendChild(btn);
+  details.appendChild(body);
+  list.appendChild(details);
+}
+
+// Pinned inspection target at the top of the left column.
+function renderTargetCard() {
+  const el = document.getElementById("target-card");
+  const a = assetsData.find(function (x) { return x.asset_id === faultTargetId; });
+  if (!a) {
+    el.innerHTML = "";
+    return;
+  }
+  const state = assetState(a);
+  const heading = routeTargetId === faultTargetId && currentPath.length > 1;
+  const dist = heading ? "Route " + pathLengths[pathLengths.length - 1].toFixed(1) + " m" : "Faulty device";
+  el.innerHTML =
+    '<div class="target-label">Inspection target · faulty device</div>' +
+    '<div class="target-row"><span class="status-dot status-' + dotClass(state) + '"></span><b>' + escapeHtml(a.tag) + "</b>" +
+    "<span>" + escapeHtml(prettyClass(a.asset_class)) + "</span>" +
+    '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(a.state ? a.state.health_score : 100) + "%</span></div>" +
+    '<div class="target-row"><span class="muted">' + dist + '</span><button class="btn" id="btn-target-go">Go ▶</button></div>';
+  el.querySelector(".target-row").onclick = function () { selectAndFocus(a.asset_id); };
+  document.getElementById("btn-target-go").onclick = function (e) {
+    e.stopPropagation();
+    goTo(a.asset_id);
+  };
+}
+
+function assetCard(a, distanceText) {
+  const state = assetState(a);
+  const health = a.state ? a.state.health_score : 100;
+  const card = document.createElement("div");
+  card.className = "asset-card" + (a.asset_id === selectedId ? " active" : "");
+  card.dataset.id = a.asset_id;
+  const isTarget = a.asset_id === routeTargetId;
+  card.innerHTML =
+    '<div class="asset-card-main">' +
+    '<span class="status-dot status-' + dotClass(state) + '"></span>' +
+    "<b>" + escapeHtml(a.tag) + "</b>" +
+    '<span class="asset-class">' + escapeHtml(prettyClass(a.asset_class)) + (isTarget ? " · target" : "") +
+    (typeof distanceText === "string" ? " · " + escapeHtml(distanceText) : "") + "</span>" +
+    '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(health) + "%</span>" +
+    "</div>" +
+    '<div class="asset-actions">' +
+    '<button class="action-pill" data-act="route">🚶 Route here</button>' +
+    "</div>";
+  card.querySelector(".asset-card-main").onclick = function () {
+    selectAndFocus(a.asset_id);
+  };
+  card.querySelector('[data-act="route"]').onclick = function (e) {
+    e.stopPropagation();
+    goTo(a.asset_id);
+  };
+  return card;
+}
+
+function selectAndFocus(id) {
+  showSelection(id);
+  const frame = framesById.get(id);
+  if (frame) {
+    lookAtAsset(frame);
+  } else {
+    showToast("This asset has no 3D frame");
+  }
+}
+
+function filteredAssets() {
+  const q = document.getElementById("asset-search").value.trim().toLowerCase();
+  if (!q) return assetsData;
+  return assetsData.filter(function (a) {
+    return (a.tag + " " + a.asset_class + " " + (a.area_name || "") + " " + assetState(a)).toLowerCase().includes(q);
   });
 }
 
-function statusDotClass(state) {
-  if (state === "attention_required") {
-    return "attention";
+// ---------------------------------------------------------------- camera
+
+function setCameraMode(mode) {
+  if (freeCam.active && mode !== "free") {
+    exitFreeCamera();
   }
-  return state;
+  cameraMode = mode;
+  ["follow", "top"].forEach(function (m) {
+    document.getElementById("btn-cam-" + m).classList.toggle("active", m === mode);
+  });
+  if (mode === "top") {
+    controls.enableRotate = false;
+    controls.enablePan = true;
+    controls.minDistance = 2;
+    controls.maxDistance = 18;
+    controls.minPolarAngle = 0;
+    controls.maxPolarAngle = Math.PI * 0.2;
+    tweenCamera(new THREE.Vector3(...TOP_VIEW.position), new THREE.Vector3(...TOP_VIEW.target));
+  } else {
+    // Follow: drag to turn around the robot, wheel to zoom; pan is off so the robot stays centred.
+    controls.enableRotate = true;
+    controls.enablePan = false;
+    controls.minDistance = FOLLOW_LIMITS.min;
+    controls.maxDistance = FOLLOW_LIMITS.max;
+    controls.minPolarAngle = FOLLOW_LIMITS.minPolar;
+    controls.maxPolarAngle = FOLLOW_LIMITS.maxPolar;
+    placeBehindRobot();
+  }
+  lastRobotPos = robotAvatar.position.clone();
 }
 
-function structureListItem(n) {
-  const context = n.data.context;
-  const li = document.createElement("li");
-  li.className = "nearby-item";
-  li.style.opacity = "0.7";
-  const dot = document.createElement("span");
-  dot.className = "status-dot status-" + statusDotClass(context.state);
-  const label = document.createElement("span");
-  label.style.gridColumn = "2 / 4";
-  label.textContent = context.summary;
-  const distance = document.createElement("span");
-  distance.textContent = n.dist.toFixed(1) + " m";
-  li.append(dot, label, distance);
-  return li;
+function robotHead() {
+  return new THREE.Vector3(robotAvatar.position.x, ROBOT_HEAD, robotAvatar.position.z);
 }
-window.appCheckProximityEvents = checkProximityEvents;
+
+// Camera behind the robot, looking where it faces (or along `dir` when given).
+function placeBehindRobot(dir) {
+  const facing = dir || new THREE.Vector3(Math.sin(robotAvatar.rotation.y), 0, Math.cos(robotAvatar.rotation.y));
+  facing.setY(0).normalize();
+  const head = robotHead();
+  const pos = head.clone().addScaledVector(facing, -FOLLOW_BACK);
+  pos.y = FOLLOW_EYE;
+  tweenCamera(pos, head);
+}
+
+// Turn the view towards an asset: in follow mode the camera goes behind the robot,
+// on the far side from the asset, so the asset is in front; in top mode it pans over it.
+function lookAtAsset(frame) {
+  if (cameraMode === "top") {
+    tweenCamera(new THREE.Vector3(frame.pos[0], 7, frame.pos[2] + 0.01), new THREE.Vector3(frame.pos[0], 0, frame.pos[2]));
+    return;
+  }
+  if (cameraMode !== "follow") setCameraMode("follow");
+  const toAsset = new THREE.Vector3(frame.pos[0] - robotAvatar.position.x, 0, frame.pos[2] - robotAvatar.position.z);
+  placeBehindRobot(toAsset.lengthSq() > 0.01 ? toAsset : null);
+}
+
+function pointOnPath(distance) {
+  if (currentPath.length < 2) return null;
+  const total = pathLengths[pathLengths.length - 1];
+  const d = THREE.MathUtils.clamp(distance, 0, total);
+  let seg = 0;
+  while (seg < currentPath.length - 2 && pathLengths[seg + 1] < d) seg++;
+  const len = pathLengths[seg + 1] - pathLengths[seg];
+  const t = len > 0 ? (d - pathLengths[seg]) / len : 0;
+  const a = currentPath[seg];
+  const b = currentPath[seg + 1];
+  return new THREE.Vector3(a.x + (b.x - a.x) * t, 0, a.z + (b.z - a.z) * t);
+}
+
+// Eye-height camera behind the robot, smoothly following.
+// Follow: the camera keeps the user's angle and zoom and moves with the robot.
+function updateFollowCamera() {
+  if (lastRobotPos) {
+    camera.position.add(new THREE.Vector3().subVectors(robotAvatar.position, lastRobotPos));
+  }
+  controls.target.copy(robotHead());
+}
+
+function resetView() {
+  setCameraMode("follow");
+}
+
+
+
+function tweenCamera(toPosition, toTarget, ms) {
+  camTween = {
+    fromPos: camera.position.clone(),
+    fromTarget: controls.target.clone(),
+    toPos: toPosition,
+    toTarget: toTarget,
+    start: performance.now(),
+    duration: ms || 650,
+  };
+}
+
+function updateCameraTween() {
+  if (!camTween) return;
+  const t = Math.min((performance.now() - camTween.start) / camTween.duration, 1);
+  const k = t * t * (3 - 2 * t);
+  camera.position.lerpVectors(camTween.fromPos, camTween.toPos, k);
+  controls.target.lerpVectors(camTween.fromTarget, camTween.toTarget, k);
+  if (t >= 1) camTween = null;
+}
+
+// Keep the orbit pivot inside the room so zoom always heads somewhere meaningful.
+function clampTarget() {
+  const margin = 1.5;
+  const t = controls.target;
+  t.x = THREE.MathUtils.clamp(t.x, roomBounds.x[0] - margin, roomBounds.x[1] + margin);
+  t.z = THREE.MathUtils.clamp(t.z, roomBounds.z[0] - margin, roomBounds.z[1] + margin);
+  t.y = THREE.MathUtils.clamp(t.y, 0, (roomBounds.ceiling || 3) + 0.5);
+}
+
+function setupViewportPicking() {
+  const raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.05;
+  const mouse = new THREE.Vector2();
+  let down = null;
+
+  function pick(e) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+  }
+
+  // Only labels on screen and highlighted frames are clickable, so the floor stays clickable.
+  function frameHit() {
+    const clickable = [];
+    boundingFramesGroup.children.forEach(function (b) {
+      const u = b.userData;
+      if (!b.visible) return;
+      if (u.label && u.label.visible && u.label.material.opacity > 0) clickable.push(u.label);
+      if (u.fillMat.opacity > 0 || (showAllFrames && u.shown)) clickable.push(b.children[0]);
+    });
+    const hits = raycaster.intersectObjects(clickable, false);
+    for (const hit of hits) {
+      let obj = hit.object;
+      while (obj && !(obj.userData && obj.userData.frame) && obj.parent) obj = obj.parent;
+      if (obj && obj.userData && obj.userData.frame) return { frame: obj.userData.frame, point: hit.point };
+    }
+    return null;
+  }
+
+  renderer.domElement.addEventListener("pointerdown", function (e) {
+    down = { x: e.clientX, y: e.clientY, t: Date.now() };
+  });
+  renderer.domElement.addEventListener("pointerup", function (e) {
+    if (!down || freeCam.active) return;
+    const moved = Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y);
+    if (moved > 5 || Date.now() - down.t > 350) return;
+    pick(e);
+    const hit = frameHit();
+    if (hit) {
+      showSelection(hit.frame.id);
+      return;
+    }
+    const floor = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), floor)) {
+      walkToPoint(floor.x, floor.z);
+    }
+  });
+}
 
 function setupFreeCamera() {
   const canvas = renderer.domElement;
@@ -2509,11 +1733,8 @@ function enterFreeCamera() {
   freeCam.pitch = euler.x;
   camera.rotation.set(freeCam.pitch, freeCam.yaw, 0, "YXZ");
   document.getElementById("freecam-hud").style.display = "block";
-  document.querySelectorAll(".view-toolbar button").forEach(function (button) {
-    button.classList.remove("active");
-    if (button.id === "btn-cam-free") {
-      button.classList.add("active");
-    }
+  ["follow", "top"].forEach(function (m) {
+    document.getElementById("btn-cam-" + m).classList.remove("active");
   });
   renderer.domElement.requestPointerLock();
 }
@@ -2521,13 +1742,14 @@ function enterFreeCamera() {
 function exitFreeCamera() {
   freeCam.active = false;
   freeCam.keys.clear();
-  controls.enabled = true;
-  if (document.exitPointerLock) {
-    document.exitPointerLock();
-  }
+  if (document.exitPointerLock) document.exitPointerLock();
   document.getElementById("freecam-hud").style.display = "none";
-  document.getElementById("btn-cam-orbit").classList.add("active");
-  cameraMode = "orbit";
+  // Re-anchor the orbit pivot in front of where the free camera looks.
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  controls.target.copy(camera.position).add(forward.multiplyScalar(2.5));
+  controls.enabled = true;
+  setCameraMode("follow");
 }
 
 function updateFreeCamera() {
@@ -2564,243 +1786,488 @@ function updateFreeCamera() {
   }
 }
 
-function setCameraMode(mode, targetBtn) {
-  if (freeCam.active) {
-    exitFreeCamera();
-  }
-  cameraMode = mode;
-  document.querySelectorAll(".view-toolbar button").forEach(function (b) {
-    b.classList.remove("active");
-  });
-  if (targetBtn) {
-    targetBtn.classList.add("active");
+// ---------------------------------------------------------------- animation loop
+
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
+  lastFrameTime = now;
+
+  if (isNavigating && currentPath.length > 1) {
+    const total = pathLengths[pathLengths.length - 1];
+    navProgress = Math.min(1, navProgress + (ROBOT_SPEED_M_S * navSpeed * dt) / Math.max(total, 1e-6));
+    const travelled = navProgress * total;
+    let seg = 0;
+    while (seg < currentPath.length - 2 && pathLengths[seg + 1] < travelled) seg++;
+    const segLength = pathLengths[seg + 1] - pathLengths[seg];
+    const t = segLength > 0 ? (travelled - pathLengths[seg]) / segLength : 0;
+    const p1 = currentPath[seg];
+    const p2 = currentPath[seg + 1];
+    robotAvatar.position.x = p1.x + (p2.x - p1.x) * t;
+    robotAvatar.position.z = p1.z + (p2.z - p1.z) * t;
+    robotAvatar.rotation.y = Math.atan2(p2.x - p1.x, p2.z - p1.z);
+    document.getElementById("hud-nav-fill").style.width = (navProgress * 100).toFixed(1) + "%";
+    checkProximityEvents(robotAvatar.position.x, robotAvatar.position.z);
+    if (navProgress >= 1) onArrival();
   }
 
-  const droneHud = document.getElementById("drone-hud-overlay");
-  if (droneHud) {
-    if (mode === "drone") {
-      droneHud.classList.add("active");
-    } else {
-      droneHud.classList.remove("active");
-    }
-  }
+  if (cameraMode === "follow" && !camTween) updateFollowCamera();
+  lastRobotPos = robotAvatar.position.clone();
 
-  if (mode === "top") {
-    camera.position.set(...TOP_VIEW.position);
-    controls.target.set(...TOP_VIEW.target);
-    setObstacleOverlay(true);
-  } else if (mode === "orbit") {
-    camera.position.set(...ORBIT_VIEW.position);
-    controls.target.set(...ORBIT_VIEW.target);
-  } else if (mode === "drone") {
-    if (robotAvatar) {
-      const rx = robotAvatar.position.x;
-      const ry = robotAvatar.position.y;
-      const rz = robotAvatar.position.z;
-      const rotY = robotAvatar.rotation.y;
-      camera.position.set(rx - Math.sin(rotY) * 1.8, ry + 1.15, rz - Math.cos(rotY) * 1.8);
-      controls.target.set(rx + Math.sin(rotY) * 2.5, ry + 0.35, rz + Math.cos(rotY) * 2.5);
-      controls.update();
-    }
+  updateCameraTween();
+  updateFreeCamera();
+  if (!freeCam.active) {
+    if (cameraMode === "top") clampTarget();
+    controls.update();
+    if (cameraMode === "follow") keepCameraInside();
   }
+  pulseXray(now);
+  if (now - lastDeclutter > 120) {
+    declutterLabels();
+    lastDeclutter = now;
+  }
+  renderer.render(scene, camera);
 }
 
-const btnSemanticExtract = document.getElementById("btn-semantic-extract");
-if (btnSemanticExtract) {
-  btnSemanticExtract.onclick = function () {
-    toggleDenseSemanticFrames();
+// ---------------------------------------------------------------- omnibar (natural language)
+
+function setupOmnibar() {
+  const input = document.getElementById("omnibar-input");
+  const box = document.getElementById("omnibar-suggestions");
+
+  function findAsset(text) {
+    const q = text.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return assetsData.find(function (a) {
+      const tag = a.tag.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const id = a.asset_id.toLowerCase().replace(/[^a-z0-9]/g, "");
+      return q.includes(tag) || q.includes(id);
+    });
+  }
+
+  async function run(text) {
+    const q = text.trim();
+    if (!q) {
+      return;
+    }
+    box.style.display = "none";
+    input.value = "";
+    addMessage("user", q);
+
+    let currentTarget = "";
+    if (selectedId && framesById.has(selectedId)) {
+      const frame = framesById.get(selectedId);
+      if (frame.asset_id) {
+        currentTarget = frame.asset_id;
+      }
+    }
+
+    const thinking = addMessage("ai", "Processing command…");
+    try {
+      const resp = await fetchJson("/api/copilot/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, asset_id: currentTarget }),
+      });
+      thinking.remove();
+
+      const action = resp.action || "diagnose";
+      const targetId = resp.target_asset_id || resp.asset_id;
+
+      if (action === "reset") {
+        resetRobot();
+      } else if (action === "navigate" && targetId) {
+        goTo(targetId);
+      } else if (action === "select" && targetId) {
+        selectAndFocus(targetId);
+      } else if (action === "diagnose" && targetId) {
+        selectAndFocus(targetId);
+      }
+
+      const answerText = resp.answer || resp.diagnosis_summary || resp.diagnosis || "Command executed.";
+      const citations = resp.citations || [];
+      const ids = citations
+        .filter(function (c) {
+          return c.source_type !== "data_quality";
+        })
+        .map(function (c) {
+          return c.source_id;
+        })
+        .slice(0, 6);
+
+      addMessage("ai", answerText, ids);
+
+      if (targetId) {
+        const dossier = await fetchJson("/api/assets/" + encodeURIComponent(targetId));
+        updateCopilotDrawer(dossier, resp);
+      }
+    } catch (err) {
+      thinking.remove();
+      addMessage("ai", "Copilot error: " + err.message);
+    }
+  }
+
+  input.oninput = function () {
+    const q = input.value.trim().toLowerCase();
+    if (q.length < 2) {
+      box.style.display = "none";
+      return;
+    }
+    const matches = assetsData.filter(function (a) {
+      return (a.tag + " " + a.asset_class + " " + (a.area_name || "")).toLowerCase().includes(q);
+    }).slice(0, 5);
+    box.innerHTML = "";
+    matches.forEach(function (m) {
+      const item = document.createElement("div");
+      item.className = "omnibar-suggestion-item";
+      item.innerHTML = '<span><span class="status-dot status-' + dotClass(assetState(m)) + '"></span><b>' +
+        escapeHtml(m.tag) + "</b> " + escapeHtml(prettyClass(m.asset_class)) + "</span><span>" +
+        Math.round(m.state ? m.state.health_score : 100) + "%</span>";
+      item.onclick = function () {
+        input.value = "";
+        box.style.display = "none";
+        selectAndFocus(m.asset_id);
+      };
+      box.appendChild(item);
+    });
+    box.style.display = matches.length ? "flex" : "none";
+  };
+  input.onkeydown = function (e) {
+    if (e.key === "Enter") run(input.value);
+  };
+  document.getElementById("omnibar-submit").onclick = function () {
+    run(input.value);
   };
 }
 
-async function launchAutonomousInspectionMission() {
-  let faulty = assetsData.find(
-    (a) => a.state && a.state.condition_state === "attention_required",
-  );
-  if (!faulty) {
-    faulty =
-      assetsData.find(
-        (a) => a.state && a.state.condition_state === "degraded",
-      ) || assetsData[0];
-  }
-  if (!faulty) {
-    showToast("No equipment data available.");
-    return;
-  }
+// ---------------------------------------------------------------- panels, toolbar, help
 
-  showToast("🚀 Autonomous Mission Launched: Heading to critical " + faulty.tag);
-
-  // Voice announcement
-  if (window.speechSynthesis) {
-    try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(
-        "Autonomous inspection mission launched. Navigating to critical asset " +
-          faulty.tag +
-          ", health " +
-          (faulty.state ? faulty.state.health_score : 44) +
-          " percent.",
-      );
-      u.rate = 1.05;
-      window.speechSynthesis.speak(u);
-    } catch (e) {}
-  }
-
-  currentSelectedAsset = faulty.asset_id;
-  await selectAsset(faulty.asset_id);
-
-  followCameraMode = true;
-  cameraMode = "drone";
-  const followBtn = document.getElementById("btn-cam-follow");
-  if (followBtn) followBtn.classList.add("active");
-
-  navSpeed = 1.6;
-  const speedSlider = document.getElementById("speed-slider");
-  const speedVal = document.getElementById("speed-val");
-  if (speedSlider) speedSlider.value = "1.6";
-  if (speedVal) speedVal.innerText = "1.6x";
-
-  navProgress = 0;
-  resetRouteLog();
-  if (!isNavigating) {
-    toggleDroneNavigation();
-  }
+function setupPanels() {
+  document.getElementById("btn-toggle-left-sidebar").onclick = toggleLeftSidebar;
+  document.getElementById("btn-toggle-copilot").onclick = toggleCopilotDrawer;
 }
 
-function toggleFollowCamera() {
-  followCameraMode = !followCameraMode;
-  const btn = document.getElementById("btn-cam-follow");
-  if (btn) {
-    btn.classList.toggle("active", followCameraMode);
-  }
-  if (followCameraMode) {
-    cameraMode = "drone";
-    showToast("🎥 Follow Drone Cam: Tracking inspector robot");
-  } else {
-    cameraMode = "orbit";
-    controls.target.set(robotAvatar.position.x, 0.8, robotAvatar.position.z);
-    showToast("Orbit camera active");
-  }
+function toggleLeftSidebar() {
+  sidebarOpen = !sidebarOpen;
+  document.getElementById("left-sidebar-container").classList.toggle("collapsed", !sidebarOpen);
+  document.getElementById("sidebar-metaverse").classList.toggle("collapsed", !sidebarOpen);
+  document.getElementById("btn-toggle-left-sidebar").innerText = sidebarOpen ? "◀" : "▶";
+  setTimeout(onWindowResize, 310);
 }
 
-const btnHeroMission = document.getElementById("btn-hero-mission");
-if (btnHeroMission) {
-  btnHeroMission.onclick = launchAutonomousInspectionMission;
+function toggleCopilotDrawer() {
+  copilotOpen = !copilotOpen;
+  document.getElementById("right-copilot-container").classList.toggle("collapsed", !copilotOpen);
+  document.getElementById("copilot-drawer").classList.toggle("collapsed", !copilotOpen);
+  document.getElementById("btn-toggle-copilot").innerText = copilotOpen ? "▶" : "◀";
+  setTimeout(onWindowResize, 310);
 }
 
-const btnCamFollow = document.getElementById("btn-cam-follow");
-if (btnCamFollow) {
-  btnCamFollow.onclick = toggleFollowCamera;
-}
-
-document.getElementById("btn-start-nav").onclick = toggleDroneNavigation;
-
-document.getElementById("btn-reset-nav").onclick = function () {
-  isNavigating = false;
-  navProgress = 0;
-  document.getElementById("nav-btn-text").innerHTML = "▶ Start Drone";
-  document.getElementById("nav-badge").innerText = "Ready";
-  document.getElementById("nav-badge").style.color = "var(--green)";
-  document.getElementById("hud-nav-fill").style.width = "0%";
-  resetRouteLog();
-  if (currentPath.length > 0) {
-    robotAvatar.position.set(currentPath[0].x, ROBOT_GROUND_OFFSET, currentPath[0].z);
-  }
-};
-
-document.getElementById("speed-slider").oninput = function (e) {
-  navSpeed = parseFloat(e.target.value);
-  document.getElementById("speed-val").innerText = navSpeed.toFixed(1) + "x";
-};
-
-document.getElementById("btn-cam-drone").onclick = function (e) {
-  setCameraMode("drone", e.currentTarget);
-};
-document.getElementById("btn-cam-orbit").onclick = function (e) {
-  setCameraMode("orbit", e.currentTarget);
-};
-document.getElementById("btn-cam-top").onclick = function (e) {
-  setCameraMode("top", e.currentTarget);
-};
-document.getElementById("btn-cam-free").onclick = enterFreeCamera;
-
-document
-  .querySelectorAll(".render-mode-btn[data-render-mode]")
-  .forEach(function (button) {
-    button.onclick = function () {
-      applyRenderMode(button.dataset.renderMode);
+function setupToolbar() {
+  document.getElementById("btn-reset-nav").onclick = resetRobot;
+  document.getElementById("btn-cam-follow").onclick = function () { setCameraMode("follow"); };
+  document.getElementById("btn-cam-top").onclick = function () { setCameraMode("top"); };
+  document.querySelectorAll(".render-mode-btn[data-view]").forEach(function (b) {
+    b.onclick = function () {
+      closeMenus();
+      if (renderMode === "heat") applyRenderMode("splat");
+      if (b.dataset.view !== viewKind) loadSceneModel(b.dataset.view);
     };
   });
-document.getElementById("btn-vision-analyze").onclick = analyzeCurrentView;
-document.getElementById("btn-obstacles").onclick = function () {
-  let nextVisible = true;
-  if (obstacleOverlay && obstacleOverlay.visible) {
-    nextVisible = false;
-  }
-  setObstacleOverlay(nextVisible);
-};
-
-const btnToggleTopology = document.getElementById("btn-toggle-topology");
-if (btnToggleTopology) {
-  btnToggleTopology.onclick = function () {
-    processTopologyGroup.visible = !processTopologyGroup.visible;
-    btnToggleTopology.classList.toggle("active", processTopologyGroup.visible);
-    btnToggleTopology.setAttribute("aria-pressed", String(processTopologyGroup.visible));
-    let statusMsg = "Process Flow Circuits Hidden";
-    if (processTopologyGroup.visible) {
-      statusMsg = "Process Flow Circuits Active in 3D";
+  document.getElementById("btn-verify").onclick = function () {
+    closeMenus();
+    verifyPlacementByCamera();
+  };
+  document.getElementById("btn-heat").onclick = function () {
+    closeMenus();
+    if (viewKind === "splat") {
+      renderMode = "heat"; // height colouring needs the point view
+      loadSceneModel("points");
+      return;
     }
-    showToast(statusMsg);
+    applyRenderMode(renderMode === "heat" ? "splat" : "heat");
+  };
+
+  function menu(buttonId, dropdownId) {
+    const dd = document.getElementById(dropdownId);
+    document.getElementById(buttonId).onclick = function (e) {
+      e.stopPropagation();
+      const open = !dd.classList.contains("open");
+      closeMenus();
+      dd.classList.toggle("open", open);
+    };
+  }
+  menu("btn-view-menu", "view-dropdown");
+  menu("btn-more", "more-dropdown");
+  document.addEventListener("click", closeMenus);
+  document.getElementById("btn-cam-free").onclick = enterFreeCamera;
+  document.getElementById("btn-vision-analyze").onclick = analyzeCurrentView;
+  document.getElementById("btn-semantic-extract").onclick = rerunExtraction;
+  document.getElementById("asset-search").oninput = function () {
+    renderAssetList(filteredAssets());
   };
 }
 
-function askCopilot() {
-  const input = document.getElementById("copilot-question");
-  const question = input.value.trim();
-  if (!question) {
+function closeMenus() {
+  document.querySelectorAll(".more-dropdown.open").forEach(function (d) { d.classList.remove("open"); });
+}
+
+async function rerunExtraction() {
+  showToast("Re-running 3D extraction…");
+  try {
+    const data = await fetchJson("/api/scene/extract-assets", { method: "POST" });
+    framesData = data.all_frames || framesData;
+    framesById.clear();
+    framesData.forEach(function (f) { framesById.set(f.id, f); });
+    buildFrames(framesData);
+    showToast(data.extracted_count + " objects in " + data.processing_seconds + " s");
+  } catch (err) {
+    showToast("Extraction failed: " + err.message);
+  }
+}
+
+function setupHelp() {
+  document.getElementById("btn-help").onclick = function () {
+    document.getElementById("help-card").classList.add("open");
+  };
+  document.getElementById("btn-help-close").onclick = hideHelp;
+}
+
+function hideHelp() {
+  document.getElementById("help-card").classList.remove("open");
+}
+
+
+
+// ---------------------------------------------------------------- camera verification
+// The workbook has no real positions, so what each detected object *is* has to come from the scan.
+// For every object the viewer renders a close crop, the backend asks a vision-language model what
+// it shows, and the asset binding then only uses objects verified as the asset's class.
+
+const VERIFY_SETTLE_MS = 1200; // lets Spark re-sort the splat after the camera jumps
+const VERIFY_CONCURRENCY = 3; // model requests in flight while the camera keeps moving
+const VERIFY_CROP_PX = 640;
+const VERIFY_GIVE_UP_AFTER = 3; // consecutive failures (no key, no network) before stopping
+let verifyRunning = false;
+let verifyStop = false;
+
+window.addEventListener("keydown", function (event) {
+  if (event.key === "Escape" && verifyRunning) verifyStop = true;
+});
+
+// A camera spot that looks at the frame from inside the room, preferring the side facing the room centre.
+function verifyCameraSpot(frame, room) {
+  const [cx, , cz] = frame.pos;
+  const reach = Math.max(1.5, Math.max.apply(null, frame.size) * 1.8);
+  const towardCentre = Math.atan2(-cz, -cx);
+  const inside = function (x, z) {
+    return x > room.x[0] + 0.15 && x < room.x[1] - 0.15 && z > room.z[0] + 0.15 && z < room.z[1] - 0.15;
+  };
+  for (const distance of [reach, reach * 0.8, reach * 0.6, 1.0]) {
+    for (const turn of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, Math.PI]) {
+      const x = cx + Math.cos(towardCentre + turn) * distance;
+      const z = cz + Math.sin(towardCentre + turn) * distance;
+      if (inside(x, z)) return { x: x, z: z };
+    }
+  }
+  return { x: cx, z: cz + (cz > 0 ? -1.2 : 1.2) };
+}
+
+// Renders the frame from a close spot and returns a JPEG crop with the object outlined.
+async function captureFrameCrop(frame, room) {
+  const centre = new THREE.Vector3(frame.pos[0], frame.pos[1], frame.pos[2]);
+  const spot = verifyCameraSpot(frame, room);
+  camera.position.set(spot.x, Math.min(Math.max(centre.y + 0.3, 0.8), 1.5), spot.z);
+  controls.target.copy(centre);
+  controls.update();
+  camera.updateMatrixWorld();
+  await new Promise(function (resolve) { setTimeout(resolve, VERIFY_SETTLE_MS); });
+
+  const canvas = renderer.domElement;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const dx of [-0.5, 0.5]) for (const dy of [-0.5, 0.5]) for (const dz of [-0.5, 0.5]) {
+    const corner = new THREE.Vector3(centre.x + dx * frame.size[0], centre.y + dy * frame.size[1], centre.z + dz * frame.size[2]).project(camera);
+    const sx = (corner.x * 0.5 + 0.5) * canvas.width;
+    const sy = (-corner.y * 0.5 + 0.5) * canvas.height;
+    x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+  }
+  const w = x1 - x0, h = y1 - y0;
+  const side = Math.max(w, h, 200) * 1.9;
+  const left = Math.max(0, (x0 + x1) / 2 - side / 2), top = Math.max(0, (y0 + y1) / 2 - side / 2);
+  const cropW = Math.min(canvas.width - left, side), cropH = Math.min(canvas.height - top, side);
+  const out = document.createElement("canvas");
+  out.width = Math.round(Math.min(cropW, VERIFY_CROP_PX));
+  out.height = Math.round(out.width * cropH / cropW);
+  const ctx = out.getContext("2d");
+  ctx.drawImage(canvas, left, top, cropW, cropH, 0, 0, out.width, out.height);
+  const k = out.width / cropW;
+  ctx.strokeStyle = "#00e5ff"; // tells the model which object is meant
+  ctx.lineWidth = 2;
+  ctx.strokeRect((x0 - left) * k, (y0 - top) * k, w * k, h * k);
+  return new Promise(function (resolve) { out.toBlob(resolve, "image/jpeg", 0.9); });
+}
+
+async function postVerification(frame, blob) {
+  const form = new FormData();
+  form.append("file", blob, "crop.jpg");
+  const res = await fetch("/api/scene/objects/" + encodeURIComponent(frame.scene_id) + "/verification", { method: "POST", body: form });
+  if (!res.ok) {
+    let detail = res.status + " " + res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (e) { /* not JSON */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+async function verifyPlacementByCamera() {
+  if (verifyRunning) return;
+  if (viewKind !== "splat" || !sceneModel) {
+    showToast("Switch to the photoreal view first");
     return;
   }
-  document.getElementById("copilot-answer").textContent = "Thinking…";
-  runCopilotDiagnosis(currentSelectedAsset, question);
-}
-document.getElementById("btn-ask-copilot").onclick = askCopilot;
-document.getElementById("copilot-question").onkeydown = function (e) {
-  if (e.key === "Enter") {
-    askCopilot();
-  }
-};
-
-document.getElementById("btn-open-copilot").onclick = function () {
-  if (!copilotOpen) {
-    toggleCopilotDrawer();
-  }
-  runCopilotDiagnosis(currentSelectedAsset);
-};
-
-document.getElementById("btn-submit-wo").onclick = async function () {
+  verifyRunning = true;
+  verifyStop = false;
+  const previousMode = cameraMode;
+  const hiddenNodes = scene.children.filter(function (n) { return n !== sparkRenderer && n !== sceneModel && !n.isLight && n.visible; });
+  hiddenNodes.forEach(function (n) { n.visible = false; }); // overlays must not appear in the crops
+  let done = 0, failed = 0, consecutiveFailures = 0, lastError = "";
   try {
-    const res = await fetch("/api/work-orders/draft", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ asset_id: currentSelectedAsset }),
-    });
-    const wo = await res.json();
-    showToast("Maintenance Work Order " + wo.work_order_id + " generated!");
+    const summary = await fetchJson("/api/scene/summary");
+    const known = await fetchJson("/api/scene/verification");
+    const todo = framesData.filter(function (f) { return !known[f.scene_id]; });
+    cameraMode = "verify";
+    camTween = null;
+    const pending = new Set();
+    for (let i = 0; i < todo.length && !verifyStop; i++) {
+      setLoading(i / todo.length, "Checking what each object is… " + i + " / " + todo.length + " (Esc to stop)");
+      const blob = await captureFrameCrop(todo[i], summary.room);
+      const request = postVerification(todo[i], blob).then(
+        function () { done++; consecutiveFailures = 0; },
+        function (err) { failed++; consecutiveFailures++; lastError = err.message; },
+      );
+      pending.add(request);
+      request.finally(function () { pending.delete(request); });
+      if (pending.size >= VERIFY_CONCURRENCY) await Promise.race(pending);
+      if (consecutiveFailures >= VERIFY_GIVE_UP_AFTER) break;
+    }
+    await Promise.all(pending);
+    if (consecutiveFailures >= VERIFY_GIVE_UP_AFTER) {
+      showToast("Verification stopped: " + lastError);
+    }
   } catch (err) {
-    showToast("Error generating work order");
+    showToast("Verification failed: " + err.message);
+  } finally {
+    hiddenNodes.forEach(function (n) { n.visible = true; });
+    setCameraMode(previousMode === "verify" ? "follow" : previousMode);
+    verifyRunning = false;
   }
-};
+  if (done === 0) {
+    setLoading(null);
+    return;
+  }
+  setLoading(0.98, "Re-placing the assets from the evidence…");
+  try {
+    await fetchJson("/api/scene/extract-assets", { method: "POST" });
+    try { sessionStorage.setItem("verifyReport", done + " objects checked" + (failed ? ", " + failed + " failed" : "")); } catch (e) { /* storage off */ }
+    window.location.reload();
+  } catch (err) {
+    setLoading(null);
+    showToast("Re-placing failed: " + err.message);
+  }
+}
 
-document.getElementById("asset-search").oninput = function (e) {
-  const q = e.target.value.toLowerCase();
-  const filtered = assetsData.filter(function (a) {
-    return (
-      a.tag.toLowerCase().includes(q) ||
-      a.asset_class.toLowerCase().includes(q) ||
-      a.area_name.toLowerCase().includes(q)
-    );
+function showVerifyReport() {
+  try {
+    const report = sessionStorage.getItem("verifyReport");
+    if (report) {
+      sessionStorage.removeItem("verifyReport");
+      setTimeout(function () { showToast("Camera verification: " + report); }, 1500);
+    }
+  } catch (e) { /* storage off */ }
+}
+
+// ---------------------------------------------------------------- YOLO (secondary)
+
+function renderVisionDetections(result) {
+  const overlay = document.getElementById("vision-overlay");
+  overlay.innerHTML = "";
+  const imageWidth = result.image.width;
+  const imageHeight = result.image.height;
+  result.detections.forEach(function (detection) {
+    const box = document.createElement("div");
+    box.className = "vision-detection";
+    box.style.left = (detection.box.x / imageWidth) * 100 + "%";
+    box.style.top = (detection.box.y / imageHeight) * 100 + "%";
+    box.style.width = (detection.box.width / imageWidth) * 100 + "%";
+    box.style.height = (detection.box.height / imageHeight) * 100 + "%";
+
+    const label = document.createElement("span");
+    label.className = "vision-detection-label";
+    label.innerText =
+      detection.label + " " + Math.round(detection.confidence * 100) + "%";
+    box.appendChild(label);
+    overlay.appendChild(box);
   });
-  renderAssetList(filtered);
-};
+}
+
+async function analyzeCurrentView() {
+  const button = document.getElementById("btn-vision-analyze");
+  const canvas = renderer.domElement;
+  button.disabled = true;
+  button.innerText = "Scanning...";
+  try {
+    const blob = await new Promise(function (resolve) {
+      canvas.toBlob(resolve, "image/jpeg", 0.82);
+    });
+    if (!blob) {
+      throw new Error("Could not capture the 3D view.");
+    }
+    const form = new FormData();
+    form.append("file", blob, "ask-your-factory-view.jpg");
+    form.append(
+      "classes",
+      "person, worker, safety helmet, pump, valve, pipe, tank, boiler, motor, industrial machine, pressure gauge, ladder, fire extinguisher",
+    );
+    const response = await fetch("/api/vision/analyze", {
+      method: "POST",
+      body: form,
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.detail || "YOLO-World analysis failed.");
+    }
+    renderVisionDetections(result);
+    showToast("YOLO-World found " + result.detections.length + " object(s)");
+  } catch (error) {
+    console.error("YOLO-World analysis error", error);
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+    button.innerText = "AI Scan";
+  }
+}
+
+// ---------------------------------------------------------------- helpers
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.innerText = text == null ? "" : String(text);
+}
+
+function prettyClass(value) {
+  return (value || "—").toString().replace(/_/g, " ").toLowerCase();
+}
+
+function dotClass(state) {
+  if (state === "attention_required") return "attention";
+  return state || "healthy";
+}
+
+function escapeHtml(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
 
 function showToast(msg) {
   const t = document.getElementById("toast");
@@ -2808,34 +2275,23 @@ function showToast(msg) {
   t.classList.add("show");
   setTimeout(function () {
     t.classList.remove("show");
-  }, 3500);
+  }, 2500);
 }
 
 function onWindowResize() {
   const container = document.getElementById("canvas-container");
-  if (!container || container.clientHeight === 0) {
-    return;
-  }
+  if (!container || container.clientHeight === 0) return;
   camera.aspect = container.clientWidth / container.clientHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(container.clientWidth, container.clientHeight);
-
-  if (
-    pointCloud &&
-    pointCloud.material &&
-    pointCloud.material.uniforms &&
-    pointCloud.material.uniforms.uScale
-  ) {
-    let fovHalfRad = THREE.MathUtils.degToRad(30.0);
-    if (camera && camera.fov) {
-      fovHalfRad = THREE.MathUtils.degToRad(camera.fov * 0.5);
-    }
-    pointCloud.material.uniforms.uScale.value =
-      container.clientHeight / (2.0 * Math.tan(fovHalfRad));
+  if (sceneModel && sceneModel.material && sceneModel.material.uniforms && sceneModel.material.uniforms.uScale) {
+    sceneModel.material.uniforms.uScale.value = container.clientHeight / (2.0 * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)));
   }
 }
 
-window.onload = function () {
+// app.js is injected by bootstrap.js, possibly after the load event already fired.
+if (document.readyState === "complete") {
   init3D();
-  runCopilotDiagnosis("ASSET-017");
-};
+} else {
+  window.addEventListener("load", init3D);
+}

@@ -1,77 +1,69 @@
-# Ask Your Factory: what stays out of git.
-# Rule of thumb: secrets, anything machine-specific or regenerable, and anything over ~25 MB
-# that a clone can rebuild. Add a negation (!) next to the rule that would hide a tracked file.
-
 # ==============================================================================
-# Secrets & local configuration (never commit)
+# Environment & Secrets
 # ==============================================================================
 .env
 .env.*
 !.env.example
 !.env.template
 *.env
-# Machine-specific uv cache paths (also matched by *.env; listed so the intent is explicit)
-backend/pythonpath.env
 *.secret
 *.pem
 *.key
-*.p12
-*.pfx
-credentials.json
-service-account*.json
-# MCP server config; holds API-key slots
-.mcp.json
 
 # ==============================================================================
-# Python
+# Python & Bytecode
 # ==============================================================================
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
 .Python
-*.egg-info/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
 .eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
 .installed.cfg
 MANIFEST
-# Anchored: bare `build/`, `dist/` or `lib/` would also hide frontend folders of that name
-/backend/build/
-/backend/dist/
 
 # ==============================================================================
-# Virtual environments & toolchains (the backend .venv alone is ~6 GB: torch, ultralytics)
+# Virtual Environments & Package Managers (uv, pip, venv, poetry, conda)
 # ==============================================================================
 .venv/
 venv/
 env/
 ENV/
 .uv/
+.python-version
 .conda/
 .direnv/
-# .python-version is deliberately NOT ignored: commit it so `uv` picks the same Python everywhere
 
 # ==============================================================================
-# Frontend tooling (the viewer is plain files today; this covers adding a bundler later)
-# ==============================================================================
-node_modules/
-npm-debug.log*
-.eslintcache
-*.tgz
-
-# ==============================================================================
-# Tests, coverage & linters
+# Testing, Coverage & Linters
 # ==============================================================================
 .pytest_cache/
 .coverage
 .coverage.*
 htmlcov/
-/coverage/
 .mypy_cache/
 .ruff_cache/
 .pytype/
 .hypothesis/
+coverage/
+out/
 
 # ==============================================================================
-# Runtime state & logs (regenerated on start)
+# Databases, SQLite Journals & Runtime Caches
 # ==============================================================================
 *.db
 *.db-shm
@@ -79,6 +71,7 @@ htmlcov/
 *.db-journal
 *.sqlite
 *.sqlite3
+backend/database.db*
 *.log
 logs/
 tmp/
@@ -86,49 +79,7 @@ temp/
 .cache/
 
 # ==============================================================================
-# Data, scans & models
-# ==============================================================================
-# Raw and variant scans stay local; only the two derived viewer files are tracked
-# (they let a fresh clone run without the 355 MB source splat).
-data/*.ply
-!data/Industrial_Boiler_Room_standard.ply
-!data/Industrial_Boiler_Room_mesh.ply
-Valmet challenge data/
-
-# Weights: block stray downloads (YOLO-World pulls CLIP ViT-B-32.pt etc. into the working
-# directory); the one detector the demo needs is tracked on purpose.
-*.pt
-*.pth
-*.onnx
-*.ckpt
-*.safetensors
-!backend/yolov8s-worldv2.pt
-
-# Archives and screen recordings belong on the submission portal, not in the repo
-*.zip
-*.7z
-*.tar
-*.tar.gz
-*.mp4
-*.mov
-*.mkv
-*.webm
-
-# Phone photos and screenshots of briefs / grading slides
-data/grading.*
-
-# ==============================================================================
-# AI assistants & tool scratch space
-# ==============================================================================
-.agents/
-.claude/settings.local.json
-.claude/worktrees/
-CLAUDE.local.md
-Claude outputs/
-.playwright-mcp/
-
-# ==============================================================================
-# Editors, OS & merge leftovers
+# IDEs, Editors & OS Metadata
 # ==============================================================================
 .idea/
 .vscode/*
@@ -139,10 +90,33 @@ Claude outputs/
 *.swp
 *.swo
 *~
-*.bak
-*.orig
-*.rej
 .DS_Store
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+.agents/
+
+# ==============================================================================
+# Large Binary Datasets & Models (>100MB / GitHub Push Limit)
+# ==============================================================================
+# Large 3D Gaussian Splatting / Raw Scans
+*.ply.zip
+*.ply.tar.gz
+**/Industrial Boiler Room.ply
+data/Industrial Boiler Room.ply
+Valmet challenge data/
+
+# Optional large model weights (keep pretrained downloads local)
+*.pt.cache
+backend/database.db-shm
+backend/database.db-wal
+
+# Model weights (ultralytics downloads them on first use)
+data/weights/
+*.pt
+
+# Local challenge inputs and generated caches
+data/input/
+data/processed/
+.mcp.json
+port_snapshot.tgz

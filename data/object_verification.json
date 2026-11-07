@@ -1,0 +1,15 @@
+{
+ "OBJ-013": {
+  "asset_class": null,
+  "category": "pipe",
+  "center": [
+   -3.26,
+   0.4,
+   0.11
+  ],
+  "confidence": 0.88,
+  "model": "gemini-3.8-flash",
+  "verified_at": "2026-11-07T10:30:58+00:00",
+  "visible_features": "insulated pipe elbow with adjacent removable insulation blanket"
+ }
+}

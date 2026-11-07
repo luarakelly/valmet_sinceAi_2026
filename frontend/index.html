@@ -3,349 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>
-      Ask Your Factory — 3D Spatial Digital Twin & Field-Service Copilot
-    </title>
+    <title>Ask Your Factory — Boiler Room Digital Twin</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+          "@sparkjsdev/spark": "https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.3.1/dist/spark.module.js"
+        }
+      }
+    </script>
     <link rel="stylesheet" href="/styles/app.css" />
-    <style>
-      /* --- UI Layout & HUD Fixes --- */
-      header {
-        height: 48px;
-        padding: 0 16px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(7, 11, 18, 0.92);
-        backdrop-filter: blur(12px);
-        z-index: 100;
-      }
-
-      .brand {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-
-      .badge-metaverse {
-        background: rgba(0, 210, 255, 0.12);
-        color: var(--accent, #00d2ff);
-        border: 1px solid rgba(0, 210, 255, 0.35);
-        font-size: 10px;
-        padding: 3px 8px;
-        border-radius: 4px;
-        letter-spacing: 0.06em;
-      }
-
-      .header-right {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-      }
-
-      .api-specs-link {
-        color: var(--muted, #8b9bb4);
-        font-size: 12px;
-        font-weight: 500;
-        text-decoration: none;
-        padding: 6px 10px;
-        border-radius: 6px;
-        transition:
-          color 0.15s,
-          background 0.15s;
-      }
-      .api-specs-link:hover {
-        color: #fff;
-        background: rgba(255, 255, 255, 0.06);
-      }
-
-      /* Fix layout container positioning */
-      .layout {
-        position: relative !important;
-        overflow: visible !important;
-      }
-
-      /* Pinned screen-edge toggle buttons (absolute to .layout) */
-      #btn-toggle-left-sidebar {
-        position: absolute !important;
-        top: 50% !important;
-        left: 0px !important;
-        right: auto !important;
-        transform: translateY(-50%) !important;
-        width: 26px !important;
-        height: 56px !important;
-        border-radius: 0 8px 8px 0 !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        background: rgba(13, 20, 33, 0.95) !important;
-        border: 1px solid rgba(255, 255, 255, 0.18) !important;
-        border-left: none !important;
-        backdrop-filter: blur(10px) !important;
-        box-shadow: 4px 0 16px rgba(0, 0, 0, 0.5) !important;
-        z-index: 80 !important;
-        cursor: pointer !important;
-        transition:
-          background 0.15s,
-          border-color 0.15s !important;
-      }
-
-      #btn-toggle-copilot {
-        position: absolute !important;
-        top: 50% !important;
-        right: 0px !important;
-        left: auto !important;
-        transform: translateY(-50%) !important;
-        width: 26px !important;
-        height: 56px !important;
-        border-radius: 8px 0 0 8px !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        background: rgba(13, 20, 33, 0.95) !important;
-        border: 1px solid rgba(255, 255, 255, 0.18) !important;
-        border-right: none !important;
-        backdrop-filter: blur(10px) !important;
-        box-shadow: -4px 0 16px rgba(0, 0, 0, 0.5) !important;
-        z-index: 80 !important;
-        cursor: pointer !important;
-        transition:
-          background 0.15s,
-          border-color 0.15s !important;
-      }
-
-      #btn-toggle-left-sidebar:hover,
-      #btn-toggle-copilot:hover {
-        background: rgba(0, 210, 255, 0.2) !important;
-        border-color: rgba(0, 210, 255, 0.6) !important;
-      }
-
-      /* Unified Top Floating HUD */
-      .floating-top-bar {
-        position: absolute !important;
-        top: 14px !important;
-        left: 20px !important;
-        right: 20px !important;
-        display: flex !important;
-        flex-wrap: wrap !important;
-        align-items: center !important;
-        justify-content: center !important;
-        gap: 10px !important;
-        pointer-events: none !important;
-        z-index: 40 !important;
-      }
-
-      .floating-top-bar > * {
-        pointer-events: auto !important;
-      }
-
-      .hud-status-pill,
-      .hud-nav-pill,
-      .view-toolbar,
-      .render-mode-toolbar {
-        height: 36px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        gap: 8px !important;
-        padding: 0 12px !important;
-        background: rgba(10, 16, 28, 0.85) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        border-radius: 999px !important;
-        backdrop-filter: blur(12px) !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
-        font-size: 12px !important;
-        white-space: nowrap !important;
-      }
-
-      .view-toolbar,
-      .render-mode-toolbar {
-        padding: 0 6px !important;
-        gap: 4px !important;
-      }
-
-      .render-mode-label {
-        font-size: 10px !important;
-        font-weight: 700 !important;
-        text-transform: uppercase !important;
-        letter-spacing: 0.06em !important;
-        color: var(--muted, #8b9bb4) !important;
-        padding: 0 8px 0 6px !important;
-      }
-
-      .tool-btn,
-      .render-mode-btn {
-        height: 26px !important;
-        padding: 0 10px !important;
-        border-radius: 999px !important;
-        font-size: 11px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        gap: 5px !important;
-      }
-
-      .kbd-hint {
-        opacity: 0.55;
-        font-family: var(--font-mono, monospace);
-        font-size: 10px;
-      }
-
-      /* Omnibar Sizing & Input Truncation Fix */
-      .omnibar-container {
-        width: min(740px, calc(100% - 40px)) !important;
-        bottom: 20px !important;
-      }
-
-      .omnibar {
-        display: flex !important;
-        align-items: center !important;
-        gap: 8px !important;
-        padding: 6px 8px 6px 14px !important;
-        border-radius: 999px !important;
-        background: rgba(10, 16, 28, 0.9) !important;
-        border: 1px solid rgba(0, 210, 255, 0.28) !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55) !important;
-        backdrop-filter: blur(14px) !important;
-      }
-
-      .omnibar-input {
-        flex: 1 1 auto !important;
-        min-width: 0 !important;
-        font-size: 13px !important;
-        background: transparent !important;
-        border: none !important;
-        color: #fff !important;
-        outline: none !important;
-      }
-
-      .omnibar-gemini-pill {
-        flex-shrink: 0 !important;
-      }
-
-      /* Sidebar & Copilot Panel Polish */
-      .panel-fill {
-        flex: 1;
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-      }
-
-      .panel-fixed {
-        flex-shrink: 0;
-      }
-
-      .mono-accent {
-        color: var(--accent, #00d2ff);
-        font-family: var(--font-mono, monospace);
-      }
-
-      .mono-green {
-        color: var(--green, #22c55e);
-        font-family: var(--font-mono, monospace);
-      }
-
-      .text-muted {
-        color: var(--muted, #8b9bb4);
-      }
-
-      .text-white {
-        color: #fff;
-      }
-
-      .search-input {
-        font-size: 11px;
-        padding: 7px 10px;
-        width: 100%;
-        box-sizing: border-box;
-      }
-
-      .btn-row {
-        display: flex;
-        gap: 6px;
-      }
-
-      .btn-flex {
-        flex: 1;
-      }
-
-      .speed-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 11px;
-        margin-top: 6px;
-      }
-
-      .card-header-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-
-      .asset-tag-title {
-        font-size: 13px;
-        font-weight: 700;
-        color: var(--accent, #00d2ff);
-      }
-
-      .asset-meta-row {
-        font-size: 11px;
-        color: var(--muted, #8b9bb4);
-        margin-top: 2px;
-      }
-
-      .telem-wrapper {
-        margin-top: 8px;
-      }
-
-      .telem-header-row {
-        display: flex;
-        justify-content: space-between;
-        font-size: 10px;
-        font-family: var(--font-mono, monospace);
-        color: var(--muted, #8b9bb4);
-        margin-bottom: 6px;
-      }
-
-      .telem-badge {
-        color: #38bdf8;
-      }
-
-      .sub-label {
-        font-size: 10px;
-        font-weight: 700;
-        text-transform: uppercase;
-        color: var(--muted, #8b9bb4);
-        margin-bottom: 4px;
-        letter-spacing: 0.04em;
-      }
-
-      .safety-title {
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 4px;
-      }
-
-      .safety-body {
-        line-height: 1.45;
-      }
-
-      .wo-submit-btn {
-        padding: 10px;
-        font-size: 13px;
-        width: 100%;
-      }
-    </style>
   </head>
   <body>
     <div id="toast" class="toast"></div>
@@ -353,363 +27,162 @@
     <header>
       <div class="brand">
         <span class="ask-your-factory-logo">ASK YOUR FACTORY</span>
-        <span class="badge badge-metaverse">VALMET METAVERSE</span>
       </div>
+
+      <div class="hint-line" id="hint-line">
+        Click the blue floor to walk · click a label to inspect · drag to look around · <b>Go</b> visits the faulty device
+      </div>
+
       <div class="header-right">
-        <button
-          class="hero-mission-btn"
-          id="btn-hero-mission"
-          title="Automatically navigate to the faulty equipment, frame surrounding assets, and deliver Gemini diagnostics"
-        >
-          <span class="pulse-dot"></span>
-          <span>🚀 Launch Autonomous Mission</span>
-        </button>
-        <nav class="nav-tabs">
-          <a href="/docs" target="_blank" class="api-specs-link">API Specs</a>
-        </nav>
+        <button class="btn-secondary" id="btn-reset-nav" title="Robot back to the door">↺ Reset</button>
+        <button class="icon-btn" id="btn-help" title="How to use">?</button>
+        <a class="api-link" href="/docs" target="_blank">API</a>
       </div>
     </header>
 
     <div class="layout">
-      <!-- Left Sidebar Container -->
       <div class="sidebar-container" id="left-sidebar-container">
         <aside class="sidebar" id="sidebar-metaverse">
-          <div class="panel-box panel-fill">
+          <div class="panel-box" style="flex: 1; min-height: 0">
             <div class="heading">
-              <span>Equipment Directory</span>
-              <span class="mono-accent" id="asset-count">30 Mapped</span>
+              <span>Equipment</span>
+              <span class="mono accent" id="asset-count">—</span>
             </div>
-            <input
-              type="text"
-              id="asset-search"
-              class="search-input"
-              placeholder="Search tag, class, or area (e.g. P-005, CV, Boiler)..."
-            />
+            <div class="target-card" id="target-card"></div>
+            <input type="text" id="asset-search" placeholder="Search tag, class or area (e.g. P-005, valve)" />
             <div class="asset-list" id="asset-list-container"></div>
           </div>
-
-          <div class="panel-box route-log-panel">
-            <div class="heading">
-              <span>Route log</span>
-              <span id="route-log-count" class="text-muted">0 / 0</span>
-            </div>
-            <ul class="route-log" id="route-log"></ul>
-          </div>
-
-          <div class="panel-box panel-fixed">
-            <div class="heading">
-              <span>Drone Nav Controller</span>
-              <span id="nav-badge" class="mono-green">Ready</span>
-            </div>
-            <div class="btn-row">
-              <button class="btn btn-flex" id="btn-start-nav">
-                <span id="nav-btn-text">▶ Start Drone</span>
-              </button>
-              <button class="btn-secondary btn-flex" id="btn-reset-nav">
-                ↺ Reset Start
-              </button>
-            </div>
-            <div class="speed-row">
-              <span class="text-muted">Flight Speed:</span>
-              <span id="speed-val" class="mono-accent">1.5x</span>
-            </div>
-            <input
-              type="range"
-              id="speed-slider"
-              min="0.5"
-              max="4.0"
-              step="0.5"
-              value="1.5"
-            />
-          </div>
         </aside>
+        <button class="sidebar-toggle-pill" id="btn-toggle-left-sidebar" title="Toggle equipment list">◀</button>
       </div>
 
-      <!-- Main Viewport -->
       <main class="viewport">
         <div id="canvas-container"></div>
 
         <div class="floating-top-bar">
-          <div class="hud-status-pill" id="hud-status-pill">
-            <span class="pulse-dot"></span>
-            <span id="engine-point-count">Boiler Room 250k Splats</span>
+          <div class="hud-nav-pill" id="hud-nav-pill" title="Inspection target and route progress">
+            <span id="hud-target-name">Target: —</span>
+            <div class="mini-bar"><div class="mini-fill" id="hud-nav-fill"></div></div>
+            <span id="hud-dist">—</span>
           </div>
 
-          <div class="hud-nav-pill" id="hud-nav-pill">
-            <span id="hud-target-name">Target: P-005</span>
-            <div class="mini-bar">
-              <div class="mini-fill" id="hud-nav-fill"></div>
+          <div class="view-toolbar" role="group" aria-label="Camera">
+            <button class="tool-btn active" id="btn-cam-follow" title="Camera around the robot: drag to turn, wheel to zoom">Follow robot</button>
+            <button class="tool-btn" id="btn-cam-top" title="Top-down plan view">Top</button>
+          </div>
+
+          <div class="render-mode-toolbar" role="group" aria-label="Display">
+            <div class="more-menu">
+              <button class="render-mode-btn active" id="btn-view-menu" aria-haspopup="true">View: <span id="view-name">Photoreal</span> ▾</button>
+              <div class="more-dropdown" id="view-dropdown">
+                <button class="render-mode-btn" data-view="splat">Photoreal scan</button>
+                <button class="render-mode-btn" data-view="points">Point cloud</button>
+                <button class="render-mode-btn" id="btn-heat">Height colours (heat)</button>
+                <button class="render-mode-btn" id="btn-verify" title="Look at every detected object with the camera and let the vision model say what it is">Verify placement (camera)</button>
+              </div>
             </div>
-            <span id="hud-dist" class="text-white">11.8m</span>
+            <div class="more-menu debug-only" id="debug-menu">
+              <button class="render-mode-btn" id="btn-more" aria-haspopup="true">Debug ▾</button>
+              <div class="more-dropdown" id="more-dropdown">
+                <button class="render-mode-btn" data-view="mesh">Surface mesh</button>
+                <button id="btn-cam-free">Free camera (Shift+F)</button>
+                <button id="btn-vision-analyze">AI Scan of this view (YOLO)</button>
+                <button id="btn-semantic-extract">Re-run 3D extraction</button>
+              </div>
+            </div>
           </div>
+        </div>
 
-          <div class="view-toolbar">
-            <button class="tool-btn" id="btn-cam-drone" title="Follow Drone">
-              📷 Drone
-            </button>
-            <button
-              class="tool-btn active"
-              id="btn-cam-orbit"
-              title="Orbit Controls"
-            >
-              🌐 Orbit
-            </button>
-            <button
-              class="tool-btn"
-              id="btn-cam-top"
-              title="Top-down 2D NavMesh"
-            >
-              🗺 2D
-            </button>
-            <button class="tool-btn" id="btn-cam-free" title="Free Camera">
-              ⌖ Free <span class="kbd-hint">Shift+F</span>
-            </button>
-            <button
-              class="tool-btn"
-              id="btn-cam-follow"
-              title="Smooth Follow Camera tracking the inspection robot"
-            >
-              🎥 Follow
-            </button>
-            <button
-              class="tool-btn"
-              id="btn-semantic-extract"
-              title="Toggle dense 3D semantic object frames (144 objects extracted)"
-            >
-              ⚡ Dense 3D Frames
-            </button>
-          </div>
-
-          <div
-            class="render-mode-toolbar"
-            aria-label="Gaussian splat render modes"
-          >
-            <span class="render-mode-label">Render</span>
-            <button
-              class="render-mode-btn active"
-              data-render-mode="splat"
-              aria-pressed="true"
-            >
-              Scan
-            </button>
-            <button
-              class="render-mode-btn"
-              data-render-mode="studio"
-              aria-pressed="false"
-            >
-              Studio
-            </button>
-            <button
-              class="render-mode-btn"
-              data-render-mode="heat"
-              aria-pressed="false"
-            >
-              Heat
-            </button>
-            <button
-              class="render-mode-btn"
-              id="btn-obstacles"
-              aria-pressed="false"
-              title="Show what the route planner treats as blocked or too narrow"
-            >
-              Obstacles
-            </button>
-            <button
-              class="render-mode-btn"
-              id="btn-vision-analyze"
-              title="Analyze the current 3D view with YOLO-World"
-            >
-              AI Scan
-            </button>
+        <div class="loading-screen" id="loading-screen">
+          <div class="loading-box">
+            <div class="loading-title">Preparing the boiler room…</div>
+            <div class="loading-bar"><div class="loading-fill" id="loading-fill"></div></div>
+            <div class="loading-text" id="loading-text">Loading the photoreal scan</div>
           </div>
         </div>
 
         <div id="vision-overlay" aria-live="polite"></div>
+        <div class="freecam-hud" id="freecam-hud">FREE CAM · WASD + mouse · Shift+F to exit</div>
 
-        <div class="freecam-hud" id="freecam-hud">
-          FREE CAM &nbsp; WASD + mouse &nbsp; Shift+F to exit
-        </div>
-
-        <div class="proximity-alert" id="proximity-alert">
-          <div class="nearby-header">
-            <b>Nearby assets</b>
-            <span id="nearby-count"></span>
-            <button class="btn" id="btn-open-copilot">Copilot Dossier →</button>
-          </div>
-          <ul class="nearby-list" id="nearby-list"></ul>
+        <div class="help-card" id="help-card">
+          <div class="help-title">How to use</div>
+          <ol>
+            <li><b>Go</b> on the target card (top left) — the robot walks a collision-free route from the door to the faulty device.</li>
+            <li><b>Click the floor</b> to walk anywhere; <b>Route here</b> on any asset walks to it.</li>
+            <li>Assets the robot passes are listed under <b>Near the robot</b>; on arrival the <b>diagnosis</b> opens on the right.</li>
+            <li><b>Click a label</b> in 3D to see that asset's diagnosis without walking.</li>
+          </ol>
+          <div class="help-mouse">Follow robot: drag = turn around the robot · wheel = zoom · Top: plan view, drag = pan · click = walk / inspect. The faint blue floor is where the robot can walk.</div>
+          <div class="help-mouse">Ask in the bar below: “Why is P-005 flagged?”, “Which assets need attention?”, “Where is M-006?”</div>
+          <button class="btn" id="btn-help-close">Got it</button>
         </div>
 
         <div class="omnibar-container" id="omnibar-container">
           <div class="omnibar-suggestions" id="omnibar-suggestions"></div>
           <div class="omnibar">
-            <span class="omnibar-icon" id="omnibar-icon">🔍</span>
-            <input
-              type="text"
-              class="omnibar-input"
-              id="omnibar-input"
-              placeholder="Ask Gemini about equipment, telemetry, alarms... (e.g., 'Why is P-005 vibrating?')"
-            />
-            <button
-              class="omnibar-gemini-pill"
-              id="omnibar-gemini-badge"
-              title="Google Gemini 3.6 Flash Copilot is online"
-            >
-              <span class="gemini-sparkle">✨</span>
-              <span>Gemini 3.6 Flash</span>
-            </button>
-            <button
-              class="omnibar-btn"
-              id="omnibar-submit"
-              title="Execute Query / Ask Gemini"
-            >
-              ↵
-            </button>
+            <span class="omnibar-icon">💬</span>
+            <input type="text" class="omnibar-input" id="omnibar-input"
+              placeholder="Ask about equipment, alarms or routes… e.g. “Why is P-005 flagged?”" />
+            <button class="omnibar-btn" id="omnibar-submit" title="Ask">↵</button>
           </div>
         </div>
       </main>
 
-      <!-- Right Copilot Container -->
-      <div class="copilot-container" id="right-copilot-container">
-        <aside class="copilot-drawer" id="copilot-drawer">
+      <div class="copilot-container collapsed" id="right-copilot-container">
+        <button class="copilot-toggle-pill" id="btn-toggle-copilot" title="Toggle AI copilot">◀</button>
+        <aside class="copilot-drawer collapsed" id="copilot-drawer">
           <div class="copilot-header">
-            <div class="copilot-title">
-              <span class="mono-accent">🤖</span>
-              <span>ASK YOUR FACTORY COPILOT</span>
-            </div>
-            <span class="badge" id="copilot-model-badge">EVIDENCE ENGINE</span>
+            <div class="copilot-title"><span class="accent">●</span><span>AI COPILOT</span></div>
           </div>
 
           <div class="copilot-body" id="copilot-content">
-            <div class="diag-card">
-              <div class="card-header-row">
-                <span id="card-asset-tag" class="asset-tag-title"
-                  >Select an asset</span
-                >
+            <div class="cp-asset">
+              <div class="row-between">
+                <span id="card-asset-tag" class="card-title">Select an asset</span>
                 <span class="badge" id="card-health-badge">—</span>
               </div>
-              <div class="asset-meta-row">
-                Class:
-                <b id="card-asset-class" class="text-white">—</b>
-                &bull; Area:
-                <b id="card-asset-area" class="text-white">—</b>
-              </div>
-
-              <div class="telem-wrapper">
-                <div class="telem-header-row">
-                  <span id="telem-drift-summary"
-                    >Multivariate Telemetry Drift</span
-                  >
-                  <span class="telem-badge" id="telem-drift-badge"
-                    >Baseline vs Recent (Welch t)</span
-                  >
-                </div>
-                <div class="telem-signal-selector" id="telem-signal-selector">
-                  <button class="telem-pill active" data-signal="primary">
-                    Primary Drift
-                  </button>
-                  <button class="telem-pill" data-signal="flow">Flow %</button>
-                  <button class="telem-pill" data-signal="pressure">
-                    Pressure
-                  </button>
-                  <button class="telem-pill" data-signal="vibration">
-                    Vibration
-                  </button>
-                  <button class="telem-pill" data-signal="temp">Temp °C</button>
-                </div>
-                <canvas id="telem-canvas"></canvas>
-              </div>
+              <div class="card-meta" id="card-asset-meta">Click a label in 3D or a card on the left.</div>
+              <div class="mapping-note" id="card-mapping-note"></div>
             </div>
 
-            <div class="diag-card">
-              <div class="heading">
-                <span>Diagnostic Assessment</span>
-                <span id="diag-conf" class="mono-green">Conf: —</span>
+            <div class="cp-diagnosis" id="diag-block">
+              <div class="cp-row"><span class="cp-key">Observation</span><span class="cp-val" id="dx-observation">—</span></div>
+              <div class="cp-row"><span class="cp-key">Hypothesis</span><span class="cp-val" id="dx-hypothesis">—</span></div>
+              <div class="cp-row"><span class="cp-key">Next safe check</span><span class="cp-val" id="dx-next">—</span></div>
+              <div class="cp-conf">
+                <span class="cp-key">Confidence</span>
+                <div class="conf-bar"><div class="conf-fill" id="dx-conf-fill"></div></div>
+                <span class="mono" id="dx-conf">—</span>
               </div>
-
-              <div class="primary-finding-box" id="finding-box">
-                <span class="finding-icon" id="finding-icon">🔍</span>
-                <span class="finding-text" id="primary-finding-text"
-                  >Run the robot to the faulty device or pick an asset.</span
-                >
-              </div>
-
-              <div>
-                <div class="sub-label">Evidence (observations)</div>
-                <ul class="root-cause-list" id="root-cause-list"></ul>
-              </div>
-
-              <div>
-                <div class="copilot-section-title">Recommended next steps</div>
-                <ol class="action-list" id="action-list"></ol>
-              </div>
-
-              <div>
-                <div class="sub-label">Corroborating Evidence</div>
-                <div
-                  class="evidence-chips-wrapper"
-                  id="evidence-citations-box"
-                ></div>
-              </div>
+              <div class="cp-note" id="dx-conf-note"></div>
+              <details class="cp-why" id="dx-why">
+                <summary id="dx-why-title">Why? Evidence</summary>
+                <ul class="why-list" id="dx-why-list"></ul>
+              </details>
             </div>
 
-            <div class="safety-card" id="safety-alert-box">
-              <div class="safety-title">
-                <span>⚠️</span>
-                <span>Field Safety Protocol (DOC-FIELD-SAFETY):</span>
-              </div>
-              <div id="safety-text" class="safety-body">
-                The assistant recommends verification only; follow site
-                procedures, lockout/tagout and permits.
-              </div>
+            <div class="cp-thread-title">Conversation</div>
+            <div class="cp-thread" id="cp-thread">
+              <div class="msg msg-ai">Ask anything in the bar below the 3D view: “Why is P-005 flagged?”, “Where is M-006?”, “Which assets need attention?”</div>
             </div>
 
-            <div class="diag-card">
-              <div class="copilot-section-title">Ask the copilot</div>
-              <div class="copilot-ask">
-                <input
-                  type="text"
-                  id="copilot-question"
-                  placeholder="e.g. What should I inspect first?"
-                />
-                <button class="btn" id="btn-ask-copilot">Ask</button>
-              </div>
-              <div class="copilot-answer" id="copilot-answer"></div>
+            <div class="cp-footer">
+              <div class="cp-safety" id="safety-text">⚠ Advisory only · follow site procedures, lockout/tagout and permits · DOC-FIELD-SAFETY</div>
+              <div class="cp-engine" id="copilot-model-badge">Grounded answer · evidence engine</div>
             </div>
-
-            <button class="btn wo-submit-btn" id="btn-submit-wo">
-              <span>📝 Draft Field Work Order</span>
-            </button>
           </div>
         </aside>
       </div>
-
-      <!-- Edge Toggle Buttons (Directly inside .layout for perfect positioning) -->
-      <button
-        class="sidebar-toggle-pill"
-        id="btn-toggle-left-sidebar"
-        title="Toggle Equipment Panel"
-      >
-        ◀
-      </button>
-      <button
-        class="copilot-toggle-pill"
-        id="btn-toggle-copilot"
-        title="Toggle AI Copilot"
-      >
-        ▶
-      </button>
     </div>
 
     <script>
-      // Global hook for 3D proximity event checking and acceptance testing
+      // Global hook for 3D proximity checks (used by the acceptance test and the console).
       window.checkProximityEvents = function (rx, rz) {
         if (typeof window.appCheckProximityEvents === "function") {
           window.appCheckProximityEvents(rx, rz);
         }
       };
     </script>
-    <script src="/js/app.js"></script>
+    <script type="module" src="/js/bootstrap.js"></script>
   </body>
 </html>
-
-```
