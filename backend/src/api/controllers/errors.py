@@ -16,7 +16,7 @@ _STATUS = {
     InvalidRequestError: status.HTTP_400_BAD_REQUEST,
     RouteNotFoundError: status.HTTP_409_CONFLICT,
     ServiceUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
-    PayloadTooLargeError: status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+    PayloadTooLargeError: status.HTTP_413_CONTENT_TOO_LARGE,
     UnsupportedMediaTypeError: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
 }
 
