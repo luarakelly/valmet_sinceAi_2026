@@ -29,7 +29,7 @@ let nearbyIds = new Set();
 let nearLabelIds = new Set(); // the few nearest assets that get a label (keeps the view readable)
 let nearbyAssets = []; // [{assetId, dist}] nearest first, shown in the left list
 let nearbyComponents = []; // [{frame, dist}] unbound objects attached to a pack asset's system
-let narratedIds = new Set(); // pack assets the copilot already explained on this walk
+let passedIds = new Set(); // pack assets the robot passed on the current or last walk
 const groupOpen = { near: true, attention: true, healthy: false, detected: false }; // remembers what the user expanded
 let showAllFrames = false;
 
@@ -49,10 +49,11 @@ const ROBOT_GROUND_OFFSET = 0.15;
 const MAX_THREAD_MESSAGES = 30;
 // Chat context: questions that move around the floor vs. questions about one asset's data.
 const NAVIGATION_PATTERN = /\b(route|take me|go to|walk|navigate|path|where is|where am i|near(by)?|attention|which assets)\b/;
+const WALK_RECAP_PATTERN = /\b(on the way|passed|along the (way|route)|during the walk)\b/;
+const HEALTHY_WORD_PATTERN = /\bhealthy\b/;
 const ASSET_DETAIL_PATTERN = /\b(why|flag|diagnos|connected|maintenance|install|service|telemetry|evidence|fault|problem|repair|health)/;
 const PROXIMITY_RADIUS = 1.5;
 const MAX_NEAR_LABELS = 4;
-const MAX_ROUTE_CITATIONS = 4;
 const XRAY_POINT_SIZE = 0.035;
 const XRAY_BASE_OPACITY = 0.75;
 const XRAY_PULSE_AMPLITUDE = 0.2;
@@ -1015,6 +1016,7 @@ function resetRobot() {
 
 // Start walking along the current route (from where the robot stands).
 function startWalking() {
+  passedIds = new Set();
   if (currentPath.length < 2) {
     onArrival();
     return;
@@ -1022,20 +1024,11 @@ function startWalking() {
   navProgress = 0;
   isNavigating = true;
   groupOpen.near = true;
-  narratedIds = new Set();
-  addMessage("ai", "Walking to " + routeTargetLabel() + ". I'll explain each device we pass.");
   hideHelp();
 }
 
-function routeTargetLabel() {
-  const frame = framesById.get(routeTargetId);
-  if (frame && frame.tag) {
-    return frame.tag;
-  }
-  return "the selected point";
-}
 
-// "Go" (target card), "Route here" (any asset) and chat "take me to …": walk there now.
+
 async function goTo(assetId) {
   try {
     useRoute(await fetchRoute({ assetId: assetId }, false));
@@ -1075,10 +1068,91 @@ function showGoalMarker(p) {
 
 function onArrival() {
   isNavigating = false;
+  addMessage("ai", walkSummary());
   if (routeTargetId === "POINT") return; // walked to a floor point: nothing to diagnose
   const frame = framesById.get(routeTargetId);
   if (frame) lookAtAsset(frame);
-  openAssetModal(routeTargetId);
+  openAssetModal(routeTargetId, true);
+}
+
+function passedAssets() {
+  return assetsData.filter(function (a) {
+    return passedIds.has(a.asset_id);
+  });
+}
+
+// "On the way: 5 assets, 3 healthy, 2 to watch (P-004, M-001)."
+function walkSummary() {
+  const passed = passedAssets();
+  if (passed.length === 0) {
+    return "On the way: no assets nearby.";
+  }
+  const toWatch = passed.filter(function (a) {
+    return assetState(a) !== "healthy";
+  });
+  const healthyCount = passed.length - toWatch.length;
+  let text = "On the way: " + passed.length + " assets, " + healthyCount + " healthy, " + toWatch.length + " to watch";
+  if (toWatch.length > 0) {
+    text += " (" + tagsOf(toWatch).join(", ") + ")";
+  }
+  return text + ".";
+}
+
+function tagsOf(assets) {
+  return assets.map(function (a) {
+    return a.tag;
+  });
+}
+
+// Follow-up about the walk: list the passed assets in the chat and highlight them in 3D.
+function answerWalkRecap(lower) {
+  const passed = passedAssets();
+  if (passed.length === 0) {
+    addMessage("ai", "No walk yet: press Go on the target card or click the floor.");
+    return;
+  }
+  const wantHealthy = HEALTHY_WORD_PATTERN.test(lower);
+  const matching = passed.filter(function (a) {
+    return matchesHealth(a, wantHealthy);
+  });
+  if (matching.length === 0) {
+    addMessage("ai", "None of the " + passed.length + " assets on the way match. " + walkSummary());
+    return;
+  }
+  if (openAssetId()) {
+    closeAssetModal();
+  }
+  highlightAssets(matching);
+  addMessage("ai", recapLine(matching, wantHealthy), tagsOf(matching));
+}
+
+function matchesHealth(asset, wantHealthy) {
+  if (wantHealthy) {
+    return assetState(asset) === "healthy";
+  }
+  return assetState(asset) !== "healthy";
+}
+
+function recapLine(assets, healthy) {
+  const details = assets.map(function (a) {
+    const state = a.state || {};
+    return a.tag + " (" + prettyClass(state.condition_state) + ", " + state.health_score + "/100)";
+  });
+  let heading = "To watch on the way: ";
+  if (healthy) {
+    heading = "Healthy on the way: ";
+  }
+  return heading + details.join(", ") + ". They are highlighted in 3D.";
+}
+
+// Reuses the "near the robot" highlight: frames and labels of these assets light up.
+function highlightAssets(assets) {
+  const ids = new Set(assets.map(function (a) {
+    return a.asset_id;
+  }));
+  nearbyIds = ids;
+  nearLabelIds = ids;
+  refreshFrameStyles();
 }
 
 // ---------------------------------------------------------------- proximity
@@ -1117,49 +1191,27 @@ function checkProximityEvents(rx, rz) {
     refreshFrameStyles();
     renderNearby(near);
     if (isNavigating) {
-      narratePassedAssets(near);
+      rememberPassedAssets(near);
     }
   }
 }
 
 // Criterion 3: explain device status along the path, grounded in the builder pack.
-function narratePassedAssets(near) {
+// Criterion 3: the walk is summarised on arrival; follow-up questions can list these assets.
+function rememberPassedAssets(near) {
   near.forEach(function (n) {
     const assetId = n.frame.asset_id;
-    const isNew = assetId && !narratedIds.has(assetId) && assetId !== routeTargetId;
-    if (!isNew) {
+    if (!assetId) {
       return;
     }
-    narratedIds.add(assetId);
-    narrateAsset(assetId);
+    if (assetId !== routeTargetId) {
+      passedIds.add(assetId);
+    }
   });
 }
 
-async function narrateAsset(assetId) {
-  const asset = assetsData.find(function (a) { return a.asset_id === assetId; });
-  if (!asset) {
-    return;
-  }
-  const state = asset.state || {};
-  const intro = "Passing " + asset.tag + " (" + prettyClass(asset.asset_class) + ", " + state.health_score + "/100, " +
-    prettyClass(state.condition_state) + "): ";
-  if (assetState(asset) === "healthy") {
-    addMessage("ai", intro + (state.issue_summary || "no deviation") + ". Next: " + (state.recommended_next_check || "monitor") + ".",
-      [state.knowledge_doc_id].filter(Boolean));
-    return;
-  }
-  try {
-    const diag = await fetchJson("/api/copilot/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ asset_id: assetId }),
-    });
-    const citations = (diag.evidence_citations || []).filter(function (id) { return id.indexOf("DQ-") !== 0; });
-    addMessage("ai", intro + (diag.diagnosis || state.issue_summary), citations.slice(0, MAX_ROUTE_CITATIONS));
-  } catch (err) {
-    addMessage("ai", intro + (state.issue_summary || "status unavailable") + " (diagnosis failed: " + err.message + ")");
-  }
-}
+
+
 window.appCheckProximityEvents = checkProximityEvents;
 
 // Nearby assets live in the left Equipment list as the "Near the robot" group (no floating panel).
@@ -1187,7 +1239,7 @@ function showSelection(id) {
 
 // The asset modal covers the screen: scan render on the left, diagnosis on the right.
 // While it is open the chat is about this asset.
-function openAssetModal(id) {
+function openAssetModal(id, announce) {
   const frame = framesById.get(id);
   const modal = document.getElementById("asset-modal");
   showSelection(id);
@@ -1199,7 +1251,7 @@ function openAssetModal(id) {
     renderStructureCard(frame);
     return;
   }
-  runCopilotDiagnosis(id);
+  runCopilotDiagnosis(id, null, announce);
 }
 
 function closeAssetModal() {
@@ -1430,7 +1482,7 @@ function xrayDotTexture() {
   return xraySprite;
 }
 
-async function runCopilotDiagnosis(assetId, question) {
+async function runCopilotDiagnosis(assetId, question, announce) {
   const body = { asset_id: assetId };
   if (question) body.query = question;
   document.getElementById("diag-block").style.display = "";
@@ -1446,7 +1498,7 @@ async function runCopilotDiagnosis(assetId, question) {
     ]);
     if (thinking) thinking.remove();
     if (openAssetId() === assetId) updateAssetModal(dossier, diag);
-    if (question) {
+    if (question || announce) {
       const ids = (diag.citations || []).filter(function (c) { return c.source_type !== "data_quality"; })
         .map(function (c) { return c.source_id; }).slice(0, 6);
       addMessage("ai", diag.answer || diag.diagnosis_summary || diag.diagnosis || "No answer.", ids);
@@ -2073,6 +2125,10 @@ function setupOmnibar() {
     box.style.display = "none";
     input.value = "";
     addMessage("user", q);
+    if (WALK_RECAP_PATTERN.test(q.toLowerCase())) {
+      answerWalkRecap(q.toLowerCase());
+      return;
+    }
     if (isWrongContext(q, findAsset(q))) {
       return;
     }
