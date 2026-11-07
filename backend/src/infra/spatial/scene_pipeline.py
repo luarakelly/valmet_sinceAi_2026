@@ -107,15 +107,28 @@ class BoilerRoomScene:
                 hits.append({**frame, "distance_m": round(distance, 2)})
         return sorted(hits, key=lambda f: f["distance_m"])
 
-    def get_navigation_path(self, target_id: Optional[str] = None, start: Optional[Tuple[float, float]] = None) -> Dict[str, Any]:
-        target = self.find_frame(target_id or self.target_asset_id)
-        if target is None:
-            raise KeyError(target_id)
-
+    def get_navigation_path(
+        self,
+        target_id: Optional[str] = None,
+        start: Optional[Tuple[float, float]] = None,
+        goal: Optional[Tuple[float, float]] = None,
+    ) -> Dict[str, Any]:
         grid = self.result.grid
+        if goal is not None:
+            # Floor point (click-to-walk): snap to the nearest walkable cell.
+            goal_cell = nearest_free(grid, *goal)
+            if goal_cell is None:
+                raise RouteNotFound("POINT")
+            gx, gz = grid.to_world(goal_cell)
+            target = {"id": "POINT", "tag": "floor point", "pos": [round(gx, 3), 0.0, round(gz, 3)]}
+        else:
+            target = self.find_frame(target_id or self.target_asset_id)
+            if target is None:
+                raise KeyError(target_id)
+            goal_cell = nearest_free(grid, target["pos"][0], target["pos"][2])
+
         origin = start or self.result.entry
         start_cell = nearest_free(grid, *origin)
-        goal_cell = nearest_free(grid, target["pos"][0], target["pos"][2])
         route = None
         if start_cell is not None and goal_cell is not None:
             route = plan_route(grid, start_cell, goal_cell)

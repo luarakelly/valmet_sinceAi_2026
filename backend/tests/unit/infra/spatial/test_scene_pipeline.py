@@ -83,3 +83,22 @@ def test_route_to_every_asset_is_collision_free():
         assert route["collision_free"], frame["asset_id"]
         last = route["waypoints"][-1]
         assert math.dist((last["x"], last["z"]), (frame["pos"][0], frame["pos"][2])) <= 0.9 + CELL
+
+
+def test_route_to_a_floor_point_snaps_to_walkable_space():
+    scene = get_scene()
+    grid = scene.result.grid
+    target = next(f for f in scene.get_semantic_frames() if f["asset_id"])
+    # A point inside an object is not walkable: the goal snaps to the nearest free cell.
+    route = scene.get_navigation_path(goal=(target["pos"][0], target["pos"][2]))
+    assert route["target_id"] == "POINT"
+    assert route["collision_free"]
+    gx, _, gz = route["target_pos"]
+    assert grid.clearance_at(gx, gz) >= ROBOT_RADIUS - CELL
+    last = route["waypoints"][-1]
+    assert math.dist((last["x"], last["z"]), (gx, gz)) <= CELL * 1.5
+
+    # Starting from where the robot stands now (not the entry) also works.
+    first = scene.get_navigation_path(target["asset_id"])["waypoints"][-1]
+    again = scene.get_navigation_path(start=(first["x"], first["z"]), goal=(gx, gz))
+    assert again["collision_free"]

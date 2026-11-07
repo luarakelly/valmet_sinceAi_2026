@@ -61,7 +61,7 @@ class FakeScene:
             return {"asset_id": "ASSET-017", "scene_id": "OBJ-010", "mapping_confidence": 0.85}
         return None
 
-    def get_navigation_path(self, target_id=None, start=None):
+    def get_navigation_path(self, target_id=None, start=None, goal=None):
         if target_id == "missing":
             raise KeyError(target_id)
 

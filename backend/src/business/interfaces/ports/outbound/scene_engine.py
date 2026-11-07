@@ -24,9 +24,15 @@ class SceneEngine(Protocol):
         ...
 
     def get_navigation_path(
-        self, target_id: Optional[str] = None, start: Optional[Tuple[float, float]] = None
+        self,
+        target_id: Optional[str] = None,
+        start: Optional[Tuple[float, float]] = None,
+        goal: Optional[Tuple[float, float]] = None,
     ) -> Dict[str, Any]:
-        """Raises KeyError (unknown target) or a route-not-found error."""
+        """Route to an asset/object, or to a floor point when `goal` (x, z) is given.
+
+        Raises KeyError (unknown target) or a route-not-found error.
+        """
         ...
 
     def rebuild(self) -> "SceneEngine":
