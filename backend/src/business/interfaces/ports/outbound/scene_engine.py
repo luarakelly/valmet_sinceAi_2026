@@ -39,6 +39,10 @@ class SceneEngine(Protocol):
         """The object's own points (float32 x, y, z triples) for highlighting; None if unknown."""
         ...
 
+    def lift_box(self, view_projection: List[float], image_box: List[float]) -> Optional[Dict[str, Any]]:
+        """3D box (`center`, `size`, `point_count`) of the nearest surface inside a 2D box; None if empty."""
+        ...
+
     def walkable_grid(self) -> Dict[str, Any]:
         """Occupancy grid: origin, cell size, nx × nz, and base64 layers `reachable` / `blocked`."""
         ...

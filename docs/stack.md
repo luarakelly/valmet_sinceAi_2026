@@ -22,7 +22,7 @@ FastAPI (Python 3.11+, Uvicorn, SQLModel / SQLite WAL)
 
 | Module | Responsibility |
 |---|---|
-| `point_cloud.py` | Reads `Industrial Boiler Room.ply`, drops low-opacity / oversized splats, rotates COLMAP Y-down to Y-up, puts the floor at y = 0 and centres the room. Exports `Industrial_Boiler_Room_standard.ply` for the viewer (tracked, so a clone works without the 355 MB raw scan). |
+| `point_cloud.py` | Reads `Equipment Room.ply`, drops low-opacity / oversized splats, rotates COLMAP Y-down to Y-up, puts the floor at y = 0 and centres the room. Exports `Equipment_Room_standard.ply` for the viewer (tracked, so a clone works without the 395 MB raw scan). |
 | `segmentation.py` | Removes walls, floor and ceiling; voxelises equipment and pipe-rack layers separately; splits 26-connected components at thin links (erosion seeds) or the sparsest plane; labels each box from geometry and colour (pipe runs, floor machines, valves, instruments, fire-safety equipment …). |
 | `navigation.py` | 2D obstacle map between ankle and robot height, Euclidean-distance inflation by the robot radius, largest connected free region, A* with no corner cutting, string-pulling, and per-route `min_clearance_m` / `collision_free` measured on the final segments. Routes to an asset stop 0.8 m from its footprint; routes can also end at any floor point. |
 | `asset_mapping.py` | Binds the 30 builder-pack assets to objects: camera-verified objects of the asset's class first, otherwise a shape-based proposal (pumps → floor machines, sensors → instruments …) on a reachable object, with `mapping_confidence` and `mapping_status`; the lowest-health asset becomes the inspection target at the far end of the walk. |

@@ -17,3 +17,12 @@ try {
 const app = document.createElement("script");
 app.src = "/js/app.js";
 document.body.appendChild(app);
+
+// Team authoring panel: only when the page is opened with ?author.
+if (new URLSearchParams(window.location.search).has("author")) {
+  app.onload = function () {
+    const authoring = document.createElement("script");
+    authoring.src = "/js/authoring.js";
+    document.body.appendChild(authoring);
+  };
+}

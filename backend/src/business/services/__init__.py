@@ -3,6 +3,7 @@ from .copilot_service import CopilotService, detect_drift
 from .dashboard_service import DashboardService
 from .maintenance_service import MaintenanceService
 from .navigation_service import NavigationService
+from .placement_service import PlacementService
 from .scene_service import SceneService
 from .verification_service import VerificationService
 from .vision_service import VisionService
@@ -14,6 +15,7 @@ __all__ = [
     "DashboardService",
     "MaintenanceService",
     "NavigationService",
+    "PlacementService",
     "SceneService",
     "VerificationService",
     "VisionService",

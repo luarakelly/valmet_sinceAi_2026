@@ -16,8 +16,8 @@
 4. Open `http://localhost:8000`.
 5. Tests: `cd backend && .venv/Scripts/python -m pytest -q` (Linux/macOS: `.venv/bin/python`).
 
-The raw 355 MB scan is optional: the viewer cloud, the mesh and the photoreal `.splat` are in git. To rebuild them, put
-`Industrial Boiler Room.ply` in `data/` or `data/input/` and run `backend/.venv/Scripts/python scripts/build_splat.py` (or `scripts/build_mesh.py`); the server also builds a missing `.splat` at startup. Reseed the database with `scripts/seed_database.py --force`.
+The raw scan is required: put `Equipment Room.ply` (395 MB, not in git) in `data/` or `data/input/`. The viewer cloud, splat and mesh are generated from it on first start. To rebuild the mesh, put
+`Equipment Room.ply` in `data/` or `data/input/` and run `backend/.venv/Scripts/python scripts/build_mesh.py`. Reseed the database with `scripts/seed_database.py --force`.
 
 ## Using the UI
 
@@ -33,15 +33,16 @@ The robot starts at the door. The faulty device (P-005) is pinned top left, and 
 - **View** menu: Photoreal (default), Point cloud, Height colours, **Verify placement (camera)** — a vision-language model looks at each object and says what it is. Free camera, YOLO and re-extraction are under `?debug=1`.
 - Asset ↔ 3D object links are synthetic unless camera-verified, and are labelled with their mapping confidence.
 
-## Results on `Industrial Boiler Room.ply`
+## Results on `Equipment Room.ply`
 
 | Challenge requirement | What the pipeline does | Measured |
 |---|---|---|
-| Extract & 3D-frame assets | Splat → canonical Y-up cloud → voxel components split at thin links / sparse planes → geometric + colour labels | **144 framed objects** (pipe runs, fittings, valves, floor machines, instruments) from 207 k splats in **0.5 s** |
-| Map Excel metadata | Camera-verified objects first (a vision-language model names what it sees); otherwise a shape-based proposal on a compatible, reachable object, with `mapping_confidence` | **30 / 30 assets** bound (shape-based proposals, confidence 0.45, until verified); target = lowest health (**P-005**, fouling, 44/100) |
-| Collision-free navigation | Obstacle grid (ankle → robot height), robot-radius inflation, A* + line-of-sight smoothing; clearance re-measured on the final route; stops 0.8 m from the asset | **5.3 m** route, min clearance **0.24 m** ≥ robot radius 0.22 m; every asset route tested collision-free |
-| Proximity display | Frames within 1.5 m light up; live *Near the robot* list with state, health and distance | updates every frame |
-| AI diagnostics | Telemetry drift (Welch t-score vs own baseline), matching alarms, similar service cases, docs, data-quality and mapping confidence penalties; optional Gemini/Claude answer accepted only if every cited ID exists | P-005: flow −8.7 % (t = −4.8), 3 fouling alarms, 2 matching cases; confidence lowered by 9 data-quality issues and the unverified mapping |
+| Extract & 3D-frame assets | Splat → canonical Y-up cloud → voxel components split at thin links / sparse planes → geometric + colour labels | **144 framed objects** (pipe runs, fittings, valves, floor machines, instruments) from 207 k splats in **0.55 s** |
+| Map Excel metadata | Pack assets bound to compatible, reachable objects with `mapping_confidence`; every other object joins the nearest asset's system as a procedural component (allowed by the brief) | **30 / 30 assets** bound, **144 / 144 objects** carry pack metadata; target = lowest health (**P-005**, fouling, 44/100) |
+| Collision-free navigation | Obstacle grid (ankle → robot height), robot-radius inflation, A* + line-of-sight smoothing; clearance re-measured on the final route; stops 0.8 m from the asset | **5.3 m** route to P-005, min clearance **0.24 m** ≥ robot radius 0.22 m; every asset route tested collision-free |
+| Proximity display | Frames within 1.5 m light up; live list of nearby assets and their components with state, health and distance | updates every frame |
+| AI along the route | Each pack asset the robot passes is explained in the copilot thread: status line for healthy devices, grounded evidence-engine diagnosis with citations for the rest | 21 devices explained on the P-005 walk |
+| AI diagnostics | Telemetry drift (Welch t-score vs own baseline), matching alarms, similar service cases, docs, data-quality confidence penalty; optional Gemini answer accepted only if every cited ID exists | P-005: flow −8.7 % (t = −4.8), 3 fouling alarms, 2 matching cases, confidence 0.91 → 0.61 from 9 data-quality issues |
 
 Architecture: [`docs/architecture.md`](docs/architecture.md). Pipeline details: [`docs/stack.md`](docs/stack.md). Code map: [`docs/file-structure.md`](docs/file-structure.md).
 

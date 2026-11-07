@@ -1,6 +1,6 @@
 """Asset binding: camera evidence beats shape guesses, and nothing is forced onto the wrong object."""
 
-from infra.spatial.asset_mapping import ASSUMED, CAMERA_VERIFIED, PROPOSED, Verified, bind_assets
+from infra.spatial.asset_mapping import ASSUMED, CAMERA_VERIFIED, PROPOSED, Binding, Verified, attach_components, bind_assets
 from infra.spatial.segmentation import SceneObject
 
 
@@ -65,3 +65,20 @@ def test_unverified_objects_are_only_weak_guesses_once_camera_evidence_exists():
     bindings = bind_assets(objects, [asset("A1", "PROCESS_PUMP", 40)], "A1", reach, walk, verified)
     assert bindings["OBJ-001"].status == PROPOSED
     assert bindings["OBJ-001"].confidence <= 0.45
+
+
+def test_every_unbound_object_joins_the_nearest_bound_assets_system():
+    pump, valve = asset("ASSET-001", "PROCESS_PUMP"), asset("ASSET-002", "CONTROL_VALVE")
+    objects = [obj(1, "FLOOR_MOUNTED_MACHINE", 0.0), obj(2, "VALVE_ASSEMBLY", 5.0), obj(3, "PIPE", 1.0), obj(4, "PIPE", 4.5)]
+    bindings = {"OBJ-001": Binding(asset=pump, confidence=0.8), "OBJ-002": Binding(asset=valve, confidence=0.8)}
+
+    links = attach_components(objects, bindings)
+
+    assert set(links) == {"OBJ-003", "OBJ-004"}
+    assert links["OBJ-003"].asset["asset_id"] == "ASSET-001"
+    assert links["OBJ-004"].asset["asset_id"] == "ASSET-002"
+    assert links["OBJ-004"].distance_m == 0.5
+
+
+def test_no_bound_assets_means_no_components():
+    assert attach_components([obj(1, "PIPE")], {}) == {}

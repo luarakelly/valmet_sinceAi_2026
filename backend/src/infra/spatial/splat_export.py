@@ -1,6 +1,6 @@
 """Photoreal viewer export: raw 3D Gaussian Splat → compact `.splat` in the canonical scene frame.
 
-The raw scan (`Industrial Boiler Room.ply`, 355 MB, 59 floats per splat) is too heavy for a
+The raw scan (`Equipment Room.ply`, 395 MB, 59 floats per splat) is too heavy for a
 browser. This writes the widely supported 32-byte `.splat` layout (antimatter15):
 
     position float32×3 · scale float32×3 (linear) · RGBA uint8×4 · rotation uint8×4 (w, x, y, z)
@@ -29,7 +29,7 @@ from infra.spatial.point_cloud import (
 
 logger = logging.getLogger("ask_your_factory.splat_export")
 
-VIEWER_SPLAT_PATH = DATA_DIR / "Industrial_Boiler_Room.splat"
+VIEWER_SPLAT_PATH = DATA_DIR / "Equipment_Room.splat"
 
 # Rendering keeps faint splats (they make surfaces look continuous) but drops near-invisible ones
 # and the huge "floater" splats typical of capture noise.
@@ -63,7 +63,7 @@ def ensure_viewer_splat() -> Path:
     if VIEWER_SPLAT_PATH.exists():
         return VIEWER_SPLAT_PATH
     if not RAW_SPLAT_PATH.exists():
-        raise FileNotFoundError("Photoreal scene needs data/input/'Industrial Boiler Room.ply' (or a prebuilt .splat)")
+        raise FileNotFoundError("Photoreal scene needs data/input/'Equipment Room.ply' (or a prebuilt .splat)")
     return build_viewer_splat()
 
 

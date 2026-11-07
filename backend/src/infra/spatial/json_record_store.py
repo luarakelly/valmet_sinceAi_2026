@@ -1,18 +1,16 @@
-"""VerificationStore adapter: one JSON file in data/, written atomically."""
+"""Record store adapter: one JSON object per file in data/, written atomically."""
 
 import json
 import threading
 from pathlib import Path
 from typing import Any, Dict
 
+from business.interfaces.ports.outbound.placement_store import PlacementStore
 from business.interfaces.ports.outbound.verification_store import VerificationStore
-from infra.paths import DATA_DIR
-
-VERIFICATION_PATH = DATA_DIR / "object_verification.json"
 
 
-class JsonVerificationStore(VerificationStore):
-    def __init__(self, path: Path = VERIFICATION_PATH):
+class JsonRecordStore(VerificationStore, PlacementStore):
+    def __init__(self, path: Path):
         self._path = path
         self._lock = threading.Lock()
 
@@ -20,10 +18,16 @@ class JsonVerificationStore(VerificationStore):
         with self._lock:
             return self._read()
 
-    def save(self, object_id: str, record: Dict[str, Any]) -> None:
+    def save(self, key: str, record: Dict[str, Any]) -> None:
         with self._lock:
             records = self._read()
-            records[object_id] = record
+            records[key] = record
+            self._write(records)
+
+    def delete(self, key: str) -> None:
+        with self._lock:
+            records = self._read()
+            records.pop(key, None)
             self._write(records)
 
     def clear(self) -> None:

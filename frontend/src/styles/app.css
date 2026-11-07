@@ -1269,3 +1269,94 @@ body.debug .debug-only { display: block; }
 .hint-line { flex: 1; text-align: center; font-size: 12px; color: var(--muted); padding: 0 16px; }
 .hint-line b { color: var(--text-secondary); }
 #canvas-container canvas { cursor: crosshair; }
+
+/* Team authoring mode (?author) */
+.author-panel {
+  position: fixed;
+  top: 110px;
+  right: 14px;
+  z-index: 40;
+  width: 270px;
+  max-height: calc(100vh - 130px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: inherit;
+  font-size: 12px;
+}
+.author-panel button,
+.author-panel select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-solid);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.author-panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.author-title {
+  font-weight: 700;
+  color: var(--accent);
+}
+.author-hint,
+.author-status {
+  margin: 0;
+  opacity: 0.8;
+}
+.author-saved-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.author-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 13;
+  pointer-events: none;
+}
+.author-overlay.active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+.author-proposal,
+.author-drawn,
+.author-chosen {
+  position: absolute;
+  border-radius: 4px;
+}
+.author-proposal {
+  border: 2px solid #ffbf47;
+  background: rgba(255, 191, 71, 0.08);
+  cursor: pointer;
+}
+.author-proposal:hover {
+  background: rgba(255, 191, 71, 0.22);
+}
+.author-drawn {
+  border: 2px dashed var(--accent);
+}
+.author-chosen {
+  border: 2px solid #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  pointer-events: none;
+}
+.author-box-label {
+  position: absolute;
+  top: -20px;
+  left: -2px;
+  padding: 2px 5px;
+  border-radius: 3px 3px 0 0;
+  background: #ffbf47;
+  color: #14100a;
+  font: 700 10px var(--font-mono);
+  white-space: nowrap;
+}

@@ -130,7 +130,7 @@ def plan_route(grid: OccupancyGrid, start: Cell, goal: Cell) -> Optional[Route]:
         waypoints=[(round(x, 3), round(z, 3)) for x, z in waypoints],
         length_m=round(length, 2),
         min_clearance_m=round(min_clearance, 3),
-        collision_free=min_clearance >= ROBOT_RADIUS - CELL / 2,
+        collision_free=min_clearance >= ROBOT_RADIUS - CELL / 2 - 0.005,
     )
 
 

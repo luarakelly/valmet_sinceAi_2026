@@ -1,6 +1,6 @@
 """VisualDetector adapter: lazy YOLO-World inference on images captured from the 3D viewer.
 
-Weights: $YOLO_WORLD_MODEL, else data/weights/yolov8s-worldv2.pt if present, else the model name
+Weights: $YOLO_WORLD_MODEL, else data/weights/yolov8x-worldv2.pt if present, else the model name
 (ultralytics downloads it on first use). Weights are not tracked in git.
 """
 
@@ -12,26 +12,25 @@ import os
 from PIL import Image
 
 
+# Descriptive phrases beat bare nouns for open-vocabulary detection of the pack's asset classes.
 DEFAULT_CLASSES = [
-    "person",
-    "worker",
-    "safety helmet",
-    "pump",
-    "valve",
-    "pipe",
-    "tank",
-    "boiler",
-    "motor",
-    "industrial machine",
-    "pressure gauge",
-    "ladder",
-    "fire extinguisher",
+    "industrial valve body",
+    "pneumatic valve actuator",
+    "circular manual handwheel",
+    "pipe flange joint",
+    "pipe elbow",
+    "insulated steam pipe",
+    "centrifugal water pump",
+    "electric motor with cooling fins",
+    "round pressure gauge dial",
+    "pressure transmitter",
+    "small vibration sensor on a machine casing",
 ]
 from business.interfaces.ports.outbound.visual_detector import VisualDetector
 from infra.paths import WEIGHTS_DIR
 
-_LOCAL_WEIGHTS = WEIGHTS_DIR / "yolov8s-worldv2.pt"
-MODEL_NAME = os.getenv("YOLO_WORLD_MODEL") or (str(_LOCAL_WEIGHTS) if _LOCAL_WEIGHTS.exists() else "yolov8s-worldv2.pt")
+_LOCAL_WEIGHTS = WEIGHTS_DIR / "yolov8x-worldv2.pt"
+MODEL_NAME = os.getenv("YOLO_WORLD_MODEL") or (str(_LOCAL_WEIGHTS) if _LOCAL_WEIGHTS.exists() else "yolov8x-worldv2.pt")
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 _model = None
