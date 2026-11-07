@@ -1,10 +1,10 @@
-"""Test session setup: every run uses a fresh, seeded SQLite database (never backend/database.db)."""
+"""Test session setup: src/ on the path and a fresh, seeded SQLite database (never backend/database.db)."""
 
 import os
+import sys
 import tempfile
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 os.environ["DATABASE_URL"] = f"sqlite:///{tempfile.mkdtemp(prefix='ask_your_factory_')}/test.db"
-
-from app.database import init_db  # noqa: E402  (must import after DATABASE_URL is set)
-
-init_db(populate=True)
+os.environ.setdefault("LLM_PROVIDER", "none")  # tests never call a real LLM
