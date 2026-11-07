@@ -37,7 +37,8 @@ let navProgress = 0;
 let isNavigating = false;
 const navSpeed = 1.5; // fixed, comfortable walking pace
 let lastFrameTime = performance.now();
-let cameraMode = "orbit"; // "orbit" | "follow" | "top" | "free"
+let cameraMode = "follow"; // "follow" (orbit around the robot) | "top" | "free" (debug)
+let walkGrid = null; // {x_min, z_min, cell, nx, nz, reachable: Uint8Array, blocked: Uint8Array}
 let lastRobotPos = null;
 let camTween = null;
 let sidebarOpen = true;
@@ -50,9 +51,10 @@ const MAX_NEAR_LABELS = 4;
 const LABEL_SCREEN_HEIGHT = 0.045; // fraction of the view height
 // Follow camera: eye height behind the robot, on the path it already walked (always free space).
 // The splat was captured at standing height, so this is where it looks sharp.
-const FOLLOW_BACK = 1.8;
-const FOLLOW_EYE = 1.6;
-const FOLLOW_LOOK_AHEAD = 2.5;
+const FOLLOW_BACK = 2.2; // default distance behind the robot
+const FOLLOW_EYE = 1.6; // camera height when placed behind the robot
+const ROBOT_HEAD = 0.9; // the follow camera orbits around this point on the robot
+const FOLLOW_LIMITS = { min: 0.8, max: 4.0, minPolar: Math.PI * 0.12, maxPolar: Math.PI * 0.47 };
 const DEBUG = new URLSearchParams(window.location.search).has("debug");
 const LABEL_PRIORITY = { target: 4, selected: 3, fault: 2, near: 1 };
 const ROBOT_SPEED_M_S = 0.8;
@@ -651,7 +653,12 @@ async function fetchSceneData() {
     buildFrames(frames);
     renderAssetList(assetsData);
     await previewRoute(faultTargetId);
+    if (currentPath.length > 1) {
+      robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
+    }
+    setCameraMode("follow");
     showSelection(faultTargetId);
+    loadWalkableGrid();
   } catch (e) {
     console.error("Scene data error", e);
     showToast("Could not load the scene data: " + e.message);
@@ -810,6 +817,77 @@ function declutterLabels() {
   });
 }
 
+// ---------------------------------------------------------------- walkable floor
+
+// The navigation grid: drawn as a faint floor overlay (where clicks can send the robot)
+// and used to keep the follow camera inside the room.
+async function loadWalkableGrid() {
+  try {
+    const g = await fetchJson("/api/navigation/walkable");
+    const decode = function (b64) { return Uint8Array.from(atob(b64), function (c) { return c.charCodeAt(0); }); };
+    walkGrid = { x_min: g.x_min, z_min: g.z_min, cell: g.cell, nx: g.nx, nz: g.nz, reachable: decode(g.reachable), blocked: decode(g.blocked) };
+    buildWalkableOverlay();
+  } catch (err) {
+    console.warn("Walkable grid unavailable", err);
+  }
+}
+
+function buildWalkableOverlay() {
+  const g = walkGrid;
+  const data = new Uint8Array(g.nx * g.nz * 4);
+  for (let i = 0; i < g.nx; i++) {
+    for (let j = 0; j < g.nz; j++) {
+      if (!g.reachable[i * g.nz + j]) continue;
+      const row = g.nz - 1 - j; // plane v runs towards -z after the rotation
+      const k = (row * g.nx + i) * 4;
+      data[k] = 0; data[k + 1] = 210; data[k + 2] = 255; data[k + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, g.nx, g.nz, THREE.RGBAFormat);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  const geo = new THREE.PlaneGeometry(g.nx * g.cell, g.nz * g.cell);
+  geo.rotateX(-Math.PI / 2);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.16, depthWrite: false }));
+  mesh.position.set(g.x_min + (g.nx * g.cell) / 2, 0.012, g.z_min + (g.nz * g.cell) / 2);
+  mesh.renderOrder = 1;
+  scene.add(mesh);
+}
+
+function gridValue(layer, x, z, outside) {
+  const g = walkGrid;
+  const i = Math.floor((x - g.x_min) / g.cell);
+  const j = Math.floor((z - g.z_min) / g.cell);
+  if (i < 0 || j < 0 || i >= g.nx || j >= g.nz) return outside;
+  return g[layer][i * g.nz + j] === 1;
+}
+
+// Game-style camera: if a wall or machine stands between the robot and the camera,
+// pull the camera in front of it; never above the ceiling or below the floor.
+function keepCameraInside() {
+  if (!walkGrid) return;
+  const t = controls.target;
+  const offset = new THREE.Vector3().subVectors(camera.position, t);
+  const length = offset.length();
+  const dir = offset.clone().normalize();
+  const step = 0.04;
+  for (let s = 0.25; s <= length; s += step) {
+    const x = t.x + dir.x * s;
+    const z = t.z + dir.z * s;
+    const y = t.y + dir.y * s;
+    // Outside the room = wall. Obstacle cells only block below ~1.25 m (machines are lower;
+    // the camera may look over them), so the view is not pulled in at every pump.
+    const outside = gridValue("blocked", x, z, null) === null;
+    if (outside || (y < 1.25 && gridValue("blocked", x, z, true))) {
+      camera.position.copy(t).addScaledVector(dir, Math.max(0.3, s - 0.12));
+      break;
+    }
+  }
+  const ceiling = (roomBounds.ceiling || 3) - 0.15;
+  camera.position.y = THREE.MathUtils.clamp(camera.position.y, 0.35, ceiling);
+}
+
 // ---------------------------------------------------------------- route & robot
 
 // Fetch a collision-free route. dest = {assetId} or {goal: [x, z]}; from the robot unless atEntry.
@@ -898,12 +976,12 @@ function resetRobot() {
   nearLabelIds = new Set();
   if (goalMarker) goalMarker.visible = false;
   renderNearby([]);
-  if (cameraMode === "follow") resetView();
   if (faultTargetId) {
     previewRoute(faultTargetId).then(function () {
       if (currentPath.length > 1) {
         robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
       }
+      if (cameraMode === "follow") placeBehindRobot();
     });
   }
 }
@@ -967,10 +1045,7 @@ function onArrival() {
   showToast("Arrived at " + (frame ? frame.tag : routeTargetId) + " — diagnosis on the right");
   if (!copilotOpen) toggleCopilotDrawer();
   showSelection(routeTargetId);
-  if (frame) {
-    if (cameraMode === "follow") setCameraMode("orbit");
-    focusOn(frame.pos, frame.size);
-  }
+  if (frame) lookAtAsset(frame);
 }
 
 // ---------------------------------------------------------------- proximity
@@ -1299,8 +1374,7 @@ function selectAndFocus(id) {
   showSelection(id);
   const frame = framesById.get(id);
   if (frame) {
-    if (cameraMode !== "orbit") setCameraMode("orbit");
-    focusOn(frame.pos, frame.size);
+    lookAtAsset(frame);
   } else {
     showToast("This asset has no 3D frame");
   }
@@ -1321,18 +1395,56 @@ function setCameraMode(mode) {
     exitFreeCamera();
   }
   cameraMode = mode;
-  ["orbit", "follow", "top"].forEach(function (m) {
+  ["follow", "top"].forEach(function (m) {
     document.getElementById("btn-cam-" + m).classList.toggle("active", m === mode);
   });
   if (mode === "top") {
+    controls.enableRotate = false;
+    controls.enablePan = true;
+    controls.minDistance = 2;
+    controls.maxDistance = 18;
+    controls.minPolarAngle = 0;
+    controls.maxPolarAngle = Math.PI * 0.2;
     tweenCamera(new THREE.Vector3(...TOP_VIEW.position), new THREE.Vector3(...TOP_VIEW.target));
+  } else {
+    // Follow: drag to turn around the robot, wheel to zoom; pan is off so the robot stays centred.
+    controls.enableRotate = true;
+    controls.enablePan = false;
+    controls.minDistance = FOLLOW_LIMITS.min;
+    controls.maxDistance = FOLLOW_LIMITS.max;
+    controls.minPolarAngle = FOLLOW_LIMITS.minPolar;
+    controls.maxPolarAngle = FOLLOW_LIMITS.maxPolar;
+    placeBehindRobot();
   }
-  controls.enableRotate = mode !== "follow";
-  controls.enablePan = mode !== "follow";
   lastRobotPos = robotAvatar.position.clone();
 }
 
-// Point on the current route at a given distance from its start (clamped).
+function robotHead() {
+  return new THREE.Vector3(robotAvatar.position.x, ROBOT_HEAD, robotAvatar.position.z);
+}
+
+// Camera behind the robot, looking where it faces (or along `dir` when given).
+function placeBehindRobot(dir) {
+  const facing = dir || new THREE.Vector3(Math.sin(robotAvatar.rotation.y), 0, Math.cos(robotAvatar.rotation.y));
+  facing.setY(0).normalize();
+  const head = robotHead();
+  const pos = head.clone().addScaledVector(facing, -FOLLOW_BACK);
+  pos.y = FOLLOW_EYE;
+  tweenCamera(pos, head);
+}
+
+// Turn the view towards an asset: in follow mode the camera goes behind the robot,
+// on the far side from the asset, so the asset is in front; in top mode it pans over it.
+function lookAtAsset(frame) {
+  if (cameraMode === "top") {
+    tweenCamera(new THREE.Vector3(frame.pos[0], 7, frame.pos[2] + 0.01), new THREE.Vector3(frame.pos[0], 0, frame.pos[2]));
+    return;
+  }
+  if (cameraMode !== "follow") setCameraMode("follow");
+  const toAsset = new THREE.Vector3(frame.pos[0] - robotAvatar.position.x, 0, frame.pos[2] - robotAvatar.position.z);
+  placeBehindRobot(toAsset.lengthSq() > 0.01 ? toAsset : null);
+}
+
 function pointOnPath(distance) {
   if (currentPath.length < 2) return null;
   const total = pathLengths[pathLengths.length - 1];
@@ -1347,38 +1459,19 @@ function pointOnPath(distance) {
 }
 
 // Eye-height camera behind the robot, smoothly following.
-function updateFollowCamera(dt) {
-  const r = robotAvatar.position;
-  const heading = new THREE.Vector3(Math.sin(robotAvatar.rotation.y), 0, Math.cos(robotAvatar.rotation.y));
-  let behind = null;
-  if (currentPath.length > 1) {
-    const travelled = navProgress * pathLengths[pathLengths.length - 1];
-    if (travelled > FOLLOW_BACK * 0.5) behind = pointOnPath(travelled - FOLLOW_BACK);
+// Follow: the camera keeps the user's angle and zoom and moves with the robot.
+function updateFollowCamera() {
+  if (lastRobotPos) {
+    camera.position.add(new THREE.Vector3().subVectors(robotAvatar.position, lastRobotPos));
   }
-  if (!behind) behind = new THREE.Vector3(r.x, 0, r.z).addScaledVector(heading, -FOLLOW_BACK);
-  const wantPos = new THREE.Vector3(behind.x, FOLLOW_EYE, behind.z);
-  const wantTarget = new THREE.Vector3(r.x, 0.9, r.z).addScaledVector(heading, FOLLOW_LOOK_AHEAD);
-  const k = 1 - Math.exp(-dt * 3.5);
-  camera.position.lerp(wantPos, k);
-  controls.target.lerp(wantTarget, k);
+  controls.target.copy(robotHead());
 }
 
 function resetView() {
-  setCameraMode("orbit");
-  tweenCamera(new THREE.Vector3(...ORBIT_VIEW.position), new THREE.Vector3(...ORBIT_VIEW.target));
+  setCameraMode("follow");
 }
 
-function focusOn(pos, size) {
-  const target = new THREE.Vector3(pos[0], pos[1], pos[2]);
-  const extent = Math.max(size ? Math.max(size[0], size[1], size[2]) : 0.5, 0.4);
-  const distance = THREE.MathUtils.clamp(extent * 3.5, 2.2, 6);
-  const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
-  if (dir.lengthSq() < 0.01) dir.set(1, 0.8, 1);
-  dir.normalize();
-  dir.y = Math.max(dir.y, 0.35);
-  dir.normalize();
-  tweenCamera(target.clone().add(dir.multiplyScalar(distance)), target);
-}
+
 
 function tweenCamera(toPosition, toTarget, ms) {
   camTween = {
@@ -1523,7 +1616,7 @@ function enterFreeCamera() {
   freeCam.pitch = euler.x;
   camera.rotation.set(freeCam.pitch, freeCam.yaw, 0, "YXZ");
   document.getElementById("freecam-hud").style.display = "block";
-  ["orbit", "follow", "top"].forEach(function (m) {
+  ["follow", "top"].forEach(function (m) {
     document.getElementById("btn-cam-" + m).classList.remove("active");
   });
   renderer.domElement.requestPointerLock();
@@ -1539,8 +1632,7 @@ function exitFreeCamera() {
   camera.getWorldDirection(forward);
   controls.target.copy(camera.position).add(forward.multiplyScalar(2.5));
   controls.enabled = true;
-  cameraMode = "orbit";
-  document.getElementById("btn-cam-orbit").classList.add("active");
+  setCameraMode("follow");
 }
 
 function updateFreeCamera() {
@@ -1603,14 +1695,15 @@ function animate() {
     if (navProgress >= 1) onArrival();
   }
 
-  if (cameraMode === "follow" && !camTween) updateFollowCamera(dt);
+  if (cameraMode === "follow" && !camTween) updateFollowCamera();
   lastRobotPos = robotAvatar.position.clone();
 
   updateCameraTween();
   updateFreeCamera();
   if (!freeCam.active) {
-    clampTarget();
+    if (cameraMode === "top") clampTarget();
     controls.update();
+    if (cameraMode === "follow") keepCameraInside();
   }
   if (now - lastDeclutter > 120) {
     declutterLabels();
@@ -1735,7 +1828,6 @@ function toggleCopilotDrawer() {
 
 function setupToolbar() {
   document.getElementById("btn-reset-nav").onclick = resetRobot;
-  document.getElementById("btn-cam-orbit").onclick = resetView;
   document.getElementById("btn-cam-follow").onclick = function () { setCameraMode("follow"); };
   document.getElementById("btn-cam-top").onclick = function () { setCameraMode("top"); };
   document.querySelectorAll(".render-mode-btn[data-view]").forEach(function (b) {
