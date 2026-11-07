@@ -54,6 +54,16 @@ Instead of manually searching through industrial equipment and technical documen
 
 ---
 
+## Automatic semantic labels (optional, GPU)
+
+The geometric extraction cannot tell a crate from a pipe. This step names and boxes equipment from photoreal renders:
+
+1. Start the server, open `http://localhost:8000/?author` and press **Capture labeling views** (40 virtual cameras on walkable floor; each image is saved with its exact camera matrix).
+2. `backend/.venv/Scripts/python scripts/spike_grounded_sam.py` is the quick go/no-go check on a few screenshots in `data/labeling/spike/`.
+3. `backend/.venv/Scripts/python scripts/label_scene.py` runs GroundingDINO + SAM 2 on every view, back-projects the masks onto the scan (±15 cm of the visible surface), votes across views (at least 2 must agree), clusters with DBSCAN (eps 0.10 m, 30 points) and writes `data/semantic_objects.json` plus an Excel coverage report (which of the 30 pack assets were found).
+4. Restart the server: semantic objects replace the geometric ones they cover, carry the asset class, and are drawn as rotated boxes. Without the file everything behaves as before.
+5. `scripts/eval_labels.py` scores the result against the boxes you confirmed with the placement tool.
+
 ## The Problem
 
 Industrial environments contain complex networks of machinery, pipes, pumps, tanks and other equipment.

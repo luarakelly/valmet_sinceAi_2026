@@ -16,6 +16,7 @@ from business.services import (
     DashboardService,
     MaintenanceService,
     NavigationService,
+    LabelingService,
     PlacementService,
     SceneService,
     VerificationService,
@@ -26,7 +27,8 @@ from infra.db.sqlmodel.database import engine, init_db
 from infra.db.sqlmodel.repositories import SqlModelAssetRepository
 from infra.importers.workbook.dataset import get_dataset
 from infra.llm import build_language_model
-from infra.paths import PLACEMENTS_PATH, VERIFICATION_PATH
+from infra.labeling.view_store import FileViewStore
+from infra.paths import LABELING_VIEWS_DIR, PLACEMENTS_PATH, VERIFICATION_PATH
 from infra.spatial.json_record_store import JsonRecordStore
 from infra.spatial.scene_pipeline import BoilerRoomScene
 from infra.vision.yolo_world_detector import YoloWorldDetector
@@ -46,6 +48,7 @@ class Container:
     vision: VisionService
     verification: VerificationService
     placements: PlacementService
+    labeling: LabelingService
     llm_name: Optional[str]
 
 
@@ -73,6 +76,7 @@ def build_container(populate_db: bool = True) -> Container:
         vision=VisionService(YoloWorldDetector()),
         verification=VerificationService(scene, llm, verification_store),
         placements=PlacementService(repository, scene, placement_store),
+        labeling=LabelingService(scene_engine, FileViewStore(LABELING_VIEWS_DIR)),
         llm_name=llm.name if llm else None,
     )
     logger.info("Container ready (LLM: %s)", container.llm_name or "none, deterministic evidence engine")

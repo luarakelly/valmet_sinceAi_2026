@@ -14,6 +14,7 @@ from api.controllers import (
     dashboard_controller as dashboard,
     maintenance_controller as maintenance,
     navigation_controller as navigation,
+    labeling_controller as labeling,
     placement_controller as placements,
     scene_controller as scene,
     verification_controller as verification,
@@ -66,6 +67,9 @@ post("/scene/lift-box", response_model=LiftBoxResponse)(placements.lift_box)
 get("/scene/placements")(placements.list_placements)
 put("/scene/placements/{asset_id}")(placements.save_placement)
 delete("/scene/placements/{asset_id}")(placements.delete_placement)
+
+post("/labeling/views")(labeling.save_view)
+get("/labeling/plan")(labeling.get_plan)
 
 # Navigation
 get("/navigation/path", response_model=NavigationPathResponse)(navigation.get_navigation_path)

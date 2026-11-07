@@ -6,7 +6,7 @@ Coordinates are canonical: Y up, floor at y = 0 (see point_cloud.py).
 """
 
 import base64
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 import logging
 import math
 import time
@@ -15,6 +15,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from infra.labeling.camera_rig import plan_views
+from infra.labeling.semantic_objects import SemanticObject, merge_semantic, read_semantic_objects
+from infra.paths import SEMANTIC_OBJECTS_PATH
 from infra.spatial.asset_mapping import (
     COMPONENT,
     COMPONENT_CONFIDENCE,
@@ -78,14 +81,16 @@ class BoilerRoomScene:
         assets_provider: Callable[[], List[Dict[str, Any]]],
         verification_provider: Optional[Callable[[], Dict[str, Dict[str, Any]]]] = None,
         placement_provider: Optional[Callable[[], Dict[str, Dict[str, Any]]]] = None,
+        semantic_provider: Optional[Callable[[], List[SemanticObject]]] = None,
     ) -> None:
         self._assets_provider = assets_provider
         self._verification_provider = verification_provider or (lambda: {})
         self._placement_provider = placement_provider or (lambda: {})
+        self._semantic_provider = semantic_provider or (lambda: read_semantic_objects(SEMANTIC_OBJECTS_PATH))
         self._build()
 
     def _build(self) -> None:
-        self.result = run_pipeline(self._assets_provider(), self._verification_provider(), self._placement_provider())
+        self.result = run_pipeline(self._assets_provider(), self._verification_provider(), self._placement_provider(), self._semantic_provider())
         self.frames = [self._frame(obj) for obj in self.result.objects]
 
     def rebuild(self) -> "BoilerRoomScene":
@@ -198,6 +203,10 @@ class BoilerRoomScene:
             return None
         return {"center": list(lifted.center), "size": list(lifted.size), "point_count": lifted.point_count}
 
+    def labeling_views(self) -> List[Dict[str, Any]]:
+        """Camera poses on walkable floor for the labeling capture run."""
+        return [asdict(view) for view in plan_views(self.result.grid)]
+
     def get_object_geometry(self, identifier: str) -> Optional[bytes]:
         """The object's own points as little-endian float32 x, y, z triples; None if unknown."""
         frame = self.find_frame(identifier)
@@ -257,6 +266,7 @@ class BoilerRoomScene:
             "class": obj.label,
             "pos": list(obj.center),
             "size": list(obj.size),
+            "yaw": obj.yaw,
             "point_count": obj.point_count,
             "asset_id": None,
             "mapped_asset": None,
@@ -303,13 +313,16 @@ def run_pipeline(
     assets: List[Dict[str, Any]],
     verification: Optional[Dict[str, Dict[str, Any]]] = None,
     placements: Optional[Dict[str, Dict[str, Any]]] = None,
+    semantic: Optional[List[SemanticObject]] = None,
 ) -> ScenePipelineResult:
     started = time.perf_counter()
     cloud = load_scene_cloud()
     room = detect_room(cloud)
     placements = placements or {}
     placed = placed_objects(cloud, placements, {asset["asset_id"] for asset in assets})
-    objects = drop_covered(extract_objects(cloud, room), list(placed.values())) + list(placed.values())
+    geometric = drop_covered(extract_objects(cloud, room), list(placed.values()))
+    objects, semantic_verified = merge_semantic(geometric, semantic or [])
+    objects = drop_covered(objects, list(placed.values())) + list(placed.values())
     grid = build_grid(cloud, room)
 
     entry_cell = _walkway_end(grid, room)
@@ -324,7 +337,8 @@ def run_pipeline(
         walk[obj.object_id] = float(travel[stand])
 
     target = choose_target(assets)
-    verified = _verified_objects(verification or {}, objects)
+    verified = {**semantic_verified, **_verified_objects(verification or {}, objects)}
+    verified = {object_id: seen for object_id, seen in verified.items() if object_id in {obj.object_id for obj in objects}}
     bindings = _bind(objects, assets, placed, placements, target["asset_id"], reach, walk, verified)
     components = attach_components(objects, bindings)
 
@@ -397,8 +411,11 @@ def _footprint_distance(frame: Dict[str, Any]) -> Callable[[float, float], float
     """Floor distance from a point to the frame's box footprint (0 inside it)."""
     cx, _, cz = frame["pos"]
     half_w, half_d = frame["size"][0] / 2, frame["size"][2] / 2
+    cos_yaw, sin_yaw = math.cos(frame.get("yaw", 0.0)), math.sin(frame.get("yaw", 0.0))
 
     def distance(x: float, z: float) -> float:
-        return math.hypot(max(abs(x - cx) - half_w, 0.0), max(abs(z - cz) - half_d, 0.0))
+        along = (x - cx) * cos_yaw + (z - cz) * sin_yaw
+        across = -(x - cx) * sin_yaw + (z - cz) * cos_yaw
+        return math.hypot(max(abs(along) - half_w, 0.0), max(abs(across) - half_d, 0.0))
 
     return distance

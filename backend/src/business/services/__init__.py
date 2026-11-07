@@ -1,6 +1,7 @@
 from .asset_service import AssetService
 from .copilot_service import CopilotService, detect_drift
 from .dashboard_service import DashboardService
+from .labeling_service import LabelingService
 from .maintenance_service import MaintenanceService
 from .navigation_service import NavigationService
 from .placement_service import PlacementService

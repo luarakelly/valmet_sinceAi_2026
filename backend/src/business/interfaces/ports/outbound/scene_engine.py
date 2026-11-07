@@ -43,6 +43,10 @@ class SceneEngine(Protocol):
         """3D box (`center`, `size`, `point_count`) of the nearest surface inside a 2D box; None if empty."""
         ...
 
+    def labeling_views(self) -> List[Dict[str, Any]]:
+        """Virtual cameras for the labeling run: `view_id`, `eye`, `target`, `fov_deg`."""
+        ...
+
     def walkable_grid(self) -> Dict[str, Any]:
         """Occupancy grid: origin, cell size, nx × nz, and base64 layers `reachable` / `blocked`."""
         ...

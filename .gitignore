@@ -128,3 +128,6 @@ data/object_verification.json
 .~lock.*#
 .mcp.json
 port_snapshot.tgz
+
+# Labeling captures are large; data/semantic_objects.json (the result) is tracked
+data/labeling/

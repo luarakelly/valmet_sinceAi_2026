@@ -55,6 +55,8 @@ class SceneObject:
     size: Tuple[float, float, float]
     point_count: int
     color: Tuple[float, float, float]
+    # Rotation about the vertical axis (radians); size is then along the rotated x / z axes.
+    yaw: float = 0.0
     # The object's own points (its voxels, not its box): drawn as the x-ray highlight.
     points: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), dtype=np.float32), compare=False, repr=False)
 

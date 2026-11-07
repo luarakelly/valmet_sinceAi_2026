@@ -5,6 +5,8 @@
   const DETECT_CONFIDENCE = 0.12;
   const MIN_DRAG_PX = 8;
   const POLL_MS = 400;
+  const LABEL_SETTLE_MS = 900; // the splat sorts and fades in after a camera jump
+  const LABEL_JPEG_QUALITY = 0.92;
   const SAVED_COLOR = 0x34d399;
   const PREVIEW_COLOR = 0xfbbf24;
 
@@ -31,6 +33,7 @@
       '<button id="author-detect">Detect in this view</button>' +
       '<button id="author-reframe" hidden>Move camera</button>' +
       '<div class="author-status" id="author-status">No view captured.</div>' +
+      '<button id="author-label-views">Capture labeling views</button>' +
       '<select id="author-asset"></select>' +
       '<button id="author-save" disabled>Save placement</button>' +
       '<div class="author-title">Saved</div>' +
@@ -38,6 +41,7 @@
     document.body.appendChild(root);
     root.querySelector("#author-detect").onclick = detect;
     root.querySelector("#author-reframe").onclick = dropCapture;
+    root.querySelector("#author-label-views").onclick = captureLabelingViews;
     root.querySelector("#author-save").onclick = savePlacement;
     return root;
   }
@@ -78,16 +82,69 @@
     return new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).elements.slice();
   }
 
-  async function captureSceneImage() {
+  async function captureSceneImage(quality) {
     // Only the scan itself: robot, path, grid and helper boxes would confuse the detector.
     const hidden = scene.children.filter(function (child) {
       return child !== sceneModel && child !== sparkRenderer && child.visible;
     });
     hidden.forEach(function (child) { child.visible = false; });
     renderer.render(scene, camera);
-    const blob = await new Promise(function (resolve) { renderer.domElement.toBlob(resolve, "image/jpeg", 0.9); });
+    const blob = await new Promise(function (resolve) { renderer.domElement.toBlob(resolve, "image/jpeg", quality || 0.9); });
     hidden.forEach(function (child) { child.visible = true; });
     return blob;
+  }
+
+  function blobToBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      const reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result).split(",")[1]); };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // Renders every planned virtual camera and uploads image + exact view_projection for label_scene.py.
+  async function captureLabelingViews() {
+    const button = panel.querySelector("#author-label-views");
+    button.disabled = true;
+    const previousMode = cameraMode;
+    const previousFov = camera.fov;
+    cameraMode = "verify";
+    camTween = null;
+    try {
+      const plan = await fetchJson("/api/labeling/plan");
+      for (let i = 0; i < plan.views.length; i++) {
+        const view = plan.views[i];
+        setStatus("Capturing view " + (i + 1) + " / " + plan.views.length + " (" + view.view_id + ")");
+        camera.position.set(view.eye[0], view.eye[1], view.eye[2]);
+        controls.target.set(view.target[0], view.target[1], view.target[2]);
+        camera.fov = view.fov_deg;
+        camera.updateProjectionMatrix();
+        controls.update();
+        await new Promise(function (resolve) { setTimeout(resolve, LABEL_SETTLE_MS); });
+        const viewProjection = currentViewProjection();
+        const blob = await captureSceneImage(LABEL_JPEG_QUALITY);
+        await fetchJson("/api/labeling/views", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            view_id: view.view_id,
+            image_base64: await blobToBase64(blob),
+            view_projection: viewProjection,
+            width: renderer.domElement.width,
+            height: renderer.domElement.height,
+          }),
+        });
+      }
+      setStatus(plan.views.length + " views saved. Now run scripts/label_scene.py");
+    } catch (error) {
+      setStatus("Capture failed: " + error.message);
+    } finally {
+      camera.fov = previousFov;
+      camera.updateProjectionMatrix();
+      setCameraMode(previousMode === "verify" ? "follow" : previousMode);
+      button.disabled = false;
+    }
   }
 
   async function detect() {

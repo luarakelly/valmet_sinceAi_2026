@@ -752,6 +752,7 @@ function buildFrames(frames) {
     const lineMat = new THREE.LineBasicMaterial({ color: colorHex, transparent: true, opacity: 0, depthTest: true });
     const box = new THREE.LineSegments(new THREE.EdgesGeometry(boxGeo), lineMat);
     box.position.set(x, y, z);
+    box.rotation.y = -(frame.yaw || 0); // semantic boxes are rotated about the vertical axis
 
     const fillMat = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0, depthWrite: false });
     const fill = new THREE.Mesh(boxGeo, fillMat);
@@ -1096,9 +1097,10 @@ function onArrival() {
 function distanceToFootprint(rx, rz, frame) {
   const [x, , z] = frame.pos;
   const [w, , d] = frame.size;
-  const dx = Math.max(Math.abs(rx - x) - w / 2, 0);
-  const dz = Math.max(Math.abs(rz - z) - d / 2, 0);
-  return Math.hypot(dx, dz);
+  const yaw = frame.yaw || 0;
+  const along = (rx - x) * Math.cos(yaw) + (rz - z) * Math.sin(yaw);
+  const across = -(rx - x) * Math.sin(yaw) + (rz - z) * Math.cos(yaw);
+  return Math.hypot(Math.max(Math.abs(along) - w / 2, 0), Math.max(Math.abs(across) - d / 2, 0));
 }
 
 function checkProximityEvents(rx, rz) {

@@ -58,6 +58,9 @@ class OccupancyGrid:
     def clearance_at(self, x: float, z: float) -> float:
         return float(self.clearance[self.to_cell(x, z)])
 
+    def is_reachable(self, x: float, z: float) -> bool:
+        return bool(self.reachable[self.to_cell(x, z)])
+
 
 @dataclass(frozen=True)
 class Route:
