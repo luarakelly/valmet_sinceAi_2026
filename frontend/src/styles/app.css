@@ -1180,3 +1180,7 @@ header { gap: 16px; }
 .nearby-item:hover { color: #fff; }
 .safety-card b { display: block; margin-bottom: 3px; }
 #btn-submit-wo { padding: 10px; font-size: 12px; }
+
+/* Side-panel toggles sit below the floating toolbar so they never cover its buttons. */
+.sidebar-toggle-pill,
+.copilot-toggle-pill { top: 72px; }

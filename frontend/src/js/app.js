@@ -20,6 +20,7 @@ let roomBounds = { x: [-5, 5], z: [-3, 3], ceiling: 3 };
 let routeTargetId = null; // the inspection target (does NOT change when you just select something)
 let selectedId = null; // what the copilot panel shows
 let nearbyIds = new Set();
+let nearLabelIds = new Set(); // the few nearest assets that get a label (keeps the view readable)
 let showAllFrames = false;
 
 let currentPath = [];
@@ -36,6 +37,11 @@ let copilotOpen = true;
 
 const ROBOT_GROUND_OFFSET = 0.15;
 const PROXIMITY_RADIUS = 1.5;
+const MAX_NEAR_LABELS = 4;
+// Labels keep a fixed on-screen size (not world size), so they never fill the screen up close.
+const LABEL_SCREEN_HEIGHT = 0.045; // fraction of the view height
+const FOLLOW_DISTANCE = 4.5;
+const FOLLOW_HEIGHT = 3.2;
 const ROBOT_SPEED_M_S = 0.8;
 const ORBIT_VIEW = { position: [-5.5, 3.6, 5.0], target: [0, 0.8, 0] };
 const TOP_VIEW = { position: [0, 10, 0.01], target: [0, 0, 0] };
@@ -548,9 +554,11 @@ function createFloatingLabelSprite(tag, stateText, colorHex) {
     transparent: true,
     opacity: 0.0,
     depthTest: false,
+    sizeAttenuation: false,
   });
   const sprite = new THREE.Sprite(spriteMat);
-  sprite.scale.set(0.9, 0.28, 1);
+  sprite.scale.set(LABEL_SCREEN_HEIGHT * (256 / 72), LABEL_SCREEN_HEIGHT, 1);
+  sprite.renderOrder = 10;
   return sprite;
 }
 
@@ -581,7 +589,7 @@ function buildFrames(frames) {
     let label = null;
     if (frame.asset_id) {
       label = createFloatingLabelSprite(frame.tag || frame.id, (frame.state || "").replace(/_/g, " "), STATE_CSS[state]);
-      label.position.set(0, h / 2 + 0.3, 0);
+      label.position.set(0, h / 2 + 0.12, 0);
       label.material.opacity = 0;
       box.add(label);
     }
@@ -593,7 +601,8 @@ function buildFrames(frames) {
 }
 
 // Which frames are drawn, and how strongly:
-//   target / selected: full;  near the robot: full;  other mapped assets: faint;
+//   target / selected: full + label;  nearest few assets: full + label;
+//   other nearby assets: outline only;  other mapped assets: faint;
 //   unmapped structure: hidden unless "All frames" is on.
 function refreshFrameStyles() {
   boundingFramesGroup.children.forEach(function (box) {
@@ -609,10 +618,12 @@ function refreshFrameStyles() {
       line = 1;
       fill = isTarget ? 0.16 : 0.1;
       label = 1;
-    } else if (isNear) {
-      line = 0.95;
-      fill = 0.08;
-      label = f.asset_id ? 1 : 0;
+    } else if (isNear && f.asset_id) {
+      line = 0.9;
+      fill = nearLabelIds.has(f.id) ? 0.06 : 0;
+      label = nearLabelIds.has(f.id) ? 1 : 0;
+    } else if (isNear && showAllFrames) {
+      line = 0.5;
     } else if (f.asset_id) {
       line = showAllFrames ? 0.55 : 0.28;
     } else if (showAllFrames) {
@@ -690,6 +701,7 @@ function resetRobot() {
   }
   lastRobotPos = robotAvatar.position.clone();
   nearbyIds = new Set();
+  nearLabelIds = new Set();
   renderNearby([]);
   refreshFrameStyles();
   setStep(1);
@@ -756,6 +768,12 @@ function checkProximityEvents(rx, rz) {
   }
   if (changed) {
     nearbyIds = ids;
+    nearLabelIds = new Set(
+      near.filter(function (n) { return n.frame.asset_id; })
+        .sort(function (a, b) { return a.dist - b.dist; })
+        .slice(0, MAX_NEAR_LABELS)
+        .map(function (n) { return n.frame.id; }),
+    );
     refreshFrameStyles();
     renderNearby(near);
   }
@@ -1075,8 +1093,8 @@ function setCameraMode(mode) {
     const p = robotAvatar.position;
     const dir = new THREE.Vector3().subVectors(camera.position, controls.target).setY(0);
     if (dir.lengthSq() < 0.01) dir.set(1, 0, 1);
-    dir.normalize().multiplyScalar(3.0);
-    tweenCamera(new THREE.Vector3(p.x + dir.x, 2.2, p.z + dir.z), new THREE.Vector3(p.x, 0.6, p.z));
+    dir.normalize().multiplyScalar(FOLLOW_DISTANCE);
+    tweenCamera(new THREE.Vector3(p.x + dir.x, FOLLOW_HEIGHT, p.z + dir.z), new THREE.Vector3(p.x, 0.6, p.z));
   }
   lastRobotPos = robotAvatar.position.clone();
 }
@@ -1089,7 +1107,7 @@ function resetView() {
 function focusOn(pos, size) {
   const target = new THREE.Vector3(pos[0], pos[1], pos[2]);
   const extent = Math.max(size ? Math.max(size[0], size[1], size[2]) : 0.5, 0.4);
-  const distance = THREE.MathUtils.clamp(extent * 3.0, 1.2, 6);
+  const distance = THREE.MathUtils.clamp(extent * 3.5, 2.2, 6);
   const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
   if (dir.lengthSq() < 0.01) dir.set(1, 0.8, 1);
   dir.normalize();
