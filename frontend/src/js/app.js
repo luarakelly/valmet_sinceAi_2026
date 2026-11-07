@@ -1245,6 +1245,7 @@ function openAssetModal(id) {
   showSelection(id);
   modal.dataset.assetId = id;
   modal.hidden = false;
+  minimizeChat();
   setChatContext();
   renderAssetImage(frame);
   if (frame && !frame.asset_id) {
@@ -1587,7 +1588,7 @@ function updateAssetModal(dossier, diag) {
     li.appendChild(text);
     list.appendChild(li);
   });
-  setText("dx-why-title", "Why? " + evidence.length + " evidence · " + docs.length + " document" + (docs.length === 1 ? "" : "s"));
+  setText("dx-why-title", "Evidence · " + evidence.length + " items · " + docs.length + " document" + (docs.length === 1 ? "" : "s"));
 }
 
 
@@ -2311,6 +2312,12 @@ function toggleChat() {
   if (!panel.hidden) {
     button.classList.remove("has-unread");
     document.getElementById("omnibar-input").focus();
+  }
+}
+
+function minimizeChat() {
+  if (!document.getElementById("chat-panel").hidden) {
+    toggleChat();
   }
 }
 
