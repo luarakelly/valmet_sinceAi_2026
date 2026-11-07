@@ -57,6 +57,7 @@
               <span>Equipment</span>
               <span class="mono accent" id="asset-count">—</span>
             </div>
+            <div class="target-card" id="target-card"></div>
             <input type="text" id="asset-search" placeholder="Search tag, class or area (e.g. P-005, valve)" />
             <div class="asset-list" id="asset-list-container"></div>
           </div>
@@ -76,20 +77,23 @@
 
           <div class="view-toolbar" role="group" aria-label="Camera">
             <button class="tool-btn active" id="btn-cam-orbit" title="Rotate around the room (drag), zoom (wheel), pan (right-drag)">Orbit</button>
-            <button class="tool-btn" id="btn-cam-follow" title="Camera follows the robot; you can still zoom and rotate">Follow robot</button>
+            <button class="tool-btn" id="btn-cam-follow" title="Eye-height camera behind the robot">Follow robot</button>
             <button class="tool-btn" id="btn-cam-top" title="Top-down plan view">Top</button>
-            <button class="tool-btn" id="btn-cam-reset" title="Back to the overview">⟲ View</button>
           </div>
 
           <div class="render-mode-toolbar" role="group" aria-label="Display">
-            <button class="render-mode-btn active" data-view="splat" title="Photoreal Gaussian-splat scan of the room">Photoreal</button>
-            <button class="render-mode-btn" data-view="points" title="Scan as coloured points">Points</button>
-            <button class="render-mode-btn" data-view="mesh" title="Reconstructed surface mesh">Mesh</button>
-            <button class="render-mode-btn" id="btn-heat" title="Colour by height">Heat</button>
-            <button class="render-mode-btn" id="btn-all-frames" title="Show every extracted 3D frame">All frames</button>
             <div class="more-menu">
-              <button class="render-mode-btn" id="btn-more" aria-haspopup="true">More ▾</button>
+              <button class="render-mode-btn active" id="btn-view-menu" aria-haspopup="true">View: <span id="view-name">Photoreal</span> ▾</button>
+              <div class="more-dropdown" id="view-dropdown">
+                <button class="render-mode-btn" data-view="splat">Photoreal scan</button>
+                <button class="render-mode-btn" data-view="points">Point cloud</button>
+                <button class="render-mode-btn" id="btn-heat">Height colours (heat)</button>
+              </div>
+            </div>
+            <div class="more-menu debug-only" id="debug-menu">
+              <button class="render-mode-btn" id="btn-more" aria-haspopup="true">Debug ▾</button>
               <div class="more-dropdown" id="more-dropdown">
+                <button class="render-mode-btn" data-view="mesh">Surface mesh</button>
                 <button id="btn-cam-free">Free camera (Shift+F)</button>
                 <button id="btn-vision-analyze">AI Scan of this view (YOLO)</button>
                 <button id="btn-semantic-extract">Re-run 3D extraction</button>
@@ -98,12 +102,12 @@
           </div>
         </div>
 
-        <div class="legend" id="legend">
-          <span><i class="dot status-attention"></i>attention</span>
-          <span><i class="dot status-degraded"></i>degraded</span>
-          <span><i class="dot status-watch"></i>watch</span>
-          <span><i class="dot status-healthy"></i>healthy</span>
-          <span><i class="dot status-structure"></i>structure</span>
+        <div class="loading-screen" id="loading-screen">
+          <div class="loading-box">
+            <div class="loading-title">Preparing the boiler room…</div>
+            <div class="loading-bar"><div class="loading-fill" id="loading-fill"></div></div>
+            <div class="loading-text" id="loading-text">Loading the photoreal scan</div>
+          </div>
         </div>
 
         <div id="vision-overlay" aria-live="polite"></div>
@@ -112,13 +116,11 @@
         <div class="help-card" id="help-card">
           <div class="help-title">How to use</div>
           <ol>
-            <li><b>Start inspection</b> — the robot walks a collision-free route to the faulty device (red frame).</li>
-            <li>While it walks, frames <b>near the robot</b> light up and are listed under <b>Near the robot</b> in the Equipment list on the left.</li>
-            <li>On arrival the <b>AI diagnosis</b> opens on the right, with the evidence it cites.</li>
+            <li><b>Start inspection</b> (or <b>Go</b> on the target card) — the robot walks a collision-free route to the faulty device (red frame).</li>
+            <li>Assets the robot passes are listed under <b>Near the robot</b> on the left.</li>
+            <li>On arrival the <b>diagnosis</b> opens on the right, with the evidence behind it.</li>
           </ol>
-          <div class="help-mouse">
-            Mouse: drag = rotate · wheel = zoom · right-drag = pan · <b>double-click</b> = focus there · click a frame = details
-          </div>
+          <div class="help-mouse">Mouse: drag = rotate · wheel = zoom · right-drag = pan · double-click = focus · click a label = details</div>
           <div class="help-mouse">Ask in the bar below: “Why is P-005 flagged?”, “Which assets need attention?”, “Where is M-006?”</div>
           <button class="btn" id="btn-help-close">Got it</button>
         </div>
@@ -139,59 +141,43 @@
         <aside class="copilot-drawer" id="copilot-drawer">
           <div class="copilot-header">
             <div class="copilot-title"><span class="accent">●</span><span>AI COPILOT</span></div>
-            <span class="badge" id="copilot-model-badge">evidence engine</span>
           </div>
 
           <div class="copilot-body" id="copilot-content">
-            <div class="diag-card">
+            <div class="cp-asset">
               <div class="row-between">
                 <span id="card-asset-tag" class="card-title">Select an asset</span>
                 <span class="badge" id="card-health-badge">—</span>
               </div>
-              <div class="card-meta">
-                <span id="card-asset-class">—</span> · <span id="card-asset-area">—</span>
-              </div>
+              <div class="card-meta" id="card-asset-meta">Click a label in 3D or a card on the left.</div>
               <div class="mapping-note" id="card-mapping-note"></div>
-              <div id="telem-block">
-                <div class="row-between small mono muted">
-                  <span id="telem-label">Recent telemetry</span><span>builder pack</span>
-                </div>
-                <canvas id="telem-canvas"></canvas>
-              </div>
             </div>
 
-            <div class="diag-card" id="diag-block">
-              <div class="heading">
-                <span>Diagnosis</span>
-                <span class="mono" id="diag-conf">Conf: —</span>
+            <div class="cp-diagnosis" id="diag-block">
+              <div class="cp-row"><span class="cp-key">Observation</span><span class="cp-val" id="dx-observation">—</span></div>
+              <div class="cp-row"><span class="cp-key">Hypothesis</span><span class="cp-val" id="dx-hypothesis">—</span></div>
+              <div class="cp-row"><span class="cp-key">Next safe check</span><span class="cp-val" id="dx-next">—</span></div>
+              <div class="cp-conf">
+                <span class="cp-key">Confidence</span>
+                <div class="conf-bar"><div class="conf-fill" id="dx-conf-fill"></div></div>
+                <span class="mono" id="dx-conf">—</span>
               </div>
-              <div class="primary-finding-box" id="finding-box">
-                <span class="finding-icon" id="finding-icon">🔍</span>
-                <span class="finding-text" id="primary-finding-text">Start the inspection or pick an asset.</span>
-              </div>
-              <div class="copilot-section-title">Evidence (observations)</div>
-              <ul class="root-cause-list" id="root-cause-list"></ul>
-              <div class="copilot-section-title">Next safe steps</div>
-              <ol class="action-list" id="action-list"></ol>
-              <div class="copilot-section-title">Cited sources</div>
-              <div class="evidence-chips-wrapper" id="evidence-citations-box"></div>
+              <div class="cp-note" id="dx-conf-note"></div>
+              <details class="cp-why" id="dx-why">
+                <summary id="dx-why-title">Why? Evidence</summary>
+                <ul class="why-list" id="dx-why-list"></ul>
+              </details>
             </div>
 
-            <div class="safety-card" id="safety-alert-box">
-              <b>⚠ Field safety (DOC-FIELD-SAFETY)</b>
-              <div id="safety-text">Advisory only: follow site procedures, lockout/tagout and permits.</div>
+            <div class="cp-thread-title">Conversation</div>
+            <div class="cp-thread" id="cp-thread">
+              <div class="msg msg-ai">Ask anything in the bar below the 3D view: “Why is P-005 flagged?”, “Where is M-006?”, “Which assets need attention?”</div>
             </div>
 
-            <div class="diag-card">
-              <div class="copilot-section-title">Ask about this asset</div>
-              <div class="copilot-ask">
-                <input type="text" id="copilot-question" placeholder="e.g. What should I inspect first?" />
-                <button class="btn" id="btn-ask-copilot">Ask</button>
-              </div>
-              <div class="copilot-answer" id="copilot-answer"></div>
+            <div class="cp-footer">
+              <div class="cp-safety" id="safety-text">⚠ Advisory only · follow site procedures, lockout/tagout and permits · DOC-FIELD-SAFETY</div>
+              <div class="cp-engine" id="copilot-model-badge">Grounded answer · evidence engine</div>
             </div>
-
-            <button class="btn" id="btn-submit-wo">📝 Draft work order (not submitted)</button>
           </div>
         </aside>
       </div>

@@ -26,7 +26,7 @@ let selectedId = null; // what the copilot panel shows
 let nearbyIds = new Set();
 let nearLabelIds = new Set(); // the few nearest assets that get a label (keeps the view readable)
 let nearbyAssets = []; // [{assetId, dist}] nearest first, shown in the left list
-const groupOpen = { near: true, attention: true, healthy: false }; // remembers what the user expanded
+const groupOpen = { near: true, attention: true, healthy: false, detected: false }; // remembers what the user expanded
 let showAllFrames = false;
 
 let currentPath = [];
@@ -46,8 +46,13 @@ const PROXIMITY_RADIUS = 1.5;
 const MAX_NEAR_LABELS = 4;
 // Labels keep a fixed on-screen size (not world size), so they never fill the screen up close.
 const LABEL_SCREEN_HEIGHT = 0.045; // fraction of the view height
-const FOLLOW_DISTANCE = 4.5;
-const FOLLOW_HEIGHT = 3.2;
+// Follow camera: eye height behind the robot, on the path it already walked (always free space).
+// The splat was captured at standing height, so this is where it looks sharp.
+const FOLLOW_BACK = 1.8;
+const FOLLOW_EYE = 1.6;
+const FOLLOW_LOOK_AHEAD = 2.5;
+const DEBUG = new URLSearchParams(window.location.search).has("debug");
+const LABEL_PRIORITY = { target: 4, selected: 3, fault: 2, near: 1 };
 const ROBOT_SPEED_M_S = 0.8;
 const ORBIT_VIEW = { position: [-5.5, 3.6, 5.0], target: [0, 0.8, 0] };
 const TOP_VIEW = { position: [0, 10, 0.01], target: [0, 0, 0] };
@@ -125,9 +130,29 @@ function init3D() {
   setupToolbar();
   setupHelp();
 
+  document.body.classList.toggle("debug", DEBUG);
   loadSceneModel(sparkRenderer ? "splat" : "points");
   fetchSceneData();
   animate();
+  startDevAutoReload();
+}
+
+// Development only: reload the page when the server restarts or a frontend file changes.
+function startDevAutoReload() {
+  if (!/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) return;
+  let known = null;
+  setInterval(async function () {
+    try {
+      const res = await fetch("/api/dev/version", { cache: "no-store" });
+      if (!res.ok) return;
+      const v = await res.json();
+      const key = v.boot_id + ":" + v.frontend_mtime;
+      if (known && key !== known) window.location.reload();
+      known = key;
+    } catch (e) {
+      /* server restarting: try again on the next tick */
+    }
+  }, 2000);
 }
 
 // ---------------------------------------------------------------- scene geometry
@@ -191,7 +216,7 @@ function createRobotAvatar() {
   robotAvatar.add(light);
   robotAvatar.add(light.target);
 
-  const ringGeo = new THREE.RingGeometry(2.3, 2.38, 48);
+  const ringGeo = new THREE.RingGeometry(0.34, 0.42, 40); // small marker under the robot
   ringGeo.rotateX(-Math.PI / 2);
   const ringMat = new THREE.MeshBasicMaterial({
     color: 0x00d2ff,
@@ -448,6 +473,41 @@ function markViewButtons(kind) {
   document.querySelectorAll(".render-mode-btn[data-view]").forEach(function (b) {
     b.classList.toggle("active", b.dataset.view === kind);
   });
+  setText("view-name", { splat: "Photoreal", points: "Points", mesh: "Mesh" }[kind] || kind);
+}
+
+function setLoading(fraction, text) {
+  const screen = document.getElementById("loading-screen");
+  if (fraction === null) {
+    screen.classList.add("done");
+    return;
+  }
+  screen.classList.remove("done");
+  document.getElementById("loading-fill").style.width = Math.round(fraction * 100) + "%";
+  if (text) setText("loading-text", text);
+}
+
+// fetch() with download progress (the splat is ~13 MB).
+async function fetchBytes(url, onProgress) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    let detail = res.status + " " + res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (e) { /* not JSON */ }
+    throw new Error(detail);
+  }
+  const total = Number(res.headers.get("Content-Length")) || 0;
+  if (!res.body || !total) return res.arrayBuffer();
+  const reader = res.body.getReader();
+  const out = new Uint8Array(total);
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    out.set(value, received);
+    received += value.length;
+    onProgress(received / total);
+  }
+  return out.buffer;
 }
 
 function loadSceneModel(kind) {
@@ -481,6 +541,7 @@ function loadSceneModel(kind) {
       scene.add(sceneModel);
       gridHelper.visible = true;
       applyRenderMode(renderMode);
+      setLoading(null);
       const count = kind === "mesh"
         ? Math.round((geometry.index ? geometry.index.count : geometry.attributes.position.count) / 3)
         : geometry.attributes.position.count;
@@ -502,17 +563,16 @@ function loadSceneModel(kind) {
 
 // Photoreal: the real Gaussian splat (already in the scene frame), rendered by Spark.
 // The first request can take ~10–30 s while the server converts the raw scan once.
+// Photoreal: the real Gaussian splat (already in the scene frame), rendered by Spark.
+// The server prepares the file at startup, so this is a plain ~13 MB download.
 async function loadSplatModel(token) {
-  showToast("Loading photoreal scene… (the first time, the server prepares it: ~30 s)");
+  setLoading(0.02, "Loading the photoreal scan…");
   try {
-    const res = await fetch("/api/scene/boiler-room.splat");
-    if (!res.ok) {
-      let detail = res.status + " " + res.statusText;
-      try { detail = (await res.json()).detail || detail; } catch (e) { /* not JSON */ }
-      throw new Error(detail);
-    }
-    const bytes = await res.arrayBuffer();
+    const bytes = await fetchBytes("/api/scene/boiler-room.splat", function (f) {
+      setLoading(0.05 + f * 0.85, "Loading the photoreal scan… " + Math.round(f * 100) + "%");
+    });
     if (token !== loadToken) return;
+    setLoading(0.95, "Preparing the 3D view…");
     const splat = new window.Spark.SplatMesh({ fileBytes: bytes, fileType: "splat", fileName: "boiler-room.splat" });
     await splat.initialized;
     if (token !== loadToken) {
@@ -524,11 +584,12 @@ async function loadSplatModel(token) {
     scene.add(splat);
     gridHelper.visible = false; // the real floor is in the splat
     if (renderMode === "heat") applyRenderMode("splat");
-    showToast("Photoreal scene: " + Math.round(bytes.byteLength / 32).toLocaleString() + " Gaussian splats");
+    setLoading(null);
   } catch (err) {
     console.warn("Photoreal scene unavailable", err);
     if (token !== loadToken) return;
     showToast("Photoreal scene unavailable (" + err.message + ") — showing scan points");
+    setLoading(0.5, "Loading the point cloud instead…");
     loadSceneModel("points");
   }
 }
@@ -709,6 +770,41 @@ function refreshFrameStyles() {
     }
     u.shown = line > 0;
     box.visible = u.shown;
+    u.priority = isTarget ? LABEL_PRIORITY.target
+      : isSelected ? LABEL_PRIORITY.selected
+      : f.asset_id && frameState(f) !== "healthy" ? LABEL_PRIORITY.fault
+      : LABEL_PRIORITY.near;
+  });
+}
+
+// Hide a label when it would overlap a more important one on screen.
+const _labelPos = new THREE.Vector3();
+let lastDeclutter = 0;
+function declutterLabels() {
+  const w = renderer.domElement.clientWidth;
+  const h = renderer.domElement.clientHeight;
+  const labelH = (LABEL_SCREEN_HEIGHT * h) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  const labelW = labelH * (256 / 72);
+  const candidates = [];
+  boundingFramesGroup.children.forEach(function (box) {
+    const u = box.userData;
+    if (!u.label) return;
+    u.label.visible = false;
+    if (!box.visible || u.label.material.opacity <= 0) return;
+    u.label.getWorldPosition(_labelPos);
+    const dist = _labelPos.distanceTo(camera.position);
+    _labelPos.project(camera);
+    if (_labelPos.z > 1 || Math.abs(_labelPos.x) > 1.1 || Math.abs(_labelPos.y) > 1.1) return;
+    candidates.push({ u: u, x: (_labelPos.x + 1) * 0.5 * w, y: (1 - _labelPos.y) * 0.5 * h, dist: dist });
+  });
+  candidates.sort(function (a, b) { return b.u.priority - a.u.priority || a.dist - b.dist; });
+  const placed = [];
+  candidates.forEach(function (c) {
+    const hit = placed.some(function (p) { return Math.abs(p.x - c.x) < labelW && Math.abs(p.y - c.y) < labelH; });
+    if (!hit) {
+      c.u.label.visible = true;
+      placed.push(c);
+    }
   });
 }
 
@@ -725,6 +821,7 @@ async function loadRoute(targetId) {
     renderPathRibbon(currentPath);
     resetRobot();
     refreshFrameStyles();
+    renderTargetCard();
     return true;
   } catch (err) {
     showToast("No collision-free route: " + err.message);
@@ -801,6 +898,14 @@ function toggleNavigation() {
   }
 }
 
+async function goTo(assetId) {
+  if (await loadRoute(assetId)) {
+    renderAssetList(filteredAssets());
+    showSelection(assetId);
+    toggleNavigation();
+  }
+}
+
 function onArrival() {
   isNavigating = false;
   document.getElementById("nav-btn-text").innerHTML = "↻ Run again";
@@ -812,6 +917,7 @@ function onArrival() {
   }
   showSelection(routeTargetId);
   if (frame) {
+    if (cameraMode === "follow") setCameraMode("orbit");
     focusOn(frame.pos, frame.size);
   }
 }
@@ -882,31 +988,20 @@ function showSelection(id) {
 
 function renderStructureCard(frame) {
   setText("card-asset-tag", frame.id + " · " + prettyClass(frame.label));
-  setText("card-asset-class", "Extracted 3D object (no builder-pack asset)");
-  setText("card-asset-area", frame.point_count + " points");
+  setText("card-asset-meta", "Detected 3D object · not linked to a builder-pack asset");
+  setText("card-mapping-note", frame.point_count + " points · " + frame.size.map(function (s) { return s.toFixed(2); }).join(" × ") + " m");
   const badge = document.getElementById("card-health-badge");
   badge.innerText = "STRUCTURE";
   badge.style.color = STATE_CSS.structure;
   badge.style.borderColor = STATE_CSS.structure;
-  setText(
-    "card-mapping-note",
-    "Size " + frame.size.map(function (s) { return s.toFixed(2); }).join(" × ") +
-      " m · centre (" + frame.pos.map(function (s) { return s.toFixed(2); }).join(", ") + ")",
-  );
-  document.getElementById("telem-block").style.display = "none";
   document.getElementById("diag-block").style.display = "none";
 }
 
 async function runCopilotDiagnosis(assetId, question) {
   const body = { asset_id: assetId };
-  if (question) {
-    body.query = question;
-  }
+  if (question) body.query = question;
   document.getElementById("diag-block").style.display = "";
-  document.getElementById("telem-block").style.display = "";
-  if (question) {
-    setText("copilot-answer", "Thinking…");
-  }
+  const thinking = question ? addMessage("ai", "Thinking…") : null;
   try {
     const [dossier, diag] = await Promise.all([
       fetchJson("/api/assets/" + encodeURIComponent(assetId)),
@@ -916,137 +1011,109 @@ async function runCopilotDiagnosis(assetId, question) {
         body: JSON.stringify(body),
       }),
     ]);
-    if (selectedId !== assetId && !question) {
-      return; // a newer selection is already being shown
+    if (thinking) thinking.remove();
+    if (selectedId === assetId || question) updateCopilotDrawer(dossier, diag);
+    if (question) {
+      const ids = (diag.citations || []).filter(function (c) { return c.source_type !== "data_quality"; })
+        .map(function (c) { return c.source_id; }).slice(0, 6);
+      addMessage("ai", diag.answer || diag.diagnosis_summary || diag.diagnosis || "No answer.", ids);
     }
-    updateCopilotDrawer(dossier, diag, question);
   } catch (err) {
     console.error("Copilot error", err);
-    setText("copilot-answer", "");
-    showToast("Copilot: " + err.message);
+    if (thinking) thinking.remove();
+    if (question) addMessage("ai", "Sorry, that failed: " + err.message);
+    else showToast("Copilot: " + err.message);
   }
 }
 
-function updateCopilotDrawer(dossier, diag, question) {
+// Conversation thread in the right column; every answer stays here (never only in a toast).
+function addMessage(role, text, chips) {
+  const thread = document.getElementById("cp-thread");
+  const msg = document.createElement("div");
+  msg.className = "msg msg-" + role;
+  msg.textContent = text;
+  if (chips && chips.length) {
+    const row = document.createElement("div");
+    row.className = "msg-chips";
+    chips.forEach(function (id) {
+      const chip = document.createElement("span");
+      chip.className = "evidence-chip";
+      chip.textContent = id;
+      row.appendChild(chip);
+    });
+    msg.appendChild(row);
+  }
+  thread.appendChild(msg);
+  while (thread.children.length > 30) thread.removeChild(thread.firstChild);
+  thread.scrollTop = thread.scrollHeight;
+  if (!copilotOpen) toggleCopilotDrawer();
+  return msg;
+}
+
+function updateCopilotDrawer(dossier, diag) {
   const state = dossier.current_state || dossier.state || {};
   const tag = diag.tag || dossier.tag || dossier.asset_id;
   const health = diag.health_score != null ? diag.health_score : state.health_score;
   const condition = diag.condition_state || state.condition_state || "unknown";
+  const css = STATE_CSS[condition] || STATE_CSS.healthy;
 
-  setText("card-asset-tag", tag + " · " + (diag.asset_id || dossier.asset_id));
-  setText("card-asset-class", prettyClass(diag.asset_class || dossier.asset_class));
-  setText("card-asset-area", dossier.area_name || "Boiler room");
-
+  setText("card-asset-tag", tag);
+  setText("card-asset-meta", prettyClass(diag.asset_class || dossier.asset_class) + " · " + (dossier.area_name || "Boiler room"));
   const frame = framesById.get(dossier.asset_id);
-  if (frame && frame.asset_id) {
-    setText(
-      "card-mapping-note",
-      "Synthetic mapping → 3D object " + frame.scene_id + " (" + prettyClass(frame.label) + "), confidence " +
-        (frame.mapping_confidence != null ? frame.mapping_confidence : "—") + (frame.id === routeTargetId ? " · inspection target" : ""),
-    );
-  } else {
-    setText("card-mapping-note", "Not placed in the 3D scene.");
-  }
-
+  setText("card-mapping-note", frame && frame.asset_id
+    ? "Synthetic mapping → 3D object " + frame.scene_id + " · confidence " + (frame.mapping_confidence != null ? frame.mapping_confidence : "—") +
+      (frame.id === routeTargetId ? " · inspection target" : "")
+    : "Not placed in the 3D scene.");
   const badge = document.getElementById("card-health-badge");
   badge.innerText = Math.round(health || 0) + "% " + condition.replace(/_/g, " ").toUpperCase();
-  const css = STATE_CSS[condition] || STATE_CSS.healthy;
   badge.style.color = css;
   badge.style.borderColor = css;
 
+  // Observation / hypothesis / next safe check, built from the grounded result.
+  const citations = diag.citations || [];
+  const evidence = citations.filter(function (c) { return ["telemetry", "event", "service_case", "work_order"].indexOf(c.source_type) >= 0; });
+  const docs = citations.filter(function (c) { return c.source_type === "doc"; });
+  const dq = citations.filter(function (c) { return c.source_type === "data_quality"; });
+  const healthy = condition === "healthy";
+  setText("dx-observation", "Health " + Math.round(health || 0) + "/100 · " + condition.replace(/_/g, " ") +
+    " · " + evidence.length + " piece" + (evidence.length === 1 ? "" : "s") + " of evidence");
+  const hypo = /Hypothesis:\s*([^.]*)/.exec(diag.diagnosis || "");
+  setText("dx-hypothesis", healthy ? "No significant deviation — routine monitoring" : hypo ? hypo[1] : prettyClass(diag.issue_code));
+  const actions = diag.recommended_actions || [];
+  setText("dx-next", actions[1] || actions[0] || "Continue routine monitoring.");
   const confidence = diag.confidence_score != null ? diag.confidence_score : diag.model_confidence;
-  setText("diag-conf", "Confidence " + (confidence != null ? Number(confidence).toFixed(2) : "—"));
+  setText("dx-conf", confidence != null ? Number(confidence).toFixed(2) : "—");
+  const fill = document.getElementById("dx-conf-fill");
+  fill.style.width = Math.round((confidence || 0) * 100) + "%";
+  fill.style.background = css;
+  setText("dx-conf-note", dq.length ? "Lowered by " + dq.length + " data-quality issue" + (dq.length === 1 ? "" : "s") + " and the synthetic 3D mapping." : "");
+  document.getElementById("diag-block").style.borderColor = css;
 
-  const findingBox = document.getElementById("finding-box");
-  const icon = condition === "healthy" ? "✅" : condition === "watch" ? "🔍" : "⚠️";
-  findingBox.style.borderColor = css;
-  findingBox.style.background = css + "1f";
-  setText("finding-icon", icon);
-  setText("primary-finding-text", diag.diagnosis_summary || diag.diagnosis || (diag.issue_code || "") + " signature");
-
-  fillList("root-cause-list", (diag.multivariate_evidence || []).slice(0, 5), "No telemetry drift, alarms or similar cases found.", true);
-  fillList("action-list", diag.recommended_actions || [], "Continue routine monitoring.", false);
-
-  const citBox = document.getElementById("evidence-citations-box");
-  citBox.innerHTML = "";
-  (diag.citations || []).forEach(function (c) {
-    const chip = document.createElement("button");
-    chip.className = "evidence-chip";
-    chip.innerText = c.source_id;
-    chip.title = c.description || "";
-    chip.onclick = function () {
-      showToast(c.source_id + ": " + (c.description || ""));
-    };
-    citBox.appendChild(chip);
-  });
-
-  if (diag.safety_guardrails && diag.safety_guardrails.length > 0) {
-    setText("safety-text", diag.safety_guardrails[0]);
-  }
-  setText("copilot-model-badge", diag.grounded_mode || "evidence engine");
-  setText("copilot-answer", question ? diag.answer || diag.diagnosis || "" : diag.answer || "");
-  drawTelemetryTrend(dossier.recent_telemetry || []);
-}
-
-function fillList(id, items, emptyText, bullets) {
-  const el = document.getElementById(id);
-  el.innerHTML = "";
-  const rows = items.length ? items : [emptyText];
-  rows.forEach(function (item) {
+  // "Why?" — one row per evidence item: ID + short text. Documents last.
+  const list = document.getElementById("dx-why-list");
+  list.innerHTML = "";
+  evidence.concat(docs).forEach(function (c) {
     const li = document.createElement("li");
-    if (bullets) {
-      li.className = "root-cause-item";
-      li.innerHTML = '<span class="root-cause-bullet">•</span>';
-      const span = document.createElement("span");
-      span.textContent = item;
-      li.appendChild(span);
-    } else {
-      li.textContent = item;
-    }
-    el.appendChild(li);
+    const id = document.createElement("span");
+    id.className = "evidence-chip";
+    id.textContent = c.source_id;
+    const text = document.createElement("span");
+    const d = (c.description || "").replace(/\s*\[[^\]]*\]\s*$/, "");
+    text.textContent = d.length > 140 ? d.slice(0, 137) + "…" : d;
+    text.title = c.description || "";
+    li.appendChild(id);
+    li.appendChild(text);
+    list.appendChild(li);
   });
+  setText("dx-why-title", "Why? " + evidence.length + " evidence · " + docs.length + " document" + (docs.length === 1 ? "" : "s"));
+
+  const llm = diag.grounded_mode && diag.grounded_mode !== "deterministic-evidence-engine";
+  setText("copilot-model-badge", llm ? "Grounded answer · " + diag.grounded_mode + " (citations verified)" : "Grounded answer · evidence engine (no LLM)");
 }
 
-function drawTelemetryTrend(records) {
-  const canvas = document.getElementById("telem-canvas");
-  const ctx = canvas.getContext("2d");
-  canvas.width = canvas.clientWidth * window.devicePixelRatio;
-  canvas.height = canvas.clientHeight * window.devicePixelRatio;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const channels = [
-    ["process_flow_pct", "flow %"],
-    ["vibration_mm_s", "vibration mm/s"],
-    ["bearing_temp_c", "bearing °C"],
-    ["process_pressure_bar", "pressure bar"],
-    ["position_actual_pct", "position %"],
-  ];
-  let key = null;
-  let label = "Recent telemetry";
-  for (const [k, l] of channels) {
-    if (records.some(function (r) { return r[k] !== undefined && r[k] !== null; })) {
-      key = k;
-      label = "Recent " + l;
-      break;
-    }
-  }
-  setText("telem-label", label);
-  if (!key || records.length < 2) {
-    return;
-  }
-  const pts = records.map(function (r) { return r[key]; }).filter(function (v) { return v !== null && v !== undefined; });
-  const min = Math.min(...pts);
-  const max = Math.max(...pts) + 1e-6;
-  ctx.strokeStyle = "#00d2ff";
-  ctx.lineWidth = 2 * window.devicePixelRatio;
-  ctx.beginPath();
-  pts.forEach(function (val, idx) {
-    const x = (idx / (pts.length - 1)) * canvas.width;
-    const y = canvas.height - ((val - min) / (max - min)) * (canvas.height * 0.72) - canvas.height * 0.14;
-    if (idx === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-}
+
+
+
 
 // ---------------------------------------------------------------- equipment list
 
@@ -1082,8 +1149,70 @@ function renderAssetList(assets) {
   group("near", "Near the robot · " + PROXIMITY_RADIUS + " m", near, function (n) {
     return assetCard(n.asset, n.dist.toFixed(1) + " m");
   }, "near-group");
-  group("attention", "Needs attention", attention, assetCard);
-  group("healthy", "Healthy", healthy, assetCard);
+  group("attention", "Needs attention", attention, assetCard, "attention-group");
+  group("healthy", "Healthy", healthy, assetCard, "healthy-group");
+  renderDetectedGroup(list);
+  renderTargetCard();
+}
+
+// "Detected objects": the extraction result (challenge criterion 1) in one place.
+function renderDetectedGroup(list) {
+  if (!framesData.length) return;
+  const mapped = framesData.filter(function (f) { return f.asset_id; }).length;
+  const counts = {};
+  framesData.filter(function (f) { return !f.asset_id; }).forEach(function (f) {
+    const k = prettyClass(f.label);
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  const details = document.createElement("details");
+  details.className = "asset-group detected-group";
+  details.open = groupOpen.detected;
+  details.ontoggle = function () { groupOpen.detected = details.open; };
+  const summary = document.createElement("summary");
+  summary.innerText = "Detected objects (" + framesData.length + ")";
+  details.appendChild(summary);
+  const body = document.createElement("div");
+  body.className = "detected-body";
+  const rows = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })
+    .map(function (k) { return "<li><span>" + escapeHtml(k) + "</span><b>" + counts[k] + "</b></li>"; }).join("");
+  body.innerHTML =
+    '<div class="detected-line"><b>' + mapped + "</b> mapped to builder-pack assets (synthetic mapping)</div>" +
+    '<div class="detected-line"><b>' + (framesData.length - mapped) + "</b> other structures, by shape:</div>" +
+    '<ul class="detected-counts">' + rows + "</ul>";
+  const btn = document.createElement("button");
+  btn.className = "action-pill" + (showAllFrames ? " active" : "");
+  btn.textContent = showAllFrames ? "Hide extra frames in 3D" : "Show all " + framesData.length + " in 3D";
+  btn.onclick = function () {
+    showAllFrames = !showAllFrames;
+    refreshFrameStyles();
+    renderAssetList(filteredAssets());
+  };
+  body.appendChild(btn);
+  details.appendChild(body);
+  list.appendChild(details);
+}
+
+// Pinned inspection target at the top of the left column.
+function renderTargetCard() {
+  const el = document.getElementById("target-card");
+  const a = assetsData.find(function (x) { return x.asset_id === routeTargetId; });
+  if (!a) {
+    el.innerHTML = "";
+    return;
+  }
+  const state = assetState(a);
+  const dist = currentPath.length > 1 ? pathLengths[pathLengths.length - 1].toFixed(1) + " m" : "";
+  el.innerHTML =
+    '<div class="target-label">Inspection target</div>' +
+    '<div class="target-row"><span class="status-dot status-' + dotClass(state) + '"></span><b>' + escapeHtml(a.tag) + "</b>" +
+    "<span>" + escapeHtml(prettyClass(a.asset_class)) + "</span>" +
+    '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(a.state ? a.state.health_score : 100) + "%</span></div>" +
+    '<div class="target-row"><span class="muted">Route ' + dist + '</span><button class="btn" id="btn-target-go">Go ▶</button></div>';
+  el.querySelector(".target-row").onclick = function () { selectAndFocus(a.asset_id); };
+  document.getElementById("btn-target-go").onclick = function (e) {
+    e.stopPropagation();
+    goTo(a.asset_id);
+  };
 }
 
 function assetCard(a, distanceText) {
@@ -1102,23 +1231,14 @@ function assetCard(a, distanceText) {
     '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(health) + "%</span>" +
     "</div>" +
     '<div class="asset-actions">' +
-    '<button class="action-pill" data-act="focus">📍 Show in 3D</button>' +
     '<button class="action-pill" data-act="route">🚶 Route here</button>' +
     "</div>";
   card.querySelector(".asset-card-main").onclick = function () {
     selectAndFocus(a.asset_id);
   };
-  card.querySelector('[data-act="focus"]').onclick = function (e) {
+  card.querySelector('[data-act="route"]').onclick = function (e) {
     e.stopPropagation();
-    selectAndFocus(a.asset_id);
-  };
-  card.querySelector('[data-act="route"]').onclick = async function (e) {
-    e.stopPropagation();
-    if (await loadRoute(a.asset_id)) {
-      showToast("New inspection target: " + a.tag + " — press Start inspection");
-      renderAssetList(filteredAssets());
-      showSelection(a.asset_id);
-    }
+    goTo(a.asset_id);
   };
   return card;
 }
@@ -1154,14 +1274,41 @@ function setCameraMode(mode) {
   });
   if (mode === "top") {
     tweenCamera(new THREE.Vector3(...TOP_VIEW.position), new THREE.Vector3(...TOP_VIEW.target));
-  } else if (mode === "follow") {
-    const p = robotAvatar.position;
-    const dir = new THREE.Vector3().subVectors(camera.position, controls.target).setY(0);
-    if (dir.lengthSq() < 0.01) dir.set(1, 0, 1);
-    dir.normalize().multiplyScalar(FOLLOW_DISTANCE);
-    tweenCamera(new THREE.Vector3(p.x + dir.x, FOLLOW_HEIGHT, p.z + dir.z), new THREE.Vector3(p.x, 0.6, p.z));
   }
+  controls.enableRotate = mode !== "follow";
+  controls.enablePan = mode !== "follow";
   lastRobotPos = robotAvatar.position.clone();
+}
+
+// Point on the current route at a given distance from its start (clamped).
+function pointOnPath(distance) {
+  if (currentPath.length < 2) return null;
+  const total = pathLengths[pathLengths.length - 1];
+  const d = THREE.MathUtils.clamp(distance, 0, total);
+  let seg = 0;
+  while (seg < currentPath.length - 2 && pathLengths[seg + 1] < d) seg++;
+  const len = pathLengths[seg + 1] - pathLengths[seg];
+  const t = len > 0 ? (d - pathLengths[seg]) / len : 0;
+  const a = currentPath[seg];
+  const b = currentPath[seg + 1];
+  return new THREE.Vector3(a.x + (b.x - a.x) * t, 0, a.z + (b.z - a.z) * t);
+}
+
+// Eye-height camera behind the robot, smoothly following.
+function updateFollowCamera(dt) {
+  const r = robotAvatar.position;
+  const heading = new THREE.Vector3(Math.sin(robotAvatar.rotation.y), 0, Math.cos(robotAvatar.rotation.y));
+  let behind = null;
+  if (currentPath.length > 1) {
+    const travelled = navProgress * pathLengths[pathLengths.length - 1];
+    if (travelled > FOLLOW_BACK * 0.5) behind = pointOnPath(travelled - FOLLOW_BACK);
+  }
+  if (!behind) behind = new THREE.Vector3(r.x, 0, r.z).addScaledVector(heading, -FOLLOW_BACK);
+  const wantPos = new THREE.Vector3(behind.x, FOLLOW_EYE, behind.z);
+  const wantTarget = new THREE.Vector3(r.x, 0.9, r.z).addScaledVector(heading, FOLLOW_LOOK_AHEAD);
+  const k = 1 - Math.exp(-dt * 3.5);
+  camera.position.lerp(wantPos, k);
+  controls.target.lerp(wantTarget, k);
 }
 
 function resetView() {
@@ -1407,12 +1554,7 @@ function animate() {
     if (navProgress >= 1) onArrival();
   }
 
-  // Follow mode: move camera and pivot with the robot, keep the user's zoom/rotation.
-  if (cameraMode === "follow" && lastRobotPos && !camTween) {
-    const delta = new THREE.Vector3().subVectors(robotAvatar.position, lastRobotPos);
-    camera.position.add(delta);
-    controls.target.add(delta);
-  }
+  if (cameraMode === "follow" && !camTween) updateFollowCamera(dt);
   lastRobotPos = robotAvatar.position.clone();
 
   updateCameraTween();
@@ -1420,6 +1562,10 @@ function animate() {
   if (!freeCam.active) {
     clampTarget();
     controls.update();
+  }
+  if (now - lastDeclutter > 120) {
+    declutterLabels();
+    lastDeclutter = now;
   }
   renderer.render(scene, camera);
 }
@@ -1443,6 +1589,8 @@ function setupOmnibar() {
     const q = text.trim();
     if (!q) return;
     box.style.display = "none";
+    input.value = "";
+    addMessage("user", q);
     const lower = q.toLowerCase();
     const asset = findAsset(q);
     if (/(need|needs|require).*(attention|maintenance)|degraded|priorit|faulty|worst|critical/.test(lower) && !asset) {
@@ -1451,19 +1599,26 @@ function setupOmnibar() {
       if (!sidebarOpen) toggleLeftSidebar();
       const worst = assetsData.filter(function (a) { return assetState(a) !== "healthy"; })
         .sort(function (a, b) { return a.state.health_score - b.state.health_score; });
-      showToast(worst.length + " assets need attention — worst: " + worst.slice(0, 3).map(function (a) { return a.tag; }).join(", "));
+      addMessage("ai", worst.length + " assets need attention. Worst first: " + worst.slice(0, 5).map(function (a) {
+        return a.tag + " (" + Math.round(a.state.health_score) + "%)";
+      }).join(", ") + ". They are listed on the left under Needs attention.");
       if (worst[0]) selectAndFocus(worst[0].asset_id);
       return;
     }
     if (asset && /(where|show|find|locate|highlight)/.test(lower)) {
       selectAndFocus(asset.asset_id);
+      addMessage("ai", asset.tag + " (" + prettyClass(asset.asset_class) + ") is in " + (asset.area_name || "the boiler room") +
+        " — the camera is now on it. Synthetic mapping to a detected 3D object.");
       return;
     }
     if (asset && /(route|reach|go to|navigate|walk|path)/.test(lower)) {
       loadRoute(asset.asset_id).then(function (ok) {
         if (ok) {
           showSelection(asset.asset_id);
-          showToast("Route to " + asset.tag + " ready — press Start inspection");
+          renderAssetList(filteredAssets());
+          addMessage("ai", "Route to " + asset.tag + ": " + pathLengths[pathLengths.length - 1].toFixed(1) +
+            " m, collision-free. The robot is walking there.");
+          toggleNavigation();
         }
       });
       return;
@@ -1473,7 +1628,6 @@ function setupOmnibar() {
     if (!copilotOpen) toggleCopilotDrawer();
     selectedId = target;
     refreshFrameStyles();
-    document.getElementById("copilot-question").value = q;
     runCopilotDiagnosis(target, q);
   }
 
@@ -1540,73 +1694,48 @@ function setupToolbar() {
     navSpeed = parseFloat(e.target.value);
     setText("speed-val", navSpeed.toFixed(1) + "x");
   };
-  document.getElementById("btn-cam-orbit").onclick = function () { setCameraMode("orbit"); };
+  document.getElementById("btn-cam-orbit").onclick = resetView;
   document.getElementById("btn-cam-follow").onclick = function () { setCameraMode("follow"); };
   document.getElementById("btn-cam-top").onclick = function () { setCameraMode("top"); };
-  document.getElementById("btn-cam-reset").onclick = resetView;
   document.querySelectorAll(".render-mode-btn[data-view]").forEach(function (b) {
     b.onclick = function () {
+      closeMenus();
+      if (renderMode === "heat") applyRenderMode("splat");
       if (b.dataset.view !== viewKind) loadSceneModel(b.dataset.view);
     };
   });
   document.getElementById("btn-heat").onclick = function () {
-    if (renderMode !== "heat" && viewKind === "splat") {
-      renderMode = "heat"; // height colouring needs the point or mesh view
+    closeMenus();
+    if (viewKind === "splat") {
+      renderMode = "heat"; // height colouring needs the point view
       loadSceneModel("points");
       return;
     }
     applyRenderMode(renderMode === "heat" ? "splat" : "heat");
   };
-  document.getElementById("btn-all-frames").onclick = function (e) {
-    showAllFrames = !showAllFrames;
-    e.currentTarget.classList.toggle("active", showAllFrames);
-    refreshFrameStyles();
-    showToast(showAllFrames ? "Showing all " + framesData.length + " extracted frames" : "Showing target, selection and nearby frames");
-  };
 
-  const more = document.getElementById("more-dropdown");
-  document.getElementById("btn-more").onclick = function (e) {
-    e.stopPropagation();
-    more.classList.toggle("open");
-  };
-  document.addEventListener("click", function () {
-    more.classList.remove("open");
-  });
+  function menu(buttonId, dropdownId) {
+    const dd = document.getElementById(dropdownId);
+    document.getElementById(buttonId).onclick = function (e) {
+      e.stopPropagation();
+      const open = !dd.classList.contains("open");
+      closeMenus();
+      dd.classList.toggle("open", open);
+    };
+  }
+  menu("btn-view-menu", "view-dropdown");
+  menu("btn-more", "more-dropdown");
+  document.addEventListener("click", closeMenus);
   document.getElementById("btn-cam-free").onclick = enterFreeCamera;
   document.getElementById("btn-vision-analyze").onclick = analyzeCurrentView;
   document.getElementById("btn-semantic-extract").onclick = rerunExtraction;
-
-  document.getElementById("btn-ask-copilot").onclick = askCopilot;
-  document.getElementById("copilot-question").onkeydown = function (e) {
-    if (e.key === "Enter") askCopilot();
-  };
-  document.getElementById("btn-submit-wo").onclick = draftWorkOrder;
   document.getElementById("asset-search").oninput = function () {
     renderAssetList(filteredAssets());
   };
 }
 
-function askCopilot() {
-  const question = document.getElementById("copilot-question").value.trim();
-  if (!question) return;
-  const frame = framesById.get(selectedId);
-  const target = frame && !frame.asset_id ? routeTargetId : selectedId || routeTargetId;
-  runCopilotDiagnosis(target, question);
-}
-
-async function draftWorkOrder() {
-  const frame = framesById.get(selectedId);
-  const target = frame && !frame.asset_id ? routeTargetId : selectedId || routeTargetId;
-  try {
-    const wo = await fetchJson("/api/work-orders/draft", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ asset_id: target }),
-    });
-    showToast("Draft " + (wo.work_order_id || "") + " created for review (not submitted)");
-  } catch (err) {
-    showToast("Work order: " + err.message);
-  }
+function closeMenus() {
+  document.querySelectorAll(".more-dropdown.open").forEach(function (d) { d.classList.remove("open"); });
 }
 
 async function rerunExtraction() {
@@ -1628,22 +1757,10 @@ function setupHelp() {
     document.getElementById("help-card").classList.add("open");
   };
   document.getElementById("btn-help-close").onclick = hideHelp;
-  let seen = false;
-  try {
-    seen = localStorage.getItem("ayf-help-seen") === "1";
-  } catch (e) {
-    seen = false;
-  }
-  if (!seen) document.getElementById("help-card").classList.add("open");
 }
 
 function hideHelp() {
   document.getElementById("help-card").classList.remove("open");
-  try {
-    localStorage.setItem("ayf-help-seen", "1");
-  } catch (e) {
-    /* storage unavailable */
-  }
 }
 
 function setStep(n) {
@@ -1743,7 +1860,7 @@ function showToast(msg) {
   t.classList.add("show");
   setTimeout(function () {
     t.classList.remove("show");
-  }, 3500);
+  }, 2500);
 }
 
 function onWindowResize() {
