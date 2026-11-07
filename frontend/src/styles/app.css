@@ -1103,7 +1103,7 @@ body.debug .debug-only { display: block; }
 
 /* ===================== Asset modal + chat box ===================== */
 :root {
-  --modal-z: 50;
+  --modal-z: 70;
   --modal-height: min(480px, calc(100vh - 64px));
   --evidence-height: 180px;
   --chat-z: 60;

@@ -103,7 +103,7 @@
             <li><b>Click a label</b> in 3D to open that asset's details without walking.</li>
           </ol>
           <div class="help-mouse">Follow robot: drag = turn around the robot · wheel = zoom · Top: plan view, drag = pan · click = walk / inspect. The faint blue floor is where the robot can walk.</div>
-          <div class="help-mouse">Chat (bottom right): on the floor ask “Where is M-006?”, “Which assets need attention?”; with an asset open ask “Why is it flagged?”.</div>
+          <div class="help-mouse">Chat (bottom right): “Where is M-006?”, “Which assets need attention?”, “Why is P-005 flagged?”</div>
           <button class="btn" id="btn-help-close">Got it</button>
         </div>
 
@@ -149,14 +149,14 @@
     <button class="chat-fab" id="btn-chat" title="Ask the factory" aria-label="Open the chat">💬</button>
     <section class="chat-panel" id="chat-panel" hidden aria-label="Chat">
       <div class="chat-head">
-        <span class="chat-context" id="chat-context">Plant floor</span>
+        <span class="chat-context">Ask the factory</span>
         <button class="chat-close" id="btn-chat-close" title="Close">×</button>
       </div>
       <div class="cp-thread" id="cp-thread"></div>
       <div class="chat-input-wrap">
         <div class="omnibar-suggestions" id="omnibar-suggestions"></div>
         <div class="chat-input-row">
-          <input type="text" class="chat-input" id="omnibar-input" placeholder="Ask about the plant floor…" />
+          <input type="text" class="chat-input" id="omnibar-input" placeholder="Where is M-006? Why is P-005 flagged?" />
           <button class="chat-send" id="omnibar-submit" title="Ask">↵</button>
         </div>
       </div>

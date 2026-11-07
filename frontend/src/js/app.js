@@ -47,11 +47,8 @@ let sidebarOpen = true;
 
 const ROBOT_GROUND_OFFSET = 0.15;
 const MAX_THREAD_MESSAGES = 30;
-// Chat context: questions that move around the floor vs. questions about one asset's data.
-const NAVIGATION_PATTERN = /\b(route|take me|go to|walk|navigate|path|where is|where am i|near(by)?|attention|which assets)\b/;
 const WALK_RECAP_PATTERN = /\b(on the way|passed|along the (way|route)|during the walk)\b/;
 const HEALTHY_WORD_PATTERN = /\bhealthy\b/;
-const ASSET_DETAIL_PATTERN = /\b(why|flag|diagnos|connected|maintenance|install|service|telemetry|evidence|fault|problem|repair|health)/;
 const PROXIMITY_RADIUS = 1.5;
 const MAX_NEAR_LABELS = 4;
 const XRAY_POINT_SIZE = 0.035;
@@ -1119,9 +1116,6 @@ function answerWalkRecap(lower) {
     addMessage("ai", "None of the " + passed.length + " assets on the way match. " + walkSummary());
     return;
   }
-  if (openAssetId()) {
-    closeAssetModal();
-  }
   highlightAssets(matching);
   addMessage("ai", recapLine(matching, wantHealthy), tagsOf(matching));
 }
@@ -1237,16 +1231,13 @@ function showSelection(id) {
   });
 }
 
-// The asset modal covers the screen: scan render on the left, diagnosis on the right.
-// While it is open the chat is about this asset.
+// The asset modal covers the screen, chat included: scan render on the left, diagnosis on the right.
 function openAssetModal(id) {
   const frame = framesById.get(id);
   const modal = document.getElementById("asset-modal");
   showSelection(id);
   modal.dataset.assetId = id;
   modal.hidden = false;
-  minimizeChat();
-  setChatContext();
   renderAssetImage(frame);
   if (frame && !frame.asset_id) {
     renderStructureCard(frame);
@@ -1259,10 +1250,9 @@ function closeAssetModal() {
   const modal = document.getElementById("asset-modal");
   modal.hidden = true;
   delete modal.dataset.assetId;
-  setChatContext();
 }
 
-// The asset the chat is about, or null on the plant floor.
+// The asset shown in the modal, or null when it is closed.
 function openAssetId() {
   const modal = document.getElementById("asset-modal");
   if (modal.hidden) {
@@ -2130,10 +2120,11 @@ function setupOmnibar() {
       answerWalkRecap(q.toLowerCase());
       return;
     }
-    if (isWrongContext(q, findAsset(q))) {
-      return;
+    const named = findAsset(q);
+    let currentTarget = "";
+    if (named) {
+      currentTarget = named.asset_id;
     }
-    const currentTarget = openAssetId() || "";
 
     const thinking = addMessage("ai", "Processing command…");
     try {
@@ -2144,12 +2135,8 @@ function setupOmnibar() {
       });
       thinking.remove();
 
-      const action = resp.action || "diagnose";
       const targetId = resp.target_asset_id || resp.asset_id;
-
-      if (!currentTarget) {
-        runFloorAction(action, targetId);
-      }
+      runFloorAction(resp.action, targetId);
 
       const answerText = resp.answer || resp.diagnosis_summary || resp.diagnosis || "Command executed.";
       const citations = resp.citations || [];
@@ -2163,11 +2150,6 @@ function setupOmnibar() {
         .slice(0, 6);
 
       addMessage("ai", answerText, ids);
-
-      if (currentTarget && targetId === currentTarget) {
-        const dossier = await fetchJson("/api/assets/" + encodeURIComponent(targetId));
-        updateAssetModal(dossier, resp);
-      }
     } catch (err) {
       thinking.remove();
       addMessage("ai", "Copilot error: " + err.message);
@@ -2207,7 +2189,8 @@ function setupOmnibar() {
   };
 }
 
-// Robot and camera actions proposed by the copilot; only on the plant floor.
+// Robot and camera actions proposed by the copilot. The answer stays readable in the chat,
+// so "diagnose" highlights the asset instead of opening the modal over it.
 function runFloorAction(action, targetId) {
   if (action === "reset") {
     resetRobot();
@@ -2221,66 +2204,12 @@ function runFloorAction(action, targetId) {
     return;
   }
   if (action === "diagnose") {
-    openAssetModal(targetId);
+    selectAndFocus(targetId);
     return;
   }
   if (action === "select") {
     selectAndFocus(targetId);
   }
-}
-
-// A question that belongs to the other context gets a notice instead of an answer.
-function isWrongContext(question, namedAsset) {
-  const lower = question.toLowerCase();
-  const assetId = openAssetId();
-  if (assetId) {
-    return isWrongInAssetMode(lower, namedAsset, assetId);
-  }
-  return isWrongOnFloor(lower, namedAsset);
-}
-
-function isWrongInAssetMode(lower, namedAsset, assetId) {
-  const tag = assetTag(assetId);
-  if (namedAsset && namedAsset.asset_id !== assetId) {
-    addMessage("ai", "This chat is about " + tag + ". Close it (Esc) to ask about " + namedAsset.tag + ".");
-    return true;
-  }
-  if (NAVIGATION_PATTERN.test(lower)) {
-    addMessage("ai", "You are looking at " + tag + ". Close it (Esc) to move around or search the plant floor.");
-    return true;
-  }
-  return false;
-}
-
-function isWrongOnFloor(lower, namedAsset) {
-  if (!isAssetDetailQuestion(lower)) {
-    return false;
-  }
-  if (namedAsset) {
-    addMessage("ai", "That is a question about " + namedAsset.tag + ". Opening its details; ask it there.");
-    openAssetModal(namedAsset.asset_id);
-    return true;
-  }
-  addMessage("ai", "Open an asset first: click its label in 3D or its card on the left, then ask.");
-  return true;
-}
-
-// Navigation wording wins: "which assets need maintenance" is a floor question.
-function isAssetDetailQuestion(lower) {
-  if (NAVIGATION_PATTERN.test(lower)) {
-    return false;
-  }
-  return ASSET_DETAIL_PATTERN.test(lower);
-}
-
-function assetTag(assetId) {
-  const asset = assetsData.find(function (a) {
-    return a.asset_id === assetId;
-  });
-  if (asset) {
-    return asset.tag;
-  }
-  return assetId;
 }
 
 function setupChat() {
@@ -2300,7 +2229,6 @@ function setupChat() {
       closeAssetModal();
     }
   });
-  setChatContext();
 }
 
 // The round button and the chat box share the bottom-right corner: one shows at a time.
@@ -2315,30 +2243,10 @@ function toggleChat() {
   }
 }
 
-function minimizeChat() {
-  if (!document.getElementById("chat-panel").hidden) {
-    toggleChat();
-  }
-}
-
 function markUnreadIfClosed() {
   if (document.getElementById("chat-panel").hidden) {
     document.getElementById("btn-chat").classList.add("has-unread");
   }
-}
-
-// The chat header and placeholder say what the chat is about right now.
-function setChatContext() {
-  const assetId = openAssetId();
-  const input = document.getElementById("omnibar-input");
-  if (assetId) {
-    const tag = assetTag(assetId);
-    setText("chat-context", "Asking about " + tag);
-    input.placeholder = "Ask about " + tag + ": why flagged, maintenance, evidence…";
-    return;
-  }
-  setText("chat-context", "Plant floor");
-  input.placeholder = "Where is M-006? Which assets need attention?";
 }
 
 // ---------------------------------------------------------------- panels, toolbar, help
