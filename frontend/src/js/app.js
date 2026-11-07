@@ -21,7 +21,9 @@ const framesById = new Map(); // frame id (asset id when mapped, else OBJ-xxx) -
 let sceneSummary = null;
 let roomBounds = { x: [-5, 5], z: [-3, 3], ceiling: 3 };
 
-let routeTargetId = null; // the inspection target (does NOT change when you just select something)
+let routeTargetId = null; // where the robot is (or was last) heading: an asset id, or "POINT"
+let faultTargetId = null; // the pre-determined faulty device (pinned card); never changes
+let goalMarker = null;
 let selectedId = null; // what the copilot panel shows
 let nearbyIds = new Set();
 let nearLabelIds = new Set(); // the few nearest assets that get a label (keeps the view readable)
@@ -33,7 +35,7 @@ let currentPath = [];
 let pathLengths = [0];
 let navProgress = 0;
 let isNavigating = false;
-let navSpeed = 1.5;
+const navSpeed = 1.5; // fixed, comfortable walking pace
 let lastFrameTime = performance.now();
 let cameraMode = "orbit"; // "orbit" | "follow" | "top" | "free"
 let lastRobotPos = null;
@@ -637,19 +639,19 @@ async function fetchSceneData() {
       framesById.set(f.id, f);
     });
 
-    routeTargetId = summary.target_asset_id;
-    selectedId = routeTargetId;
+    faultTargetId = summary.target_asset_id;
+    routeTargetId = faultTargetId;
+    selectedId = faultTargetId;
     robotAvatar.position.set(summary.entry.x, ROBOT_GROUND_OFFSET, summary.entry.z);
     lastRobotPos = robotAvatar.position.clone();
 
     document.getElementById("asset-count").innerText =
-      frames.length + " frames · " + (summary.mapped_asset_count || 0) + " assets";
+      frames.length + " objects · " + (summary.mapped_asset_count || 0) + " mapped";
 
     buildFrames(frames);
     renderAssetList(assetsData);
-    await loadRoute(routeTargetId);
-    showSelection(routeTargetId);
-    setStep(1);
+    await previewRoute(faultTargetId);
+    showSelection(faultTargetId);
   } catch (e) {
     console.error("Scene data error", e);
     showToast("Could not load the scene data: " + e.message);
@@ -742,7 +744,7 @@ function refreshFrameStyles() {
   boundingFramesGroup.children.forEach(function (box) {
     const u = box.userData;
     const f = u.frame;
-    const isTarget = f.id === routeTargetId;
+    const isTarget = f.id === faultTargetId || f.id === routeTargetId;
     const isSelected = f.id === selectedId;
     const isNear = nearbyIds.has(f.id);
     let line = 0;
@@ -810,18 +812,44 @@ function declutterLabels() {
 
 // ---------------------------------------------------------------- route & robot
 
-async function loadRoute(targetId) {
+// Fetch a collision-free route. dest = {assetId} or {goal: [x, z]}; from the robot unless atEntry.
+async function fetchRoute(dest, atEntry) {
+  const params = new URLSearchParams();
+  if (dest.goal) {
+    params.set("goal_x", dest.goal[0].toFixed(3));
+    params.set("goal_z", dest.goal[1].toFixed(3));
+  } else {
+    params.set("target_id", dest.assetId);
+  }
+  if (!atEntry) {
+    params.set("start_x", robotAvatar.position.x.toFixed(3));
+    params.set("start_z", robotAvatar.position.z.toFixed(3));
+  }
+  return fetchJson("/api/navigation/path?" + params.toString());
+}
+
+function useRoute(data) {
+  currentPath = data.waypoints;
+  pathLengths = cumulativeLengths(currentPath);
+  routeTargetId = data.target_id;
+  navProgress = 0;
+  renderPathRibbon(currentPath);
+  setHud(data.target_id === "POINT" ? "Walking to a floor point" : "Target: " + (data.target_tag || data.target_id),
+    data.total_distance_m + " m");
+  refreshFrameStyles();
+  renderTargetCard();
+}
+
+function setHud(name, dist) {
+  setText("hud-target-name", name);
+  setText("hud-dist", dist);
+  document.getElementById("hud-nav-fill").style.width = "0%";
+}
+
+// Route from the door to an asset, drawn on the floor; the robot does not move yet.
+async function previewRoute(assetId) {
   try {
-    const data = await fetchJson("/api/navigation/path?target_id=" + encodeURIComponent(targetId));
-    currentPath = data.waypoints;
-    pathLengths = cumulativeLengths(currentPath);
-    routeTargetId = data.target_id || targetId;
-    document.getElementById("hud-target-name").innerText = "Target: " + (data.target_tag || targetId);
-    document.getElementById("hud-dist").innerText = data.total_distance_m + " m";
-    renderPathRibbon(currentPath);
-    resetRobot();
-    refreshFrameStyles();
-    renderTargetCard();
+    useRoute(await fetchRoute({ assetId: assetId }, true));
     return true;
   } catch (err) {
     showToast("No collision-free route: " + err.message);
@@ -858,63 +886,86 @@ function renderPathRibbon(waypoints) {
   scene.add(pathLineMesh);
 }
 
+// Reset: robot back at the door, route to the faulty device previewed again.
 function resetRobot() {
   isNavigating = false;
   navProgress = 0;
-  document.getElementById("nav-btn-text").innerHTML = "▶ Start inspection";
-  document.getElementById("hud-nav-fill").style.width = "0%";
-  if (currentPath.length > 0) {
-    robotAvatar.position.set(currentPath[0].x, ROBOT_GROUND_OFFSET, currentPath[0].z);
-    if (currentPath.length > 1) {
-      robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
-    }
+  if (sceneSummary) {
+    robotAvatar.position.set(sceneSummary.entry.x, ROBOT_GROUND_OFFSET, sceneSummary.entry.z);
   }
   lastRobotPos = robotAvatar.position.clone();
   nearbyIds = new Set();
   nearLabelIds = new Set();
+  if (goalMarker) goalMarker.visible = false;
   renderNearby([]);
-  refreshFrameStyles();
-  setStep(1);
+  if (cameraMode === "follow") resetView();
+  if (faultTargetId) {
+    previewRoute(faultTargetId).then(function () {
+      if (currentPath.length > 1) {
+        robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
+      }
+    });
+  }
 }
 
-function toggleNavigation() {
+// Start walking along the current route (from where the robot stands).
+function startWalking() {
   if (currentPath.length < 2) {
-    showToast("No route loaded yet");
+    onArrival();
     return;
   }
-  if (navProgress >= 1.0) {
-    resetRobot();
-  }
-  isNavigating = !isNavigating;
-  document.getElementById("nav-btn-text").innerHTML = isNavigating ? "❚❚ Pause" : "▶ Resume";
-  if (isNavigating) {
-    setStep(2);
-    groupOpen.near = true;
-    if (!sidebarOpen) toggleLeftSidebar();
-    if (cameraMode === "orbit" || cameraMode === "top") {
-      setCameraMode("follow");
-    }
-    hideHelp();
-  }
+  navProgress = 0;
+  isNavigating = true;
+  groupOpen.near = true;
+  if (!sidebarOpen) toggleLeftSidebar();
+  hideHelp();
 }
 
+// "Go" (target card), "Route here" (any asset) and chat "take me to …": walk there now.
 async function goTo(assetId) {
-  if (await loadRoute(assetId)) {
-    renderAssetList(filteredAssets());
-    showSelection(assetId);
-    toggleNavigation();
+  try {
+    useRoute(await fetchRoute({ assetId: assetId }, false));
+  } catch (err) {
+    showToast("No collision-free route: " + err.message);
+    return false;
   }
+  if (goalMarker) goalMarker.visible = false;
+  renderAssetList(filteredAssets());
+  showSelection(assetId);
+  startWalking();
+  return true;
+}
+
+// Click on the floor: walk to that point (snapped to walkable space by the backend).
+async function walkToPoint(x, z) {
+  try {
+    useRoute(await fetchRoute({ goal: [x, z] }, false));
+  } catch (err) {
+    showToast("Can't walk there: " + err.message);
+    return;
+  }
+  showGoalMarker(routeTargetId === "POINT" && currentPath.length ? currentPath[currentPath.length - 1] : { x: x, z: z });
+  startWalking();
+}
+
+function showGoalMarker(p) {
+  if (!goalMarker) {
+    const geo = new THREE.RingGeometry(0.12, 0.18, 32);
+    geo.rotateX(-Math.PI / 2);
+    goalMarker = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+    scene.add(goalMarker);
+  }
+  goalMarker.position.set(p.x, 0.03, p.z);
+  goalMarker.visible = true;
 }
 
 function onArrival() {
   isNavigating = false;
-  document.getElementById("nav-btn-text").innerHTML = "↻ Run again";
-  setStep(3);
+  document.getElementById("hud-nav-fill").style.width = "100%";
+  if (routeTargetId === "POINT") return; // walked to a floor point: nothing to diagnose
   const frame = framesById.get(routeTargetId);
-  showToast("Arrived at " + (frame ? frame.tag : routeTargetId) + " — AI diagnosis");
-  if (!copilotOpen) {
-    toggleCopilotDrawer();
-  }
+  showToast("Arrived at " + (frame ? frame.tag : routeTargetId) + " — diagnosis on the right");
+  if (!copilotOpen) toggleCopilotDrawer();
   showSelection(routeTargetId);
   if (frame) {
     if (cameraMode === "follow") setCameraMode("orbit");
@@ -1195,19 +1246,20 @@ function renderDetectedGroup(list) {
 // Pinned inspection target at the top of the left column.
 function renderTargetCard() {
   const el = document.getElementById("target-card");
-  const a = assetsData.find(function (x) { return x.asset_id === routeTargetId; });
+  const a = assetsData.find(function (x) { return x.asset_id === faultTargetId; });
   if (!a) {
     el.innerHTML = "";
     return;
   }
   const state = assetState(a);
-  const dist = currentPath.length > 1 ? pathLengths[pathLengths.length - 1].toFixed(1) + " m" : "";
+  const heading = routeTargetId === faultTargetId && currentPath.length > 1;
+  const dist = heading ? "Route " + pathLengths[pathLengths.length - 1].toFixed(1) + " m" : "Faulty device";
   el.innerHTML =
-    '<div class="target-label">Inspection target</div>' +
+    '<div class="target-label">Inspection target · faulty device</div>' +
     '<div class="target-row"><span class="status-dot status-' + dotClass(state) + '"></span><b>' + escapeHtml(a.tag) + "</b>" +
     "<span>" + escapeHtml(prettyClass(a.asset_class)) + "</span>" +
     '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(a.state ? a.state.health_score : 100) + "%</span></div>" +
-    '<div class="target-row"><span class="muted">Route ' + dist + '</span><button class="btn" id="btn-target-go">Go ▶</button></div>';
+    '<div class="target-row"><span class="muted">' + dist + '</span><button class="btn" id="btn-target-go">Go ▶</button></div>';
   el.querySelector(".target-row").onclick = function () { selectAndFocus(a.asset_id); };
   document.getElementById("btn-target-go").onclick = function (e) {
     e.stopPropagation();
@@ -1370,9 +1422,16 @@ function setupViewportPicking() {
     raycaster.setFromCamera(mouse, camera);
   }
 
+  // Only labels on screen and highlighted frames are clickable, so the floor stays clickable.
   function frameHit() {
-    const shown = boundingFramesGroup.children.filter(function (b) { return b.userData.shown; });
-    const hits = raycaster.intersectObjects(shown, true);
+    const clickable = [];
+    boundingFramesGroup.children.forEach(function (b) {
+      const u = b.userData;
+      if (!b.visible) return;
+      if (u.label && u.label.visible && u.label.material.opacity > 0) clickable.push(u.label);
+      if (u.fillMat.opacity > 0 || (showAllFrames && u.shown)) clickable.push(b.children[0]);
+    });
+    const hits = raycaster.intersectObjects(clickable, false);
     for (const hit of hits) {
       let obj = hit.object;
       while (obj && !(obj.userData && obj.userData.frame) && obj.parent) obj = obj.parent;
@@ -1393,21 +1452,11 @@ function setupViewportPicking() {
     if (hit) {
       showSelection(hit.frame.id);
       if (!copilotOpen) toggleCopilotDrawer();
-    }
-  });
-  renderer.domElement.addEventListener("dblclick", function (e) {
-    if (freeCam.active) return;
-    pick(e);
-    const hit = frameHit();
-    if (hit) {
-      focusOn(hit.frame.pos, hit.frame.size);
       return;
     }
-    if (sceneModel) {
-      const hits = raycaster.intersectObject(sceneModel, false);
-      if (hits.length > 0) {
-        focusOn([hits[0].point.x, hits[0].point.y, hits[0].point.z], [0.6, 0.6, 0.6]);
-      }
+    const floor = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), floor)) {
+      walkToPoint(floor.x, floor.z);
     }
   });
 }
@@ -1612,19 +1661,16 @@ function setupOmnibar() {
       return;
     }
     if (asset && /(route|reach|go to|navigate|walk|path)/.test(lower)) {
-      loadRoute(asset.asset_id).then(function (ok) {
+      goTo(asset.asset_id).then(function (ok) {
         if (ok) {
-          showSelection(asset.asset_id);
-          renderAssetList(filteredAssets());
-          addMessage("ai", "Route to " + asset.tag + ": " + pathLengths[pathLengths.length - 1].toFixed(1) +
-            " m, collision-free. The robot is walking there.");
-          toggleNavigation();
+          addMessage("ai", "Walking to " + asset.tag + ": " + pathLengths[pathLengths.length - 1].toFixed(1) +
+            " m, collision-free route. The diagnosis opens on arrival.");
         }
       });
       return;
     }
     // Everything else goes to the AI copilot about the named (or selected) asset.
-    const target = asset ? asset.asset_id : selectedId && framesById.get(selectedId) && framesById.get(selectedId).asset_id ? selectedId : routeTargetId;
+    const target = asset ? asset.asset_id : selectedId && framesById.get(selectedId) && framesById.get(selectedId).asset_id ? selectedId : faultTargetId;
     if (!copilotOpen) toggleCopilotDrawer();
     selectedId = target;
     refreshFrameStyles();
@@ -1688,12 +1734,7 @@ function toggleCopilotDrawer() {
 }
 
 function setupToolbar() {
-  document.getElementById("btn-start-nav").onclick = toggleNavigation;
   document.getElementById("btn-reset-nav").onclick = resetRobot;
-  document.getElementById("speed-slider").oninput = function (e) {
-    navSpeed = parseFloat(e.target.value);
-    setText("speed-val", navSpeed.toFixed(1) + "x");
-  };
   document.getElementById("btn-cam-orbit").onclick = resetView;
   document.getElementById("btn-cam-follow").onclick = function () { setCameraMode("follow"); };
   document.getElementById("btn-cam-top").onclick = function () { setCameraMode("top"); };
@@ -1763,13 +1804,7 @@ function hideHelp() {
   document.getElementById("help-card").classList.remove("open");
 }
 
-function setStep(n) {
-  document.querySelectorAll("#steps .step").forEach(function (li) {
-    const s = Number(li.dataset.step);
-    li.classList.toggle("active", s === n);
-    li.classList.toggle("done", s < n);
-  });
-}
+
 
 // ---------------------------------------------------------------- YOLO (secondary)
 

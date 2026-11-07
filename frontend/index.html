@@ -29,21 +29,12 @@
         <span class="ask-your-factory-logo">ASK YOUR FACTORY</span>
       </div>
 
-      <ol class="steps" id="steps" aria-label="Inspection steps">
-        <li class="step active" data-step="1"><b>1</b> Scene &amp; target</li>
-        <li class="step" data-step="2"><b>2</b> Walk &amp; nearby assets</li>
-        <li class="step" data-step="3"><b>3</b> AI diagnosis</li>
-      </ol>
+      <div class="hint-line" id="hint-line">
+        Click the floor to walk · click a label to inspect · <b>Go</b> on the target card visits the faulty device
+      </div>
 
       <div class="header-right">
-        <button class="btn" id="btn-start-nav">
-          <span id="nav-btn-text">▶ Start inspection</span>
-        </button>
-        <button class="btn-secondary" id="btn-reset-nav" title="Robot back to the entry">↺ Reset</button>
-        <label class="speed" title="Walking speed">
-          <span id="speed-val">1.5x</span>
-          <input type="range" id="speed-slider" min="0.5" max="4.0" step="0.5" value="1.5" />
-        </label>
+        <button class="btn-secondary" id="btn-reset-nav" title="Robot back to the door">↺ Reset</button>
         <button class="icon-btn" id="btn-help" title="How to use">?</button>
         <a class="api-link" href="/docs" target="_blank">API</a>
       </div>
@@ -116,11 +107,12 @@
         <div class="help-card" id="help-card">
           <div class="help-title">How to use</div>
           <ol>
-            <li><b>Start inspection</b> (or <b>Go</b> on the target card) — the robot walks a collision-free route to the faulty device (red frame).</li>
-            <li>Assets the robot passes are listed under <b>Near the robot</b> on the left.</li>
-            <li>On arrival the <b>diagnosis</b> opens on the right, with the evidence behind it.</li>
+            <li><b>Go</b> on the target card (top left) — the robot walks a collision-free route from the door to the faulty device.</li>
+            <li><b>Click the floor</b> to walk anywhere; <b>Route here</b> on any asset walks to it.</li>
+            <li>Assets the robot passes are listed under <b>Near the robot</b>; on arrival the <b>diagnosis</b> opens on the right.</li>
+            <li><b>Click a label</b> in 3D to see that asset's diagnosis without walking.</li>
           </ol>
-          <div class="help-mouse">Mouse: drag = rotate · wheel = zoom · right-drag = pan · double-click = focus · click a label = details</div>
+          <div class="help-mouse">Mouse: drag = rotate · wheel = zoom · right-drag = pan · click = walk / inspect</div>
           <div class="help-mouse">Ask in the bar below: “Why is P-005 flagged?”, “Which assets need attention?”, “Where is M-006?”</div>
           <button class="btn" id="btn-help-close">Got it</button>
         </div>
