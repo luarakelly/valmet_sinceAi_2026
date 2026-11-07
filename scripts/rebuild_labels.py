@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend" / "src"))
 
 from infra.importers.workbook.dataset import get_dataset  # noqa: E402
+from infra.labeling.colour_items import find_colour_tanks  # noqa: E402
 from infra.labeling.pack_coverage import coverage_report  # noqa: E402
 from infra.labeling.rebuild import rebuild_objects  # noqa: E402
 from infra.labeling.semantic_objects import read_semantic_objects, write_json_atomically, write_semantic_objects  # noqa: E402
@@ -27,7 +28,7 @@ from infra.paths import (  # noqa: E402
     VIEW_ANNOTATIONS_PATH,
 )
 from infra.spatial.point_cloud import load_scene_cloud  # noqa: E402
-from infra.spatial.segmentation import detect_room  # noqa: E402
+from infra.spatial.segmentation import detect_room, extract_objects  # noqa: E402
 
 MATRIX_VALUES = 16
 
@@ -37,7 +38,8 @@ def main() -> None:
         sys.exit("Missing {}. Draw boxes first (see README: Automatic semantic labels).".format(VIEW_ANNOTATIONS_PATH))
     projections, problems = _view_projections()
     cloud = load_scene_cloud()
-    result = rebuild_objects(cloud.xyz, detect_room(cloud), projections, VIEW_ANNOTATIONS_PATH, read_semantic_objects(MODEL_OBJECTS_PATH))
+    room = detect_room(cloud)
+    result = rebuild_objects(cloud.xyz, room, projections, VIEW_ANNOTATIONS_PATH, read_semantic_objects(MODEL_OBJECTS_PATH), extract_objects(cloud, room), find_colour_tanks(cloud.xyz, cloud.rgb))
     issues = problems + result.issues
     if not result.objects:
         _print_issues(issues)

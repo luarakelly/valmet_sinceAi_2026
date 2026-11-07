@@ -44,16 +44,16 @@
    "label": "CRATE",
    "asset_class": null,
    "center": [
-    -3.975,
-    0.56,
-    -3.111
+    -4.028,
+    0.53,
+    -3.079
    ],
    "size": [
-    0.418,
-    0.62,
-    0.578
+    0.375,
+    0.68,
+    0.659
    ],
-   "yaw": 1.536,
+   "yaw": 1.03,
    "point_count": 3238,
    "score": 0.5,
    "view_count": 2
@@ -63,16 +63,16 @@
    "label": "CRATE",
    "asset_class": null,
    "center": [
-    2.001,
-    0.23,
-    2.931
+    2.076,
+    0.31,
+    2.88
    ],
    "size": [
-    0.711,
-    0.28,
-    0.893
+    1.102,
+    0.42,
+    0.915
    ],
-   "yaw": 1.553,
+   "yaw": 0.017,
    "point_count": 2627,
    "score": 0.25,
    "view_count": 1
@@ -82,16 +82,16 @@
    "label": "CRATE",
    "asset_class": null,
    "center": [
-    3.233,
-    0.19,
-    -2.94
+    3.112,
+    0.315,
+    -2.977
    ],
    "size": [
-    0.441,
-    0.2,
-    0.506
+    0.314,
+    0.41,
+    0.534
    ],
-   "yaw": 0.157,
+   "yaw": 0.0,
    "point_count": 579,
    "score": 0.25,
    "view_count": 1
@@ -120,16 +120,16 @@
    "label": "CRATE",
    "asset_class": null,
    "center": [
-    4.065,
-    0.27,
-    1.845
+    4.073,
+    0.285,
+    1.703
    ],
    "size": [
-    0.872,
-    0.36,
-    0.462
+    0.53,
+    0.37,
+    0.834
    ],
-   "yaw": 0.192,
+   "yaw": 0.838,
    "point_count": 3794,
    "score": 0.75,
    "view_count": 3
@@ -139,16 +139,16 @@
    "label": "DOOR",
    "asset_class": null,
    "center": [
-    -0.646,
-    1.01,
-    3.471
+    -0.749,
+    1.11,
+    3.2
    ],
    "size": [
-    1.509,
-    1.78,
-    0.402
+    1.405,
+    1.88,
+    0.365
    ],
-   "yaw": 0.07,
+   "yaw": 0.0,
    "point_count": 37183,
    "score": 1.0,
    "view_count": 6
@@ -158,16 +158,16 @@
    "label": "ELECTRICAL_CABINET",
    "asset_class": null,
    "center": [
-    -4.42,
-    0.575,
-    0.485
+    -4.316,
+    0.645,
+    0.628
    ],
    "size": [
-    0.428,
-    0.95,
-    0.258
+    0.183,
+    0.99,
+    0.744
    ],
-   "yaw": 1.553,
+   "yaw": 0.0,
    "point_count": 2090,
    "score": 0.5,
    "view_count": 2
@@ -177,17 +177,17 @@
    "label": "ELECTRICAL_CABINET",
    "asset_class": null,
    "center": [
-    -4.405,
-    1.35,
-    2.007
+    -4.314,
+    1.065,
+    2.012
    ],
    "size": [
-    0.445,
-    0.94,
-    1.262
+    0.187,
+    1.07,
+    0.949
    ],
-   "yaw": 0.175,
-   "point_count": 7442,
+   "yaw": 0.0,
+   "point_count": 3087,
    "score": 0.5,
    "view_count": 2
   },
@@ -196,41 +196,22 @@
    "label": "ELECTRICAL_CABINET",
    "asset_class": null,
    "center": [
-    -4.32,
-    1.11,
-    -0.447
+    -4.276,
+    1.05,
+    -0.37
    ],
    "size": [
-    0.604,
-    0.96,
-    0.321
+    0.227,
+    1.16,
+    0.72
    ],
-   "yaw": 1.536,
+   "yaw": 0.017,
    "point_count": 8392,
    "score": 0.5,
    "view_count": 2
   },
   {
    "object_id": "SEM-ELECTRICAL_CABINET-04",
-   "label": "ELECTRICAL_CABINET",
-   "asset_class": null,
-   "center": [
-    1.799,
-    0.89,
-    3.311
-   ],
-   "size": [
-    1.563,
-    1.02,
-    0.523
-   ],
-   "yaw": 0.524,
-   "point_count": 7651,
-   "score": 0.25,
-   "view_count": 1
-  },
-  {
-   "object_id": "SEM-ELECTRICAL_CABINET-05",
    "label": "ELECTRICAL_CABINET",
    "asset_class": null,
    "center": [
@@ -249,20 +230,20 @@
    "view_count": 5
   },
   {
-   "object_id": "SEM-ELECTRICAL_CABINET-06",
+   "object_id": "SEM-ELECTRICAL_CABINET-05",
    "label": "ELECTRICAL_CABINET",
    "asset_class": null,
    "center": [
-    4.276,
-    1.2,
-    1.217
+    4.22,
+    1.185,
+    1.144
    ],
    "size": [
-    0.506,
-    0.94,
-    0.204
+    0.318,
+    1.19,
+    0.624
    ],
-   "yaw": 1.553,
+   "yaw": 0.157,
    "point_count": 943,
    "score": 0.25,
    "view_count": 1
@@ -310,16 +291,16 @@
    "label": "PALLET",
    "asset_class": null,
    "center": [
-    -3.168,
+    -3.155,
     0.405,
-    1.894
+    2.044
    ],
    "size": [
-    1.153,
+    0.847,
     0.57,
-    0.693
+    1.187
    ],
-   "yaw": 0.506,
+   "yaw": 0.0,
    "point_count": 1814,
    "score": 0.25,
    "view_count": 1
@@ -329,14 +310,14 @@
    "label": "PALLET",
    "asset_class": null,
    "center": [
-    -2.398,
-    0.29,
-    2.073
+    -2.386,
+    0.285,
+    2.064
    ],
    "size": [
-    0.399,
-    0.42,
-    0.279
+    0.375,
+    0.37,
+    0.251
    ],
    "yaw": 1.396,
    "point_count": 1136,
@@ -349,15 +330,15 @@
    "asset_class": null,
    "center": [
     -2.27,
-    0.775,
+    0.79,
     2.173
    ],
    "size": [
-    0.053,
-    0.57,
+    0.052,
+    0.54,
     0.308
    ],
-   "yaw": 0.75,
+   "yaw": 0.82,
    "point_count": 846,
    "score": 0.25,
    "view_count": 1
@@ -386,16 +367,16 @@
    "label": "PIPE",
    "asset_class": null,
    "center": [
-    -3.151,
-    1.21,
-    -1.276
+    -2.952,
+    1.09,
+    -1.088
    ],
    "size": [
-    2.175,
-    1.8,
-    0.866
+    2.633,
+    1.84,
+    1.539
    ],
-   "yaw": 0.419,
+   "yaw": 0.384,
    "point_count": 6700,
    "score": 0.25,
    "view_count": 1
@@ -405,16 +386,16 @@
    "label": "PIPE",
    "asset_class": null,
    "center": [
-    -1.824,
+    -1.696,
     1.06,
-    -1.323
+    -1.379
    ],
    "size": [
-    1.081,
-    1.94,
-    0.755
+    1.756,
+    1.88,
+    1.141
    ],
-   "yaw": 0.524,
+   "yaw": 0.035,
    "point_count": 8241,
    "score": 0.25,
    "view_count": 1
@@ -424,16 +405,16 @@
    "label": "PIPE",
    "asset_class": null,
    "center": [
-    -1.365,
-    1.285,
-    3.388
+    -1.176,
+    1.095,
+    3.199
    ],
    "size": [
-    0.379,
-    1.63,
-    0.688
+    0.558,
+    1.85,
+    0.364
    ],
-   "yaw": 1.536,
+   "yaw": 0.0,
    "point_count": 3159,
    "score": 0.25,
    "view_count": 1
@@ -443,16 +424,16 @@
    "label": "PIPE",
    "asset_class": null,
    "center": [
-    -1.086,
-    1.35,
-    -1.859
+    -1.076,
+    1.08,
+    -1.85
    ],
    "size": [
-    1.372,
-    1.66,
-    0.618
+    1.088,
+    1.92,
+    1.346
    ],
-   "yaw": 1.501,
+   "yaw": 0.0,
    "point_count": 15556,
    "score": 0.25,
    "view_count": 1
@@ -462,14 +443,14 @@
    "label": "PIPE",
    "asset_class": null,
    "center": [
-    -0.464,
-    1.095,
-    0.122
+    -0.581,
+    1.1,
+    0.234
    ],
    "size": [
-    0.967,
-    1.97,
-    0.998
+    1.335,
+    1.92,
+    1.563
    ],
    "yaw": 0.0,
    "point_count": 14658,
@@ -519,16 +500,16 @@
    "label": "PUMP",
    "asset_class": "PROCESS_PUMP",
    "center": [
-    -2.285,
-    0.93,
-    -0.087
+    -2.25,
+    0.885,
+    -0.068
    ],
    "size": [
-    0.181,
-    0.26,
-    0.353
+    0.274,
+    0.59,
+    0.35
    ],
-   "yaw": 0.0,
+   "yaw": 0.262,
    "point_count": 2407,
    "score": 0.5,
    "view_count": 2
@@ -557,16 +538,16 @@
    "label": "PUMP",
    "asset_class": "PROCESS_PUMP",
    "center": [
-    2.481,
-    0.995,
-    -1.816
+    2.485,
+    1.19,
+    -1.788
    ],
    "size": [
-    0.522,
-    0.31,
-    0.155
+    0.442,
+    0.28,
+    0.165
    ],
-   "yaw": 1.466,
+   "yaw": 1.239,
    "point_count": 1272,
    "score": 0.5,
    "view_count": 2
@@ -576,14 +557,14 @@
    "label": "PUMP",
    "asset_class": "PROCESS_PUMP",
    "center": [
-    2.668,
-    1.22,
-    3.294
+    2.739,
+    1.3,
+    3.212
    ],
    "size": [
-    0.61,
-    0.34,
-    0.461
+    0.788,
+    0.7,
+    0.289
    ],
    "yaw": 0.0,
    "point_count": 5582,
@@ -595,16 +576,16 @@
    "label": "PUMP",
    "asset_class": "PROCESS_PUMP",
    "center": [
-    4.301,
-    1.2,
-    2.04
+    4.236,
+    1.215,
+    2.095
    ],
    "size": [
-    0.646,
-    0.36,
-    0.387
+    0.341,
+    0.87,
+    0.884
    ],
-   "yaw": 1.257,
+   "yaw": 0.0,
    "point_count": 4353,
    "score": 0.75,
    "view_count": 3
@@ -614,16 +595,16 @@
    "label": "PUMP",
    "asset_class": "PROCESS_PUMP",
    "center": [
-    4.336,
-    1.32,
-    2.715
+    4.307,
+    1.47,
+    2.55
    ],
    "size": [
-    0.413,
-    0.44,
-    0.399
+    0.196,
+    0.36,
+    0.716
    ],
-   "yaw": 1.553,
+   "yaw": 0.157,
    "point_count": 1093,
    "score": 0.25,
    "view_count": 1
@@ -633,16 +614,16 @@
    "label": "RACK",
    "asset_class": null,
    "center": [
-    -2.028,
-    0.835,
-    0.315
+    -1.725,
+    0.875,
+    0.318
    ],
    "size": [
-    0.663,
-    1.39,
-    1.727
+    2.006,
+    1.51,
+    0.961
    ],
-   "yaw": 0.0,
+   "yaw": 1.152,
    "point_count": 16338,
    "score": 0.25,
    "view_count": 1
@@ -652,14 +633,14 @@
    "label": "RACK",
    "asset_class": null,
    "center": [
-    -1.175,
-    0.92,
-    0.411
+    -1.154,
+    1.09,
+    0.366
    ],
    "size": [
-    1.491,
-    1.62,
-    1.617
+    2.067,
+    1.92,
+    1.789
    ],
    "yaw": 0.0,
    "point_count": 91241,
@@ -671,18 +652,18 @@
    "label": "TANK",
    "asset_class": null,
    "center": [
-    -2.342,
-    0.76,
-    -2.975
+    -2.369163078938689,
+    0.8100000023841858,
+    -2.9195170348738726
    ],
    "size": [
-    0.776,
-    1.34,
-    0.423
+    0.576515568092637,
+    1.100000023841858,
+    0.2596809897203416
    ],
-   "yaw": 0.035,
-   "point_count": 2191,
-   "score": 0.25,
+   "yaw": 0.08726646259971647,
+   "point_count": 458,
+   "score": 0.6,
    "view_count": 1
   },
   {
@@ -690,16 +671,16 @@
    "label": "TANK",
    "asset_class": null,
    "center": [
-    -2.158,
-    0.815,
-    -1.245
+    -2.001,
+    0.805,
+    -1.479
    ],
    "size": [
-    0.663,
-    1.43,
-    0.811
+    0.655,
+    1.39,
+    1.373
    ],
-   "yaw": 0.087,
+   "yaw": 0.471,
    "point_count": 22873,
    "score": 1.0,
    "view_count": 4
@@ -709,14 +690,14 @@
    "label": "TANK",
    "asset_class": null,
    "center": [
-    0.401,
-    0.77,
-    -1.844
+    0.319,
+    0.86,
+    -1.806
    ],
    "size": [
-    1.025,
-    1.32,
-    1.054
+    1.21,
+    1.5,
+    1.099
    ],
    "yaw": 0.0,
    "point_count": 38421,
@@ -728,19 +709,38 @@
    "label": "TANK",
    "asset_class": null,
    "center": [
-    1.369,
-    0.86,
-    -2.114
+    1.2025668621063232,
+    0.8349999785423279,
+    -2.140792191028595
    ],
    "size": [
-    0.629,
-    1.24,
-    0.692
+    0.30367136001586914,
+    1.0499999523162842,
+    0.5891741514205933
    ],
    "yaw": 0.0,
-   "point_count": 15170,
-   "score": 1.0,
-   "view_count": 6
+   "point_count": 381,
+   "score": 0.6,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-TANK-05",
+   "label": "TANK",
+   "asset_class": null,
+   "center": [
+    4.209188478010825,
+    0.75,
+    -0.09031814284299824
+   ],
+   "size": [
+    0.2994737628653539,
+    0.9800000190734863,
+    0.08990743768564237
+   ],
+   "yaw": 0.017453292519943295,
+   "point_count": 182,
+   "score": 0.6,
+   "view_count": 1
   },
   {
    "object_id": "SEM-TARP-01",
@@ -776,25 +776,25 @@
     0.854
    ],
    "yaw": 0.192,
-   "point_count": 45737,
-   "score": 0.75,
-   "view_count": 3
+   "point_count": 28865,
+   "score": 0.5,
+   "view_count": 2
   },
   {
    "object_id": "SEM-TROLLEY-02",
    "label": "TROLLEY",
    "asset_class": null,
    "center": [
-    -0.722,
-    1.235,
-    0.348
+    -0.877,
+    1.195,
+    0.357
    ],
    "size": [
-    0.815,
-    0.57,
-    0.313
+    0.84,
+    0.87,
+    0.596
    ],
-   "yaw": 0.873,
+   "yaw": 0.0,
    "point_count": 3300,
    "score": 0.25,
    "view_count": 1
@@ -804,16 +804,16 @@
    "label": "TROLLEY",
    "asset_class": null,
    "center": [
-    -0.072,
-    0.46,
-    -1.921
+    -0.163,
+    0.61,
+    -1.989
    ],
    "size": [
-    1.374,
-    0.76,
-    0.472
+    1.514,
+    1.02,
+    0.919
    ],
-   "yaw": 1.257,
+   "yaw": 0.663,
    "point_count": 3748,
    "score": 0.25,
    "view_count": 1
@@ -823,36 +823,36 @@
    "label": "TROLLEY",
    "asset_class": null,
    "center": [
-    1.814,
-    0.61,
-    2.042
+    1.681,
+    0.4,
+    1.644
    ],
    "size": [
-    0.369,
-    1.04,
-    1.185
+    0.671,
+    0.6,
+    0.51
    ],
-   "yaw": 1.169,
-   "point_count": 18835,
-   "score": 0.75,
-   "view_count": 3
+   "yaw": 0.0,
+   "point_count": 2557,
+   "score": 0.25,
+   "view_count": 1
   },
   {
    "object_id": "SEM-TROLLEY-05",
    "label": "TROLLEY",
    "asset_class": null,
    "center": [
-    1.969,
-    0.545,
-    2.966
+    1.828,
+    0.62,
+    2.133
    ],
    "size": [
-    0.951,
-    0.93,
-    1.11
+    1.075,
+    1.04,
+    0.988
    ],
    "yaw": 0.0,
-   "point_count": 7993,
+   "point_count": 15123,
    "score": 0.5,
    "view_count": 2
   },
@@ -861,17 +861,17 @@
    "label": "TROLLEY",
    "asset_class": null,
    "center": [
-    3.374,
-    0.495,
-    2.552
+    1.901,
+    0.675,
+    2.745
    ],
    "size": [
-    1.441,
-    0.77,
-    1.578
+    1.348,
+    1.15,
+    1.192
    ],
    "yaw": 0.0,
-   "point_count": 25081,
+   "point_count": 6266,
    "score": 0.5,
    "view_count": 2
   },
@@ -880,14 +880,33 @@
    "label": "TROLLEY",
    "asset_class": null,
    "center": [
-    3.761,
-    0.57,
-    -0.161
+    3.218,
+    0.55,
+    2.562
    ],
    "size": [
-    0.981,
-    0.96,
-    0.721
+    1.497,
+    0.8,
+    1.594
+   ],
+   "yaw": 0.0,
+   "point_count": 22026,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-TROLLEY-08",
+   "label": "TROLLEY",
+   "asset_class": null,
+   "center": [
+    3.812,
+    0.68,
+    -0.134
+   ],
+   "size": [
+    1.07,
+    1.14,
+    1.256
    ],
    "yaw": 0.0,
    "point_count": 9177,
@@ -899,16 +918,16 @@
    "label": "VACUUM_CLEANER",
    "asset_class": null,
    "center": [
-    1.596,
-    0.405,
-    -0.627
+    1.584,
+    0.495,
+    -0.657
    ],
    "size": [
-    0.578,
-    0.63,
-    0.739
+    0.586,
+    0.77,
+    0.79
    ],
-   "yaw": 0.017,
+   "yaw": 0.0,
    "point_count": 18861,
    "score": 1.0,
    "view_count": 4
@@ -937,16 +956,16 @@
    "label": "VALVE",
    "asset_class": "CONTROL_VALVE",
    "center": [
-    -1.295,
-    0.525,
-    3.261
+    -1.188,
+    0.465,
+    3.198
    ],
    "size": [
-    0.252,
-    0.45,
-    0.532
+    0.592,
+    0.63,
+    0.366
    ],
-   "yaw": 0.489,
+   "yaw": 0.0,
    "point_count": 1686,
    "score": 0.5,
    "view_count": 2
@@ -956,16 +975,16 @@
    "label": "VALVE",
    "asset_class": "CONTROL_VALVE",
    "center": [
-    2.582,
-    1.125,
-    -1.717
+    2.545,
+    1.17,
+    -1.77
    ],
    "size": [
-    0.278,
-    0.29,
-    0.324
+    0.375,
+    0.68,
+    0.392
    ],
-   "yaw": 0.0,
+   "yaw": 0.017,
    "point_count": 1671,
    "score": 0.25,
    "view_count": 1
@@ -975,16 +994,16 @@
    "label": "VALVE",
    "asset_class": "CONTROL_VALVE",
    "center": [
-    4.286,
-    1.01,
-    2.092
+    4.317,
+    0.99,
+    2.172
    ],
    "size": [
-    0.577,
-    0.24,
-    0.243
+    0.171,
+    0.5,
+    0.782
    ],
-   "yaw": 1.257,
+   "yaw": 0.0,
    "point_count": 1218,
    "score": 0.25,
    "view_count": 1
@@ -1013,16 +1032,16 @@
    "label": "WASHING_MACHINE",
    "asset_class": null,
    "center": [
-    2.092,
-    0.55,
-    -2.075
+    2.165,
+    0.6,
+    -2.051
    ],
    "size": [
-    0.689,
-    0.84,
-    1.282
+    1.137,
+    0.96,
+    1.213
    ],
-   "yaw": 0.332,
+   "yaw": 0.017,
    "point_count": 4295,
    "score": 0.5,
    "view_count": 2

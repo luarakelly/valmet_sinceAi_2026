@@ -8,7 +8,7 @@ import numpy as np
 from infra.labeling.annotations import Report, lift_annotations, load_annotations, merge_candidates
 from infra.labeling.instances import OrientedBox, box_iou
 from infra.labeling.semantic_objects import SemanticObject
-from infra.spatial.segmentation import Room
+from infra.spatial.segmentation import Room, SceneObject
 from pathlib import Path
 
 ROOM_MARGIN_M = 0.3  # an object centre further outside the room than this is a back-projection error
@@ -27,12 +27,15 @@ def rebuild_objects(
     view_projections: Dict[str, Sequence[float]],
     annotations_path: Path,
     model_objects: Sequence[SemanticObject],
+    fragments: Sequence[SceneObject] = (),
+    trusted: Sequence[SemanticObject] = (),
 ) -> RebuildResult:
     report = Report()
     annotations = load_annotations(annotations_path, report)
     candidates = lift_annotations(xyz, view_projections, annotations, report)
-    drawn = merge_candidates(candidates, xyz)
-    combined = drawn + _model_only(model_objects, drawn)
+    drawn = merge_candidates(candidates, xyz, fragments)
+    drawn = [d for d in drawn if not any(d.label == t.label and _overlaps(d, t) for t in trusted)]
+    combined = list(trusted) + drawn + _model_only(model_objects, list(trusted) + drawn)
     inside = [_clamped_to_height(obj, room) for obj in combined if _is_inside_room(obj, room, report)]
     return RebuildResult(_renumber(inside), report.issues)
 

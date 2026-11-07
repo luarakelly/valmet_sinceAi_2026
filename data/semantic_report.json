@@ -1,11 +1,11 @@
 {
- "objects": 54,
+ "objects": 55,
  "by_label": {
   "CANISTER": 1,
   "CHAIR": 1,
   "CRATE": 5,
   "DOOR": 1,
-  "ELECTRICAL_CABINET": 6,
+  "ELECTRICAL_CABINET": 5,
   "FIRE_EXTINGUISHER": 1,
   "LADDER": 1,
   "PALLET": 4,
@@ -13,9 +13,9 @@
   "PRESSURE_GAUGE": 1,
   "PUMP": 6,
   "RACK": 2,
-  "TANK": 4,
+  "TANK": 5,
   "TARP": 1,
-  "TROLLEY": 7,
+  "TROLLEY": 8,
   "VACUUM_CLEANER": 1,
   "VALVE": 4,
   "WASHING_MACHINE": 2
@@ -25,8 +25,10 @@
   "V00-4 WASHING_MACHINE skipped: implausible size [1.4, 1.02, 0.79]",
   "V01-1 PRESSURE_GAUGE skipped: no compact object behind the box",
   "V04-2 PUMP skipped: no compact object behind the box",
-  "V05-0 TROLLEY skipped: implausible size [2.02, 1.23, 0.89]",
-  "V07-1 PRESSURE_GAUGE skipped: no compact object behind the box"
+  "V05-0 TROLLEY skipped: implausible size [1.83, 1.23, 0.89]",
+  "V05-1 TROLLEY skipped: implausible size [1.83, 1.23, 0.71]",
+  "V07-1 PRESSURE_GAUGE skipped: no compact object behind the box",
+  "V07-2 ELECTRICAL_CABINET skipped: implausible size [1.45, 0.87, 0.52]"
  ],
  "workbook_coverage": {
   "classes": {
@@ -61,15 +63,15 @@
    "CHAIR": 1,
    "CRATE": 5,
    "DOOR": 1,
-   "ELECTRICAL_CABINET": 6,
+   "ELECTRICAL_CABINET": 5,
    "FIRE_EXTINGUISHER": 1,
    "LADDER": 1,
    "PALLET": 4,
    "PIPE": 6,
    "RACK": 2,
-   "TANK": 4,
+   "TANK": 5,
    "TARP": 1,
-   "TROLLEY": 7,
+   "TROLLEY": 8,
    "VACUUM_CLEANER": 1,
    "WASHING_MACHINE": 2
   },

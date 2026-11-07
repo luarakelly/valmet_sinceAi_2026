@@ -49,10 +49,17 @@ def write_semantic_objects(path: Path, objects: List[SemanticObject]) -> None:
     write_json_atomically(path, payload)
 
 
+def _plain_number(value):
+    """numpy scalars (float32, int64...) are not JSON; store them as plain Python numbers."""
+    if isinstance(value, np.generic):
+        return value.item()
+    raise TypeError("Object of type {} is not JSON serializable".format(type(value).__name__))
+
+
 def write_json_atomically(path: Path, payload: Dict) -> None:
     """Write beside the target, then rename: a crash can never leave a half-written file."""
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, indent=1))
+    temporary.write_text(json.dumps(payload, indent=1, default=_plain_number))
     os.replace(temporary, path)
 
 

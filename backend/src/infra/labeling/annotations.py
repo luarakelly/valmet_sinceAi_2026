@@ -14,7 +14,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from infra.labeling.instances import OrientedBox, box_iou, fit_box
-from infra.labeling.semantic_objects import ID_PREFIX, ROUND_DIGITS, SemanticObject, asset_class_of
+from infra.labeling.semantic_objects import ID_PREFIX, ROUND_DIGITS, SemanticObject, asset_class_of, points_in_box
+from infra.spatial.segmentation import SceneObject
 from infra.labeling.vocabulary import VOCABULARY
 from sklearn.cluster import DBSCAN
 
@@ -26,8 +27,8 @@ MIN_SIDE_M = 0.03
 MAX_SIDE_M = 4.0  # default ceiling for sizes; a bigger box grabbed wall or ceiling
 # Largest plausible side per label (m): a box beyond it picked up the wall behind the object or its neighbour.
 MAX_SIDE_BY_LABEL = {
-    "DOOR": 2.5, "ELECTRICAL_CABINET": 1.6, "PUMP": 0.9, "TANK": 1.8, "CRATE": 1.5, "CHAIR": 1.0,
-    "TROLLEY": 2.0, "WASHING_MACHINE": 1.3, "LADDER": 2.2, "PALLET": 1.6, "PIPE": 4.0, "PRESSURE_GAUGE": 0.3,
+    "DOOR": 2.5, "ELECTRICAL_CABINET": 1.3, "PUMP": 0.9, "TANK": 1.8, "CRATE": 1.5, "CHAIR": 1.0,
+    "TROLLEY": 1.7, "WASHING_MACHINE": 1.3, "LADDER": 2.2, "PALLET": 1.6, "PIPE": 4.0, "PRESSURE_GAUGE": 0.3,
     "VALVE": 0.8, "VACUUM_CLEANER": 0.9, "TARP": 1.2, "CANISTER": 0.4, "RACK": 2.2, "FIRE_EXTINGUISHER": 1.0,
 }
 FLOOR_CLEARANCE_M = 0.08  # floor points connect everything standing on it; drop them before clustering
@@ -35,6 +36,11 @@ MIN_OBJECT_POINTS = 150
 CLUSTER_VOXEL_M = 0.03
 CLUSTER_EPS_M = 0.07
 CLUSTER_MIN_VOXELS = 6
+SNAP_GROWTH = 1.3  # fragments are gathered inside the lifted box grown by this factor
+SNAP_MARGIN_M = 0.08
+SNAP_MIN_INSIDE = 0.6  # share of a fragment's points that must lie inside to count as part of the item
+DUPLICATE_IOU = 0.4
+SNAP_MAX_VOLUME_RATIO = 6.0  # the front slab is thin; a whole item is much bigger, but not unboundedly
 SURFACE_MIN_SHARE = 0.3  # the object is the nearest surface holding at least this share of the box's points
 MERGE_IOU = 0.10
 MERGE_CENTER_M = 0.30
@@ -139,14 +145,14 @@ def _largest_cluster(points: np.ndarray) -> np.ndarray:
     return points[found[inverse] == int(weights.argmax())]
 
 
-def merge_candidates(candidates: Sequence[Candidate], xyz: np.ndarray) -> List[SemanticObject]:
+def merge_candidates(candidates: Sequence[Candidate], xyz: np.ndarray, fragments: Sequence[SceneObject] = ()) -> List[SemanticObject]:
     """One object per physical thing: same-label boxes that overlap are one object seen in several views."""
     objects: List[SemanticObject] = []
     for label in sorted({c.label for c in candidates}):
         groups = _group(sorted((c for c in candidates if c.label == label), key=lambda c: (c.view_id, c.box.center)))
         for number, group in enumerate(groups, start=1):
-            objects.append(_object_from(label, number, group, xyz))
-    return objects
+            objects.append(_object_from(label, number, group, xyz, fragments))
+    return _without_duplicates(objects)
 
 
 def _annotation_problem(item: Dict) -> str:
@@ -185,9 +191,9 @@ def _same_thing(a: OrientedBox, b: OrientedBox) -> bool:
     return box_iou(a, b) >= MERGE_IOU or math.dist(a.center, b.center) <= MERGE_CENTER_M
 
 
-def _object_from(label: str, number: int, group: List[Candidate], xyz: np.ndarray) -> SemanticObject:
+def _object_from(label: str, number: int, group: List[Candidate], xyz: np.ndarray, fragments: Sequence[SceneObject]) -> SemanticObject:
     best_view = max(group, key=lambda c: c.point_count)  # the view that saw the most of the object
-    box = _refine(best_view.box, xyz, label)
+    box = _refine(_snap_to_fragments(best_view.box, fragments, label), xyz, label)
     views = {c.view_id for c in group}
     return SemanticObject(
         object_id="{}{}-{:02d}".format(ID_PREFIX, label, number),
@@ -200,6 +206,41 @@ def _object_from(label: str, number: int, group: List[Candidate], xyz: np.ndarra
         score=round(min(1.0, SCORE_PER_VIEW * len(views)), 2),
         view_count=len(views),
     )
+
+
+def _snap_to_fragments(box: OrientedBox, fragments: Sequence[SceneObject], label: str) -> OrientedBox:
+    """Grow the lifted (front-slab) box to the whole item: union the extracted fragments mostly inside it.
+
+    The extraction already removed walls, floor and ceiling, so the union cannot bleed into them; a fragment
+    that sticks far out (a pipe running on) is not mostly inside and stays out.
+    """
+    window = SceneObject("window", label, box.center, tuple(s * SNAP_GROWTH for s in box.size), 0, (0, 0, 0), yaw=box.yaw)
+    reach = MAX_SIDE_BY_LABEL.get(label, MAX_SIDE_M)
+    inside = [
+        f for f in fragments
+        if len(f.points) > 0 and max(f.size) <= reach and points_in_box(f.points, window, SNAP_MARGIN_M).mean() >= SNAP_MIN_INSIDE
+    ]
+    if not inside:
+        return box
+    union = np.vstack([f.points for f in inside]).astype(np.float64)
+    if len(union) < MIN_OBJECT_POINTS:
+        return box
+    fitted = fit_box(union)
+    is_reasonable_growth = np.prod(fitted.size) <= SNAP_MAX_VOLUME_RATIO * np.prod(box.size)
+    if _is_plausible_size(fitted.size, label) and is_reasonable_growth:
+        return fitted
+    return box
+
+
+def _without_duplicates(objects: List[SemanticObject]) -> List[SemanticObject]:
+    """Two same-label objects whose whole-item boxes overlap strongly are one item seen from different spots."""
+    kept: List[SemanticObject] = []
+    for obj in sorted(objects, key=lambda o: -o.view_count):
+        box = OrientedBox(obj.center, obj.size, obj.yaw)
+        twin = next((k for k in kept if k.label == obj.label and box_iou(box, OrientedBox(k.center, k.size, k.yaw)) >= DUPLICATE_IOU), None)
+        if twin is None:
+            kept.append(obj)
+    return kept
 
 
 def _refine(box: OrientedBox, xyz: np.ndarray, label: str) -> OrientedBox:

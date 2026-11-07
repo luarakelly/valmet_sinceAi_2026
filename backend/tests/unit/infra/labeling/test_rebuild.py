@@ -96,3 +96,36 @@ def test_boxes_are_trimmed_to_floor_and_ceiling():
     trimmed = _clamped_to_height(low, ROOM)
     assert trimmed.center[1] - trimmed.size[1] / 2 == 0.0
     assert _clamped_to_height(tall, ROOM).center[1] + _clamped_to_height(tall, ROOM).size[1] / 2 == 3.0
+
+
+def test_box_grows_to_the_whole_item_from_its_fragments(tmp_path):
+    """A lifted front slab is 0.6 m wide; two fragments of the same crate make it 1.0 m."""
+    from infra.spatial.segmentation import SceneObject
+
+    rng = np.random.default_rng(1)
+    left = ((rng.random((6000, 3)) - 0.5) * np.array([0.5, 0.6, 0.6]) + np.array([-0.25, 0.3, -4.0])).astype(np.float32)
+    right = ((rng.random((6000, 3)) - 0.5) * np.array([0.5, 0.6, 0.6]) + np.array([0.25, 0.3, -4.0])).astype(np.float32)
+    far_pipe = (rng.random((600, 3)) * np.array([3.0, 0.1, 0.1]) + np.array([2.0, 1.0, -4.0])).astype(np.float32)
+    fragments = [SceneObject(name, "X", tuple(p.mean(axis=0)), (0.5, 0.6, 0.6), len(p), (0.5, 0.5, 0.5), points=p) for name, p in (("l", left), ("r", right), ("pipe", far_pipe))]
+    path = write(tmp_path / "a.json", {"A": [{"label": "CRATE", "box": [0.40, 0.37, 0.60, 0.50]}]})
+    scene = np.vstack([left, right, far_pipe])
+    result = rebuild_objects(scene, ROOM, {"A": VP}, path, [], fragments)
+    crate = result.objects[0]
+    assert max(crate.size) > 0.9
+    assert crate.size[1] < 0.8  # the pipe is not mostly inside, so it stays out
+
+
+def test_numpy_numbers_are_written_as_plain_json(tmp_path):
+    from infra.labeling.semantic_objects import read_semantic_objects, write_semantic_objects
+
+    path = tmp_path / "o.json"
+    obj = SemanticObject("S", "TANK", None, (np.float32(1.0), np.float32(2.0), np.float32(3.0)), (np.float32(1), np.float32(1), np.float32(1)), np.float32(0.1), np.int64(5), 0.5, 1)
+    write_semantic_objects(path, [obj])
+    assert read_semantic_objects(path)[0].point_count == 5
+
+
+def test_trusted_colour_box_replaces_a_loose_hand_drawn_one_of_the_same_label(tmp_path):
+    path = write(tmp_path / "a.json", {"A": [{"label": "CRATE", "box": CENTRE_BOX}]})
+    tight = SemanticObject("C", "CRATE", None, (0.0, 0.15, -4.0), (0.6, 0.3, 0.6), 0.0, 100, 0.6, 1)
+    result = rebuild_objects(scene_points(), ROOM, {"A": VP}, path, [], (), [tight])
+    assert [o.size for o in result.objects] == [tight.size]
