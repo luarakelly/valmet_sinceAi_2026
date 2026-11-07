@@ -41,6 +41,13 @@ def get_boiler_room_ply(app: Container = Depends(get_container)) -> FileResponse
     return FileResponse(path=str(path), media_type="application/octet-stream", filename=path.name)
 
 
+def get_boiler_room_splat(app: Container = Depends(get_container)) -> FileResponse:
+    """Photoreal Gaussian splat (.splat, scene frame) for the Spark renderer; built on first request."""
+    with http_errors():
+        path = app.scene.viewer_splat()
+    return FileResponse(path=str(path), media_type="application/octet-stream", filename=path.name)
+
+
 def get_boiler_room_mesh(app: Container = Depends(get_container)) -> FileResponse:
     """Surface mesh reconstructed from the splat (rebuild offline with scripts/build_mesh.py)."""
     with http_errors():

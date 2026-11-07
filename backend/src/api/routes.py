@@ -54,6 +54,7 @@ post("/scene/proximity", response_model=List[ProximityAssetResponse])(scene.quer
 post("/scene/extract-assets")(scene.extract_scene_assets)
 get("/scene/boiler-room.ply")(scene.get_boiler_room_ply)
 get("/scene/boiler-room-mesh.ply")(scene.get_boiler_room_mesh)
+get("/scene/boiler-room.splat")(scene.get_boiler_room_splat)
 
 # Navigation
 get("/navigation/path", response_model=NavigationPathResponse)(navigation.get_navigation_path)

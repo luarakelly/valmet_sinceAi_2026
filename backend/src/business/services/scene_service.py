@@ -95,6 +95,12 @@ class SceneService:
             raise NotFoundError("Boiler room PLY not found on server")
         return path
 
+    def viewer_splat(self) -> Path:
+        try:
+            return self._scene.get_splat_path()
+        except FileNotFoundError as error:
+            raise NotFoundError(str(error)) from error
+
     def viewer_mesh(self) -> Path:
         """Served as-is; rebuild offline with scripts/build_mesh.py (minutes, extra deps)."""
         path = self._scene.get_mesh_path()

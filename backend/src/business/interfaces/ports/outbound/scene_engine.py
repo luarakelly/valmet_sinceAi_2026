@@ -37,3 +37,7 @@ class SceneEngine(Protocol):
 
     def get_mesh_path(self) -> Path:
         ...
+
+    def get_splat_path(self) -> Path:
+        """Photoreal Gaussian splat in the scene frame; raises FileNotFoundError if it cannot be built."""
+        ...

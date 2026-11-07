@@ -10,9 +10,15 @@
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+          "@sparkjsdev/spark": "https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.3.1/dist/spark.module.js"
+        }
+      }
+    </script>
     <link rel="stylesheet" href="/styles/app.css" />
   </head>
   <body>
@@ -76,7 +82,8 @@
           </div>
 
           <div class="render-mode-toolbar" role="group" aria-label="Display">
-            <button class="render-mode-btn active" data-view="points" title="Scan as coloured points (shows all pipes)">Points</button>
+            <button class="render-mode-btn active" data-view="splat" title="Photoreal Gaussian-splat scan of the room">Photoreal</button>
+            <button class="render-mode-btn" data-view="points" title="Scan as coloured points">Points</button>
             <button class="render-mode-btn" data-view="mesh" title="Reconstructed surface mesh">Mesh</button>
             <button class="render-mode-btn" id="btn-heat" title="Colour by height">Heat</button>
             <button class="render-mode-btn" id="btn-all-frames" title="Show every extracted 3D frame">All frames</button>
@@ -206,6 +213,6 @@
         }
       };
     </script>
-    <script src="/js/app.js"></script>
+    <script type="module" src="/js/bootstrap.js"></script>
   </body>
 </html>

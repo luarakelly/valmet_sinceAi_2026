@@ -1,11 +1,15 @@
 // Ask Your Factory — guided boiler-room digital twin.
 // Flow: 1) scene + faulty target  2) robot walks, nearby frames light up  3) AI diagnosis on arrival.
 // Scene frame from the backend: Y up, floor at y = 0, room centred on x = z = 0.
+// Loaded by bootstrap.js after THREE (r180, with OrbitControls/PLYLoader) and Spark are on window.
 
 let scene, camera, renderer, controls;
-let sceneModel = null; // THREE.Points (scan) or THREE.Mesh (surface)
+let sceneModel = null; // SplatMesh (photoreal), THREE.Points (scan) or THREE.Mesh (surface)
 let pointCloud = null; // alias kept for the shaders/resize helpers
-let viewKind = "points"; // "points" | "mesh"
+let viewKind = "splat"; // "splat" (photoreal Gaussian splat) | "points" | "mesh"
+let sparkRenderer = null;
+let gridHelper = null;
+let loadToken = 0; // ignores late loads after the user switched view
 let renderMode = "splat"; // "splat" | "heat"
 const boundingFramesGroup = new THREE.Group();
 let pathLineMesh = null;
@@ -72,13 +76,17 @@ function init3D() {
   camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.03, 200);
   camera.position.set(...ORBIT_VIEW.position);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", preserveDrawingBuffer: true });
-  renderer.outputEncoding = THREE.sRGBEncoding;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.1;
+  // antialias off: recommended by Spark (no benefit for splats, large cost).
+  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance", preserveDrawingBuffer: true });
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.NoToneMapping; // keep the scan's real colours
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
+
+  if (window.Spark) {
+    sparkRenderer = new window.Spark.SparkRenderer({ renderer: renderer });
+  }
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -92,15 +100,17 @@ function init3D() {
   controls.maxPolarAngle = Math.PI * 0.495; // never go below the floor
   controls.target.set(...ORBIT_VIEW.target);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-  const dirLight = new THREE.DirectionalLight(0xbfe9ff, 0.6);
+  // r155+ uses physically based light units: these values match the old r128 look.
+  scene.add(new THREE.AmbientLight(0xffffff, 1.4));
+  const dirLight = new THREE.DirectionalLight(0xbfe9ff, 1.8);
   dirLight.position.set(5, 10, 5);
   scene.add(dirLight);
 
-  const grid = new THREE.GridHelper(20, 40, 0x183040, 0x0b1722);
-  grid.material.transparent = true;
-  grid.material.opacity = 0.35;
-  scene.add(grid);
+  gridHelper = new THREE.GridHelper(20, 40, 0x183040, 0x0b1722);
+  gridHelper.material.transparent = true;
+  gridHelper.material.opacity = 0.35;
+  scene.add(gridHelper);
+  if (sparkRenderer) scene.add(sparkRenderer);
 
   scene.add(boundingFramesGroup);
   createRobotAvatar();
@@ -113,7 +123,7 @@ function init3D() {
   setupToolbar();
   setupHelp();
 
-  loadSceneModel("points");
+  loadSceneModel(sparkRenderer ? "splat" : "points");
   fetchSceneData();
   animate();
 }
@@ -348,6 +358,7 @@ function createPointMaterial(geometry) {
         }
 
         gl_FragColor = vec4(outputColor, splatAlpha);
+        #include <colorspace_fragment>
       }
     `,
     transparent: true,
@@ -412,27 +423,51 @@ function createMeshMaterial(geometry) {
           base = heatColor(vHeight);
         }
         gl_FragColor = vec4(base * light, uOpacity);
+        #include <colorspace_fragment>
       }
     `,
     side: THREE.DoubleSide,
   });
 }
 
-function loadSceneModel(kind) {
-  viewKind = kind;
+function removeSceneModel() {
+  if (!sceneModel) return;
+  scene.remove(sceneModel);
+  if (window.Spark && sceneModel instanceof window.Spark.SplatMesh) {
+    sceneModel.dispose();
+  } else if (sceneModel.geometry) {
+    sceneModel.geometry.dispose();
+  }
+  sceneModel = null;
+  pointCloud = null;
+}
+
+function markViewButtons(kind) {
   document.querySelectorAll(".render-mode-btn[data-view]").forEach(function (b) {
     b.classList.toggle("active", b.dataset.view === kind);
   });
+}
+
+function loadSceneModel(kind) {
+  if (kind === "splat" && !sparkRenderer) {
+    showToast("Photoreal view unavailable (splat renderer did not load) — showing scan points");
+    kind = "points";
+  }
+  viewKind = kind;
+  markViewButtons(kind);
+  const token = ++loadToken;
+  if (kind === "splat") {
+    loadSplatModel(token);
+    return;
+  }
   const loader = new THREE.PLYLoader();
   const url = kind === "mesh" ? "/api/scene/boiler-room-mesh.ply" : "/api/scene/boiler-room.ply";
   showToast(kind === "mesh" ? "Loading surface mesh…" : "Loading scan points…");
   loader.load(
     url,
     function (geometry) {
-      if (sceneModel) {
-        scene.remove(sceneModel);
-        sceneModel.geometry.dispose();
-      }
+      if (token !== loadToken) return;
+      removeSceneModel();
       if (kind === "mesh") {
         geometry.computeVertexNormals();
         sceneModel = new THREE.Mesh(geometry, createMeshMaterial(geometry));
@@ -442,6 +477,7 @@ function loadSceneModel(kind) {
       }
       pointCloud = sceneModel;
       scene.add(sceneModel);
+      gridHelper.visible = true;
       applyRenderMode(renderMode);
       const count = kind === "mesh"
         ? Math.round((geometry.index ? geometry.index.count : geometry.attributes.position.count) / 3)
@@ -451,6 +487,7 @@ function loadSceneModel(kind) {
     undefined,
     function (err) {
       console.warn("Could not load " + url, err);
+      if (token !== loadToken) return;
       if (kind === "mesh") {
         showToast("Mesh not available — showing scan points");
         loadSceneModel("points");
@@ -459,6 +496,39 @@ function loadSceneModel(kind) {
       }
     },
   );
+}
+
+// Photoreal: the real Gaussian splat (already in the scene frame), rendered by Spark.
+// The first request can take ~10–30 s while the server converts the raw scan once.
+async function loadSplatModel(token) {
+  showToast("Loading photoreal scene… (the first time, the server prepares it: ~30 s)");
+  try {
+    const res = await fetch("/api/scene/boiler-room.splat");
+    if (!res.ok) {
+      let detail = res.status + " " + res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch (e) { /* not JSON */ }
+      throw new Error(detail);
+    }
+    const bytes = await res.arrayBuffer();
+    if (token !== loadToken) return;
+    const splat = new window.Spark.SplatMesh({ fileBytes: bytes, fileType: "splat", fileName: "boiler-room.splat" });
+    await splat.initialized;
+    if (token !== loadToken) {
+      splat.dispose();
+      return;
+    }
+    removeSceneModel();
+    sceneModel = splat;
+    scene.add(splat);
+    gridHelper.visible = false; // the real floor is in the splat
+    if (renderMode === "heat") applyRenderMode("splat");
+    showToast("Photoreal scene: " + Math.round(bytes.byteLength / 32).toLocaleString() + " Gaussian splats");
+  } catch (err) {
+    console.warn("Photoreal scene unavailable", err);
+    if (token !== loadToken) return;
+    showToast("Photoreal scene unavailable (" + err.message + ") — showing scan points");
+    loadSceneModel("points");
+  }
 }
 
 function applyRenderMode(mode) {
@@ -549,6 +619,7 @@ function createFloatingLabelSprite(tag, stateText, colorHex) {
   ctx.fillText(stateText.toUpperCase(), 128, 58);
 
   const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   const spriteMat = new THREE.SpriteMaterial({
     map: texture,
     transparent: true,
@@ -1485,6 +1556,11 @@ function setupToolbar() {
     };
   });
   document.getElementById("btn-heat").onclick = function () {
+    if (renderMode !== "heat" && viewKind === "splat") {
+      renderMode = "heat"; // height colouring needs the point or mesh view
+      loadSceneModel("points");
+      return;
+    }
     applyRenderMode(renderMode === "heat" ? "splat" : "heat");
   };
   document.getElementById("btn-all-frames").onclick = function (e) {
@@ -1687,4 +1763,9 @@ function onWindowResize() {
   }
 }
 
-window.onload = init3D;
+// app.js is injected by bootstrap.js, possibly after the load event already fired.
+if (document.readyState === "complete") {
+  init3D();
+} else {
+  window.addEventListener("load", init3D);
+}

@@ -17,6 +17,7 @@ import numpy as np
 from infra.spatial.asset_mapping import Binding, bind_assets, choose_target
 from infra.spatial.navigation import ROBOT_RADIUS, WALK_SPEED_M_S, Cell, OccupancyGrid, build_grid, nearest_free, plan_route, travel_distances
 from infra.spatial.point_cloud import PointCloud, VIEWER_MESH_PATH, VIEWER_PLY_PATH, load_scene_cloud
+from infra.spatial.splat_export import ensure_viewer_splat
 from infra.spatial.segmentation import Room, SceneObject, detect_room, extract_objects
 
 logger = logging.getLogger("ask_your_factory.scene")
@@ -56,6 +57,10 @@ class BoilerRoomScene:
 
     def get_mesh_path(self) -> Path:
         return VIEWER_MESH_PATH
+
+    def get_splat_path(self) -> Path:
+        """Built from the raw scan on first use (≈10–30 s), then served from data/."""
+        return ensure_viewer_splat()
 
     @property
     def target_asset_id(self) -> str:
