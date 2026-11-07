@@ -1072,7 +1072,7 @@ function onArrival() {
   if (routeTargetId === "POINT") return; // walked to a floor point: nothing to diagnose
   const frame = framesById.get(routeTargetId);
   if (frame) lookAtAsset(frame);
-  openAssetModal(routeTargetId, true);
+  openAssetModal(routeTargetId);
 }
 
 function passedAssets() {
@@ -1239,7 +1239,7 @@ function showSelection(id) {
 
 // The asset modal covers the screen: scan render on the left, diagnosis on the right.
 // While it is open the chat is about this asset.
-function openAssetModal(id, announce) {
+function openAssetModal(id) {
   const frame = framesById.get(id);
   const modal = document.getElementById("asset-modal");
   showSelection(id);
@@ -1251,7 +1251,7 @@ function openAssetModal(id, announce) {
     renderStructureCard(frame);
     return;
   }
-  runCopilotDiagnosis(id, null, announce);
+  runCopilotDiagnosis(id);
 }
 
 function closeAssetModal() {
@@ -1482,7 +1482,7 @@ function xrayDotTexture() {
   return xraySprite;
 }
 
-async function runCopilotDiagnosis(assetId, question, announce) {
+async function runCopilotDiagnosis(assetId, question) {
   const body = { asset_id: assetId };
   if (question) body.query = question;
   document.getElementById("diag-block").style.display = "";
@@ -1498,7 +1498,7 @@ async function runCopilotDiagnosis(assetId, question, announce) {
     ]);
     if (thinking) thinking.remove();
     if (openAssetId() === assetId) updateAssetModal(dossier, diag);
-    if (question || announce) {
+    if (question) {
       const ids = (diag.citations || []).filter(function (c) { return c.source_type !== "data_quality"; })
         .map(function (c) { return c.source_id; }).slice(0, 6);
       addMessage("ai", diag.answer || diag.diagnosis_summary || diag.diagnosis || "No answer.", ids);
