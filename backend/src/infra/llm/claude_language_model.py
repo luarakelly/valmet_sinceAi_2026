@@ -3,13 +3,14 @@
 Env: ANTHROPIC_API_KEY, ANTHROPIC_MODEL (default claude-sonnet-5-5), ANTHROPIC_VERSION (default 2023-06-01).
 """
 
+import base64
 import json
 import logging
 import os
 import re
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from business.interfaces.ports.outbound.language_model import LanguageModel
 
@@ -32,11 +33,16 @@ class ClaudeLanguageModel(LanguageModel):
     def is_available(self) -> bool:
         return bool(self._api_key)
 
-    def complete_json(self, prompt: str) -> Optional[Dict[str, Any]]:
+    def complete_json(self, prompt: str, images: Optional[List[bytes]] = None) -> Optional[Dict[str, Any]]:
+        blocks: List[Dict[str, Any]] = [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(image).decode("ascii")}}
+            for image in (images or [])
+        ]
+        blocks.append({"type": "text", "text": prompt + "\nRespond with the JSON object only."})
         body = json.dumps({
             "model": self._model,
             "max_tokens": 1200,
-            "messages": [{"role": "user", "content": prompt + "\nRespond with the JSON object only."}],
+            "messages": [{"role": "user", "content": blocks}],
         }).encode("utf-8")
         request = urllib.request.Request(API_URL, data=body, method="POST", headers={
             "content-type": "application/json", "x-api-key": self._api_key, "anthropic-version": self._version,

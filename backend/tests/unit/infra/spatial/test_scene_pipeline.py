@@ -118,3 +118,14 @@ def test_route_to_a_floor_point_snaps_to_walkable_space():
     first = scene.get_navigation_path(target["asset_id"])["waypoints"][-1]
     again = scene.get_navigation_path(start=(first["x"], first["z"]), goal=(gx, gz))
     assert again["collision_free"]
+
+
+def test_object_geometry_is_the_objects_own_points_inside_its_frame():
+    scene = get_scene()
+    frame = next(f for f in scene.get_semantic_frames() if f["asset_id"])
+    points = np.frombuffer(scene.get_object_geometry(frame["tag"]), dtype="<f4").reshape(-1, 3)
+    assert len(points) > 0
+    low = np.array(frame["pos"]) - np.array(frame["size"]) / 2 - 1e-3
+    high = np.array(frame["pos"]) + np.array(frame["size"]) / 2 + 1e-3
+    assert ((points >= low) & (points <= high)).all()
+    assert scene.get_object_geometry("NO-SUCH-OBJECT") is None

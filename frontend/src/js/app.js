@@ -47,6 +47,15 @@ let copilotOpen = false;
 const ROBOT_GROUND_OFFSET = 0.15;
 const PROXIMITY_RADIUS = 1.5;
 const MAX_NEAR_LABELS = 4;
+const XRAY_POINT_SIZE = 0.035;
+const XRAY_BASE_OPACITY = 0.75;
+const XRAY_PULSE_AMPLITUDE = 0.2;
+const XRAY_PULSE_HZ = 1.1;
+const XRAY_RENDER_ORDER = 20;
+const xrayGeometryCache = new Map(); // frame id -> Float32Array of x, y, z
+let xrayPoints = null;
+let xrayRequest = 0; // ignores a late response after the selection changed
+let xraySprite = null;
 // Labels keep a fixed on-screen size (not world size), so they never fill the screen up close.
 const LABEL_SCREEN_HEIGHT = 0.045; // fraction of the view height
 // Follow camera: eye height behind the robot, on the path it already walked (always free space).
@@ -137,6 +146,7 @@ function init3D() {
   document.body.classList.toggle("debug", DEBUG);
   loadSceneModel(sparkRenderer ? "splat" : "points");
   fetchSceneData();
+  showVerifyReport();
   animate();
   startDevAutoReload();
 }
@@ -492,26 +502,36 @@ function setLoading(fraction, text) {
 }
 
 // fetch() with download progress (the splat is ~13 MB).
-async function fetchBytes(url, onProgress) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    let detail = res.status + " " + res.statusText;
-    try { detail = (await res.json()).detail || detail; } catch (e) { /* not JSON */ }
-    throw new Error(detail);
+async function fetchBytes(url, onProgress, timeoutMs) {
+  // Never wait forever: a stalled request aborts, and the caller falls back to the point cloud.
+  const controller = new AbortController();
+  const timer = setTimeout(function () { controller.abort(); }, timeoutMs || 60000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      let detail = res.status + " " + res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch (e) { /* not JSON */ }
+      throw new Error(detail);
+    }
+    const total = Number(res.headers.get("Content-Length")) || 0;
+    if (!res.body || !total) return await res.arrayBuffer();
+    const reader = res.body.getReader();
+    const out = new Uint8Array(total);
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out.set(value, received);
+      received += value.length;
+      onProgress(received / total);
+    }
+    return out.buffer;
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error("the scan download timed out");
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  const total = Number(res.headers.get("Content-Length")) || 0;
-  if (!res.body || !total) return res.arrayBuffer();
-  const reader = res.body.getReader();
-  const out = new Uint8Array(total);
-  let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    out.set(value, received);
-    received += value.length;
-    onProgress(received / total);
-  }
-  return out.buffer;
 }
 
 function loadSceneModel(kind) {
@@ -1099,6 +1119,7 @@ function renderNearby(near) {
 function showSelection(id) {
   selectedId = id;
   refreshFrameStyles();
+  showXray(id);
   document.querySelectorAll(".asset-card").forEach(function (el) {
     el.classList.toggle("active", el.dataset.id === id);
   });
@@ -1110,15 +1131,118 @@ function showSelection(id) {
   runCopilotDiagnosis(id);
 }
 
+// How sure we are that this asset really is the 3D object it is attached to, and why.
+function mappingNote(frame) {
+  const status = frame.mapping_status;
+  const confidence = frame.mapping_confidence != null ? frame.mapping_confidence : "—";
+  const target = frame.id === routeTargetId ? " · inspection target" : "";
+  if (status === "camera_verified") {
+    return "Verified by camera → 3D object " + frame.scene_id + " · " + (frame.mapping_evidence || "") + target;
+  }
+  if (status === "assumed") {
+    return "Placement assumed, not verified → 3D object " + frame.scene_id + " · confidence " + confidence + target;
+  }
+  return "Proposed from shape, not verified → 3D object " + frame.scene_id + " · confidence " + confidence + target;
+}
+
 function renderStructureCard(frame) {
   setText("card-asset-tag", frame.id + " · " + prettyClass(frame.label));
   setText("card-asset-meta", "Detected 3D object · not linked to a builder-pack asset");
-  setText("card-mapping-note", frame.point_count + " points · " + frame.size.map(function (s) { return s.toFixed(2); }).join(" × ") + " m");
+  const seen = frame.seen_as
+    ? " · camera: " + (frame.seen_as.features || frame.seen_as.category.replace(/_/g, " ")) + " (" + frame.seen_as.confidence + ")"
+    : "";
+  setText("card-mapping-note", frame.point_count + " points · " + frame.size.map(function (s) { return s.toFixed(2); }).join(" × ") + " m" + seen);
   const badge = document.getElementById("card-health-badge");
   badge.innerText = "STRUCTURE";
   badge.style.color = STATE_CSS.structure;
   badge.style.borderColor = STATE_CSS.structure;
   document.getElementById("diag-block").style.display = "none";
+}
+
+async function showXray(id) {
+  const request = ++xrayRequest;
+  clearXray();
+  const frame = framesById.get(id);
+  if (!frame) {
+    return;
+  }
+  const positions = await fetchXrayGeometry(id);
+  if (!positions || request !== xrayRequest) {
+    return;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color: STATE_COLORS[frameState(frame)] || STATE_COLORS.structure,
+    size: XRAY_POINT_SIZE,
+    sizeAttenuation: true,
+    map: xrayDotTexture(),
+    transparent: true,
+    opacity: XRAY_BASE_OPACITY,
+    depthTest: false, // the point of x-ray: visible through walls, pipes and the splat
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  xrayPoints = new THREE.Points(geometry, material);
+  xrayPoints.renderOrder = XRAY_RENDER_ORDER;
+  xrayPoints.frustumCulled = false;
+  scene.add(xrayPoints);
+}
+
+async function fetchXrayGeometry(id) {
+  if (xrayGeometryCache.has(id)) {
+    return xrayGeometryCache.get(id);
+  }
+  try {
+    const res = await fetch("/api/scene/objects/" + encodeURIComponent(id) + "/geometry");
+    if (!res.ok) {
+      return null;
+    }
+    const positions = new Float32Array(await res.arrayBuffer());
+    xrayGeometryCache.set(id, positions);
+    return positions;
+  } catch (err) {
+    console.error("X-ray geometry error", err);
+    return null;
+  }
+}
+
+function clearXray() {
+  if (!xrayPoints) {
+    return;
+  }
+  scene.remove(xrayPoints);
+  xrayPoints.geometry.dispose();
+  xrayPoints.material.dispose();
+  xrayPoints = null;
+}
+
+function pulseXray(nowMs) {
+  if (!xrayPoints) {
+    return;
+  }
+  const phase = (nowMs / 1000) * XRAY_PULSE_HZ * 2 * Math.PI;
+  xrayPoints.material.opacity = XRAY_BASE_OPACITY + XRAY_PULSE_AMPLITUDE * Math.sin(phase);
+}
+
+// Soft round dot instead of square GL points; built once.
+function xrayDotTexture() {
+  if (xraySprite) {
+    return xraySprite;
+  }
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const glow = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  glow.addColorStop(0, "rgba(255,255,255,1)");
+  glow.addColorStop(0.4, "rgba(255,255,255,0.8)");
+  glow.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, size, size);
+  xraySprite = new THREE.CanvasTexture(canvas);
+  return xraySprite;
 }
 
 async function runCopilotDiagnosis(assetId, question) {
@@ -1183,10 +1307,7 @@ function updateCopilotDrawer(dossier, diag) {
   setText("card-asset-tag", tag);
   setText("card-asset-meta", prettyClass(diag.asset_class || dossier.asset_class) + " · " + (dossier.area_name || "Boiler room"));
   const frame = framesById.get(dossier.asset_id);
-  setText("card-mapping-note", frame && frame.asset_id
-    ? "Synthetic mapping → 3D object " + frame.scene_id + " · confidence " + (frame.mapping_confidence != null ? frame.mapping_confidence : "—") +
-      (frame.id === routeTargetId ? " · inspection target" : "")
-    : "Not placed in the 3D scene.");
+  setText("card-mapping-note", frame && frame.asset_id ? mappingNote(frame) : "Not located in the scan: no object was verified as this asset.");
   const badge = document.getElementById("card-health-badge");
   badge.innerText = Math.round(health || 0) + "% " + condition.replace(/_/g, " ").toUpperCase();
   badge.style.color = css;
@@ -1701,6 +1822,7 @@ function animate() {
     controls.update();
     if (cameraMode === "follow") keepCameraInside();
   }
+  pulseXray(now);
   if (now - lastDeclutter > 120) {
     declutterLabels();
     lastDeclutter = now;
@@ -1852,6 +1974,10 @@ function setupToolbar() {
       if (b.dataset.view !== viewKind) loadSceneModel(b.dataset.view);
     };
   });
+  document.getElementById("btn-verify").onclick = function () {
+    closeMenus();
+    verifyPlacementByCamera();
+  };
   document.getElementById("btn-heat").onclick = function () {
     closeMenus();
     if (viewKind === "splat") {
@@ -1912,6 +2038,153 @@ function hideHelp() {
 }
 
 
+
+// ---------------------------------------------------------------- camera verification
+// The workbook has no real positions, so what each detected object *is* has to come from the scan.
+// For every object the viewer renders a close crop, the backend asks a vision-language model what
+// it shows, and the asset binding then only uses objects verified as the asset's class.
+
+const VERIFY_SETTLE_MS = 1200; // lets Spark re-sort the splat after the camera jumps
+const VERIFY_CONCURRENCY = 3; // model requests in flight while the camera keeps moving
+const VERIFY_CROP_PX = 640;
+const VERIFY_GIVE_UP_AFTER = 3; // consecutive failures (no key, no network) before stopping
+let verifyRunning = false;
+let verifyStop = false;
+
+window.addEventListener("keydown", function (event) {
+  if (event.key === "Escape" && verifyRunning) verifyStop = true;
+});
+
+// A camera spot that looks at the frame from inside the room, preferring the side facing the room centre.
+function verifyCameraSpot(frame, room) {
+  const [cx, , cz] = frame.pos;
+  const reach = Math.max(1.5, Math.max.apply(null, frame.size) * 1.8);
+  const towardCentre = Math.atan2(-cz, -cx);
+  const inside = function (x, z) {
+    return x > room.x[0] + 0.15 && x < room.x[1] - 0.15 && z > room.z[0] + 0.15 && z < room.z[1] - 0.15;
+  };
+  for (const distance of [reach, reach * 0.8, reach * 0.6, 1.0]) {
+    for (const turn of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, Math.PI]) {
+      const x = cx + Math.cos(towardCentre + turn) * distance;
+      const z = cz + Math.sin(towardCentre + turn) * distance;
+      if (inside(x, z)) return { x: x, z: z };
+    }
+  }
+  return { x: cx, z: cz + (cz > 0 ? -1.2 : 1.2) };
+}
+
+// Renders the frame from a close spot and returns a JPEG crop with the object outlined.
+async function captureFrameCrop(frame, room) {
+  const centre = new THREE.Vector3(frame.pos[0], frame.pos[1], frame.pos[2]);
+  const spot = verifyCameraSpot(frame, room);
+  camera.position.set(spot.x, Math.min(Math.max(centre.y + 0.3, 0.8), 1.5), spot.z);
+  controls.target.copy(centre);
+  controls.update();
+  camera.updateMatrixWorld();
+  await new Promise(function (resolve) { setTimeout(resolve, VERIFY_SETTLE_MS); });
+
+  const canvas = renderer.domElement;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const dx of [-0.5, 0.5]) for (const dy of [-0.5, 0.5]) for (const dz of [-0.5, 0.5]) {
+    const corner = new THREE.Vector3(centre.x + dx * frame.size[0], centre.y + dy * frame.size[1], centre.z + dz * frame.size[2]).project(camera);
+    const sx = (corner.x * 0.5 + 0.5) * canvas.width;
+    const sy = (-corner.y * 0.5 + 0.5) * canvas.height;
+    x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+  }
+  const w = x1 - x0, h = y1 - y0;
+  const side = Math.max(w, h, 200) * 1.9;
+  const left = Math.max(0, (x0 + x1) / 2 - side / 2), top = Math.max(0, (y0 + y1) / 2 - side / 2);
+  const cropW = Math.min(canvas.width - left, side), cropH = Math.min(canvas.height - top, side);
+  const out = document.createElement("canvas");
+  out.width = Math.round(Math.min(cropW, VERIFY_CROP_PX));
+  out.height = Math.round(out.width * cropH / cropW);
+  const ctx = out.getContext("2d");
+  ctx.drawImage(canvas, left, top, cropW, cropH, 0, 0, out.width, out.height);
+  const k = out.width / cropW;
+  ctx.strokeStyle = "#00e5ff"; // tells the model which object is meant
+  ctx.lineWidth = 2;
+  ctx.strokeRect((x0 - left) * k, (y0 - top) * k, w * k, h * k);
+  return new Promise(function (resolve) { out.toBlob(resolve, "image/jpeg", 0.9); });
+}
+
+async function postVerification(frame, blob) {
+  const form = new FormData();
+  form.append("file", blob, "crop.jpg");
+  const res = await fetch("/api/scene/objects/" + encodeURIComponent(frame.scene_id) + "/verification", { method: "POST", body: form });
+  if (!res.ok) {
+    let detail = res.status + " " + res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (e) { /* not JSON */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+async function verifyPlacementByCamera() {
+  if (verifyRunning) return;
+  if (viewKind !== "splat" || !sceneModel) {
+    showToast("Switch to the photoreal view first");
+    return;
+  }
+  verifyRunning = true;
+  verifyStop = false;
+  const previousMode = cameraMode;
+  const hiddenNodes = scene.children.filter(function (n) { return n !== sparkRenderer && n !== sceneModel && !n.isLight && n.visible; });
+  hiddenNodes.forEach(function (n) { n.visible = false; }); // overlays must not appear in the crops
+  let done = 0, failed = 0, consecutiveFailures = 0, lastError = "";
+  try {
+    const summary = await fetchJson("/api/scene/summary");
+    const known = await fetchJson("/api/scene/verification");
+    const todo = framesData.filter(function (f) { return !known[f.scene_id]; });
+    cameraMode = "verify";
+    camTween = null;
+    const pending = new Set();
+    for (let i = 0; i < todo.length && !verifyStop; i++) {
+      setLoading(i / todo.length, "Checking what each object is… " + i + " / " + todo.length + " (Esc to stop)");
+      const blob = await captureFrameCrop(todo[i], summary.room);
+      const request = postVerification(todo[i], blob).then(
+        function () { done++; consecutiveFailures = 0; },
+        function (err) { failed++; consecutiveFailures++; lastError = err.message; },
+      );
+      pending.add(request);
+      request.finally(function () { pending.delete(request); });
+      if (pending.size >= VERIFY_CONCURRENCY) await Promise.race(pending);
+      if (consecutiveFailures >= VERIFY_GIVE_UP_AFTER) break;
+    }
+    await Promise.all(pending);
+    if (consecutiveFailures >= VERIFY_GIVE_UP_AFTER) {
+      showToast("Verification stopped: " + lastError);
+    }
+  } catch (err) {
+    showToast("Verification failed: " + err.message);
+  } finally {
+    hiddenNodes.forEach(function (n) { n.visible = true; });
+    setCameraMode(previousMode === "verify" ? "follow" : previousMode);
+    verifyRunning = false;
+  }
+  if (done === 0) {
+    setLoading(null);
+    return;
+  }
+  setLoading(0.98, "Re-placing the assets from the evidence…");
+  try {
+    await fetchJson("/api/scene/extract-assets", { method: "POST" });
+    try { sessionStorage.setItem("verifyReport", done + " objects checked" + (failed ? ", " + failed + " failed" : "")); } catch (e) { /* storage off */ }
+    window.location.reload();
+  } catch (err) {
+    setLoading(null);
+    showToast("Re-placing failed: " + err.message);
+  }
+}
+
+function showVerifyReport() {
+  try {
+    const report = sessionStorage.getItem("verifyReport");
+    if (report) {
+      sessionStorage.removeItem("verifyReport");
+      setTimeout(function () { showToast("Camera verification: " + report); }, 1500);
+    }
+  } catch (e) { /* storage off */ }
+}
 
 // ---------------------------------------------------------------- YOLO (secondary)
 

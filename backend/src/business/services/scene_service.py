@@ -85,6 +85,12 @@ class SceneService:
             })
         return result
 
+    def object_geometry(self, identifier: str) -> bytes:
+        geometry = self._scene.get_object_geometry(identifier)
+        if geometry is None:
+            raise NotFoundError("No scene object matches '{}'.".format(identifier))
+        return geometry
+
     def re_extract(self) -> Dict[str, Any]:
         scene = self._scene.rebuild()
         return {**scene.summary(), "all_frames": scene.get_semantic_frames()}
