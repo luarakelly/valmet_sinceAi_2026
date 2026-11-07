@@ -1579,6 +1579,25 @@ function updateAssetModal(dossier, diag) {
     list.appendChild(li);
   });
   setText("dx-why-title", "Evidence · " + evidence.length + " items · " + docs.length + " document" + (docs.length === 1 ? "" : "s"));
+  lockDiagnosisHeight();
+}
+
+// The diagnosis card keeps its collapsed size; opening the evidence scrolls inside it.
+function lockDiagnosisHeight() {
+  const block = document.getElementById("diag-block");
+  document.getElementById("dx-why").open = false;
+  block.style.maxHeight = "";
+  block.style.maxHeight = block.offsetHeight + "px";
+}
+
+// Opening the evidence scrolls the card so the list starts at its top edge.
+function scrollToEvidence() {
+  const why = document.getElementById("dx-why");
+  if (!why.open) {
+    return;
+  }
+  const block = document.getElementById("diag-block");
+  block.scrollTop = why.offsetTop - block.offsetTop;
 }
 
 
@@ -2216,6 +2235,7 @@ function setupChat() {
   document.getElementById("btn-chat").onclick = toggleChat;
   document.getElementById("btn-chat-close").onclick = toggleChat;
   document.getElementById("btn-asset-close").onclick = closeAssetModal;
+  document.getElementById("dx-why").addEventListener("toggle", scrollToEvidence);
   document.getElementById("asset-modal").onclick = function (e) {
     if (e.target.id === "asset-modal") {
       closeAssetModal();

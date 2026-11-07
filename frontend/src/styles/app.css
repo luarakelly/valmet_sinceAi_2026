@@ -1105,7 +1105,6 @@ body.debug .debug-only { display: block; }
 :root {
   --modal-z: 70;
   --modal-height: min(480px, calc(100vh - 64px));
-  --evidence-height: 180px;
   --chat-z: 60;
   --chat-width: 33vw;
   --chat-height: 50vh;
@@ -1148,8 +1147,8 @@ body.debug .debug-only { display: block; }
 }
 .asset-modal-close:hover { color: var(--text); }
 .cp-why summary { cursor: pointer; }
-.cp-why[open] .why-list {
-  max-height: var(--evidence-height);
+.asset-modal-details .cp-diagnosis {
+  flex-shrink: 0;
   overflow-y: auto;
 }
 .asset-modal-image {
