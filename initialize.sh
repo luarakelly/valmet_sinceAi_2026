@@ -12,7 +12,11 @@ fi
 
 printf '%s\n' "Creating or updating the backend uv environment..."
 uv venv "$VENV_DIR"
-uv pip install --python "$VENV_DIR/bin/python" -r "$BACKEND_DIR/requirements.txt"
+VENV_PYTHON="$VENV_DIR/bin/python"
+if [ ! -x "$VENV_PYTHON" ] && [ -x "$VENV_DIR/Scripts/python.exe" ]; then
+  VENV_PYTHON="$VENV_DIR/Scripts/python.exe"   # Git Bash on Windows
+fi
+uv pip install --python "$VENV_PYTHON" -r "$BACKEND_DIR/requirements.txt"
 
 if [ ! -f "$ROOT_DIR/.env" ]; then
   cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"

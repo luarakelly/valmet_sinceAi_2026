@@ -564,16 +564,16 @@ def get_boiler_room_ply():
 
 @router.get("/scene/boiler-room-mesh.ply")
 def get_boiler_room_mesh():
-    """Surface mesh reconstructed from the Gaussian splat (vertex colours + faces), same canonical frame."""
-    from app.metaverse.point_cloud import VIEWER_MESH_PATH, build_scene_mesh
+    """Surface mesh reconstructed from the Gaussian splat (vertex colours + faces), same canonical frame.
 
-    try:
-        path = build_scene_mesh()
-    except FileNotFoundError:
-        path = VIEWER_MESH_PATH
-    if not path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Boiler room mesh not found on server")
-    return FileResponse(path=str(path), media_type="application/octet-stream", filename=path.name)
+    Served as-is: rebuilding takes minutes and needs scikit-image/trimesh, so it is done offline with
+    `python scripts/build_mesh.py`, never inside a request.
+    """
+    from app.metaverse.point_cloud import VIEWER_MESH_PATH
+
+    if not VIEWER_MESH_PATH.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Boiler room mesh not found; run scripts/build_mesh.py")
+    return FileResponse(path=str(VIEWER_MESH_PATH), media_type="application/octet-stream", filename=VIEWER_MESH_PATH.name)
 
 
 @router.post("/vision/analyze")

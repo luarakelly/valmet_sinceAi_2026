@@ -1,142 +1,118 @@
+// Ask Your Factory — guided boiler-room digital twin.
+// Flow: 1) scene + faulty target  2) robot walks, nearby frames light up  3) AI diagnosis on arrival.
+// Scene frame from the backend: Y up, floor at y = 0, room centred on x = z = 0.
+
 let scene, camera, renderer, controls;
-let pointCloud = null;
-let boundingFramesGroup = new THREE.Group();
+let sceneModel = null; // THREE.Points (scan) or THREE.Mesh (surface)
+let pointCloud = null; // alias kept for the shaders/resize helpers
+let viewKind = "points"; // "points" | "mesh"
+let renderMode = "splat"; // "splat" | "heat"
+const boundingFramesGroup = new THREE.Group();
 let pathLineMesh = null;
 let robotAvatar = null;
+
 let assetsData = [];
+let framesData = [];
+const framesById = new Map(); // frame id (asset id when mapped, else OBJ-xxx) -> frame
+let sceneSummary = null;
+let roomBounds = { x: [-5, 5], z: [-3, 3], ceiling: 3 };
+
+let routeTargetId = null; // the inspection target (does NOT change when you just select something)
+let selectedId = null; // what the copilot panel shows
+let nearbyIds = new Set();
+let showAllFrames = false;
+
 let currentPath = [];
-let navProgress = 0;
 let pathLengths = [0];
-let lastFrameTime = performance.now();
+let navProgress = 0;
 let isNavigating = false;
 let navSpeed = 1.5;
-let cameraMode = "orbit";
-let currentSelectedAsset = "ASSET-017";
-let pointSize = 0.070;
-let renderMode = "splat";
+let lastFrameTime = performance.now();
+let cameraMode = "orbit"; // "orbit" | "follow" | "top" | "free"
+let lastRobotPos = null;
+let camTween = null;
 let sidebarOpen = true;
 let copilotOpen = true;
 
-// Canonical scene frame from the backend: Y up, floor at y = 0, room centred on x = z = 0.
 const ROBOT_GROUND_OFFSET = 0.15;
 const PROXIMITY_RADIUS = 1.5;
 const ROBOT_SPEED_M_S = 0.8;
-const ORBIT_VIEW = { position: [-5.5, 3.2, 4.5], target: [0, 0.8, 0] };
-const TOP_VIEW = { position: [0, 9, 0.01], target: [0, 0, 0] };
-
-const freeCam = {
-  active: false,
-  keys: new Set(),
-  yaw: 0,
-  pitch: 0,
-  speed: 2.8,
-  lastTime: 0,
+const ORBIT_VIEW = { position: [-5.5, 3.6, 5.0], target: [0, 0.8, 0] };
+const TOP_VIEW = { position: [0, 10, 0.01], target: [0, 0, 0] };
+const STATE_COLORS = {
+  attention_required: 0xef4444,
+  degraded: 0xf97316,
+  watch: 0xf59e0b,
+  healthy: 0x10b981,
+  structure: 0x5eead4,
 };
+const STATE_CSS = {
+  attention_required: "#ef4444",
+  degraded: "#f97316",
+  watch: "#f59e0b",
+  healthy: "#10b981",
+  structure: "#5eead4",
+};
+
+const freeCam = { active: false, keys: new Set(), yaw: 0, pitch: 0, speed: 2.8, lastTime: 0 };
+
+// ---------------------------------------------------------------- setup
 
 function init3D() {
   const container = document.getElementById("canvas-container");
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x06090e);
-  scene.fog = new THREE.FogExp2(0x06090e, 0.038);
+  scene.background = new THREE.Color(0x070b12);
 
-  camera = new THREE.PerspectiveCamera(
-    60,
-    container.clientWidth / container.clientHeight,
-    0.05,
-    120,
-  );
+  camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.03, 200);
   camera.position.set(...ORBIT_VIEW.position);
 
-  renderer = new THREE.WebGLRenderer({
-    antialias: true,
-    powerPreference: "high-performance",
-  });
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", preserveDrawingBuffer: true });
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMappingExposure = 1.1;
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
+  controls.dampingFactor = 0.08;
+  controls.rotateSpeed = 0.6;
+  controls.zoomSpeed = 0.9;
+  controls.panSpeed = 0.8;
+  controls.screenSpacePanning = true;
+  controls.minDistance = 0.4;
+  controls.maxDistance = 18;
+  controls.maxPolarAngle = Math.PI * 0.495; // never go below the floor
   controls.target.set(...ORBIT_VIEW.target);
 
-  const ambLight = new THREE.AmbientLight(0xffffff, 0.9);
-  scene.add(ambLight);
-  const dirLight = new THREE.DirectionalLight(0x00d2ff, 0.65);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const dirLight = new THREE.DirectionalLight(0xbfe9ff, 0.6);
   dirLight.position.set(5, 10, 5);
   scene.add(dirLight);
 
-  const grid = new THREE.GridHelper(16, 16, 0x183040, 0x0b1722);
-  grid.position.y = 0;
+  const grid = new THREE.GridHelper(20, 40, 0x183040, 0x0b1722);
   grid.material.transparent = true;
-  grid.material.opacity = 0.42;
+  grid.material.opacity = 0.35;
   scene.add(grid);
 
-  boundingFramesGroup.visible = true;
   scene.add(boundingFramesGroup);
-
   createRobotAvatar();
-  loadBoilerRoomPLY();
-  fetchAssetsAndFrames();
 
   window.addEventListener("resize", onWindowResize);
   setupFreeCamera();
+  setupViewportPicking();
   setupOmnibar();
-  setupPanelCollapses();
-  setupViewportRaycaster();
-  // Collapse left and right panels by default for clean open viewport
-  toggleLeftSidebar();
-  toggleCopilotDrawer();
+  setupPanels();
+  setupToolbar();
+  setupHelp();
 
+  loadSceneModel("points");
+  fetchSceneData();
   animate();
 }
 
-function setupViewportRaycaster() {
-  const raycaster = new THREE.Raycaster();
-  const mouse = new THREE.Vector2();
-  let mouseDownTime = 0;
-  let mouseDownPos = { x: 0, y: 0 };
-
-  renderer.domElement.addEventListener("mousedown", (e) => {
-    mouseDownTime = Date.now();
-    mouseDownPos = { x: e.clientX, y: e.clientY };
-  });
-
-  renderer.domElement.addEventListener("mouseup", (e) => {
-    const dt = Date.now() - mouseDownTime;
-    const dx = Math.abs(e.clientX - mouseDownPos.x);
-    const dy = Math.abs(e.clientY - mouseDownPos.y);
-    if (dt > 300 || dx > 4 || dy > 4) return;
-
-    const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(
-      boundingFramesGroup.children,
-      true,
-    );
-    if (intersects.length > 0) {
-      let topObj = intersects[0].object;
-      while (
-        topObj &&
-        (!topObj.userData || !topObj.userData.id) &&
-        topObj.parent
-      ) {
-        topObj = topObj.parent;
-      }
-      if (topObj && topObj.userData && topObj.userData.id) {
-        const targetId = topObj.userData.id;
-        selectAsset(targetId);
-        showToast("Selected " + (topObj.userData.tag || targetId) + " in 3D");
-      }
-    }
-  });
-}
+// ---------------------------------------------------------------- scene geometry
 
 function createRobotAvatar() {
   robotAvatar = new THREE.Group();
@@ -213,9 +189,6 @@ function createRobotAvatar() {
   scene.add(robotAvatar);
 }
 
-/**
- * Prepares the point cloud geometry with guaranteed bounding volumes and vertex colors.
- */
 function preparePointGeometry(geometry) {
   if (!geometry.hasAttribute("color")) {
     const count = geometry.attributes.position.count;
@@ -230,10 +203,6 @@ function preparePointGeometry(geometry) {
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
-}
-
-function cleanAndPreparePointGeometry(rawGeometry) {
-  return preparePointGeometry(rawGeometry);
 }
 
 function createPointMaterial(geometry) {
@@ -382,114 +351,6 @@ function createPointMaterial(geometry) {
   });
 }
 
-function applyRenderMode(mode) {
-  renderMode = mode;
-  let modeIndex = 0;
-  if (mode === "studio") {
-    modeIndex = 1;
-  } else if (mode === "heat") {
-    modeIndex = 2;
-  }
-
-  document
-    .querySelectorAll(".render-mode-btn[data-render-mode]")
-    .forEach(function (button) {
-      let active = false;
-      if (button.dataset.renderMode === mode) {
-        active = true;
-      }
-      button.classList.toggle("active", active);
-      if (active) {
-        button.setAttribute("aria-pressed", "true");
-      } else {
-        button.setAttribute("aria-pressed", "false");
-      }
-    });
-
-  if (pointCloud && pointCloud.material && pointCloud.material.uniforms) {
-    if (pointCloud.material.uniforms.uMode) {
-      pointCloud.material.uniforms.uMode.value = modeIndex;
-    }
-    if (pointCloud.material.uniforms.uPointSize) {
-      if (mode === "splat") {
-        pointCloud.material.uniforms.uPointSize.value = 0.088;
-      } else {
-        pointCloud.material.uniforms.uPointSize.value = 0.065;
-      }
-    }
-    if (pointCloud.material.uniforms.uOpacity) {
-      if (mode === "heat") {
-        pointCloud.material.uniforms.uOpacity.value = 0.92;
-      } else {
-        pointCloud.material.uniforms.uOpacity.value = 0.98;
-      }
-    }
-  }
-
-  showToast("Render mode: " + mode.charAt(0).toUpperCase() + mode.slice(1));
-}
-
-function renderVisionDetections(result) {
-  const overlay = document.getElementById("vision-overlay");
-  overlay.innerHTML = "";
-  const imageWidth = result.image.width;
-  const imageHeight = result.image.height;
-  result.detections.forEach(function (detection) {
-    const box = document.createElement("div");
-    box.className = "vision-detection";
-    box.style.left = (detection.box.x / imageWidth) * 100 + "%";
-    box.style.top = (detection.box.y / imageHeight) * 100 + "%";
-    box.style.width = (detection.box.width / imageWidth) * 100 + "%";
-    box.style.height = (detection.box.height / imageHeight) * 100 + "%";
-
-    const label = document.createElement("span");
-    label.className = "vision-detection-label";
-    label.innerText =
-      detection.label + " " + Math.round(detection.confidence * 100) + "%";
-    box.appendChild(label);
-    overlay.appendChild(box);
-  });
-}
-
-async function analyzeCurrentView() {
-  const button = document.getElementById("btn-vision-analyze");
-  const canvas = renderer.domElement;
-  button.disabled = true;
-  button.innerText = "Scanning...";
-  try {
-    const blob = await new Promise(function (resolve) {
-      canvas.toBlob(resolve, "image/jpeg", 0.82);
-    });
-    if (!blob) {
-      throw new Error("Could not capture the 3D view.");
-    }
-    const form = new FormData();
-    form.append("file", blob, "ask-your-factory-view.jpg");
-    form.append(
-      "classes",
-      "person, worker, safety helmet, pump, valve, pipe, tank, boiler, motor, industrial machine, pressure gauge, ladder, fire extinguisher",
-    );
-    const response = await fetch("/api/vision/analyze", {
-      method: "POST",
-      body: form,
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(result.detail || "YOLO-World analysis failed.");
-    }
-    renderVisionDetections(result);
-    showToast("YOLO-World found " + result.detections.length + " object(s)");
-  } catch (error) {
-    console.error("YOLO-World analysis error", error);
-    showToast(error.message);
-  } finally {
-    button.disabled = false;
-    button.innerText = "AI Scan";
-  }
-}
-
-// Surface mesh reconstructed from the Gaussian splat (see backend splat_mesh.py).
-// Modes: 0 = scan colours, 1 = studio (height-tinted clay), 2 = heat (height ramp).
 function createMeshMaterial(geometry) {
   geometry.computeBoundingBox();
   const bounds = geometry.boundingBox;
@@ -551,117 +412,112 @@ function createMeshMaterial(geometry) {
   });
 }
 
-function loadBoilerRoomPLY() {
-  showToast("Loading boiler room mesh...");
+function loadSceneModel(kind) {
+  viewKind = kind;
+  document.querySelectorAll(".render-mode-btn[data-view]").forEach(function (b) {
+    b.classList.toggle("active", b.dataset.view === kind);
+  });
   const loader = new THREE.PLYLoader();
+  const url = kind === "mesh" ? "/api/scene/boiler-room-mesh.ply" : "/api/scene/boiler-room.ply";
+  showToast(kind === "mesh" ? "Loading surface mesh…" : "Loading scan points…");
   loader.load(
-    "/api/scene/boiler-room-mesh.ply",
+    url,
     function (geometry) {
-      if (pointCloud) {
-        scene.remove(pointCloud);
+      if (sceneModel) {
+        scene.remove(sceneModel);
+        sceneModel.geometry.dispose();
       }
-      geometry.computeVertexNormals();
-      pointCloud = new THREE.Mesh(geometry, createMeshMaterial(geometry));
-      scene.add(pointCloud);
+      if (kind === "mesh") {
+        geometry.computeVertexNormals();
+        sceneModel = new THREE.Mesh(geometry, createMeshMaterial(geometry));
+      } else {
+        preparePointGeometry(geometry);
+        sceneModel = new THREE.Points(geometry, createPointMaterial(geometry));
+      }
+      pointCloud = sceneModel;
+      scene.add(sceneModel);
       applyRenderMode(renderMode);
-      const faces = geometry.index ? geometry.index.count / 3 : geometry.attributes.position.count / 3;
-      const pointCountEl = document.getElementById("engine-point-count");
-      if (pointCountEl) {
-        pointCountEl.innerText = "Boiler room mesh · " + Math.round(faces / 1000) + "k triangles";
-      }
+      const count = kind === "mesh"
+        ? Math.round((geometry.index ? geometry.index.count : geometry.attributes.position.count) / 3)
+        : geometry.attributes.position.count;
+      showToast((kind === "mesh" ? "Mesh: " : "Scan: ") + count.toLocaleString() + (kind === "mesh" ? " triangles" : " points"));
     },
     undefined,
     function (err) {
-      console.warn("Mesh unavailable, falling back to point cloud", err);
-      loadBoilerRoomPointCloud();
+      console.warn("Could not load " + url, err);
+      if (kind === "mesh") {
+        showToast("Mesh not available — showing scan points");
+        loadSceneModel("points");
+      } else {
+        showToast("Scan could not be loaded — is the backend running?");
+      }
     },
   );
 }
 
-function loadBoilerRoomPointCloud() {
-  const loader = new THREE.PLYLoader();
-
-  loader.load(
-    "/api/scene/boiler-room.ply",
-    function (rawGeometry) {
-      if (pointCloud) {
-        scene.remove(pointCloud);
-      }
-
-      const geometry = cleanAndPreparePointGeometry(rawGeometry, 0.12, 4);
-      const material = createPointMaterial(geometry);
-
-      pointCloud = new THREE.Points(geometry, material);
-      scene.add(pointCloud);
-
-      applyRenderMode(renderMode);
-
-      const finalCount = geometry.attributes.position.count;
-      const pointCountEl = document.getElementById("engine-point-count");
-      if (pointCountEl) {
-        pointCountEl.innerText = finalCount.toLocaleString() + " splats verified";
-      }
-      showToast("Boiler Room loaded (" + finalCount.toLocaleString() + " splats)");
-    },
-    undefined,
-    function (err) {
-      console.warn("Falling back to procedural cloud", err);
-      generateProceduralPointcloud();
-    }
-  );
-}
-
-function generateProceduralPointcloud() {
-  const pCount = 80000;
-  const positions = new Float32Array(pCount * 3);
-  const colors = new Float32Array(pCount * 3);
-  for (let i = 0; i < pCount; i++) {
-    const x = (Math.random() - 0.5) * 8.0;
-    const y = (Math.random() - 0.5) * 3.0;
-    const z = (Math.random() - 0.5) * 8.0 - 1.5;
-    positions[i * 3] = x;
-    positions[i * 3 + 1] = y;
-    positions[i * 3 + 2] = z;
-
-    colors[i * 3] = 0.5 + Math.sin(x) * 0.2;
-    colors[i * 3 + 1] = 0.5 + Math.cos(z) * 0.2;
-    colors[i * 3 + 2] = 0.6;
+function applyRenderMode(mode) {
+  renderMode = mode;
+  document.getElementById("btn-heat").classList.toggle("active", mode === "heat");
+  if (sceneModel && sceneModel.material && sceneModel.material.uniforms && sceneModel.material.uniforms.uMode) {
+    sceneModel.material.uniforms.uMode.value = mode === "heat" ? 2 : 0;
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geo.computeBoundingBox();
-  const mat = createPointMaterial(geo);
-  pointCloud = new THREE.Points(geo, mat);
-  scene.add(pointCloud);
-  applyRenderMode(renderMode);
 }
 
-async function fetchAssetsAndFrames() {
+// ---------------------------------------------------------------- data
+
+async function fetchJson(url, options) {
+  const res = await fetch(url, options);
+  let body = null;
   try {
-    const [assetsRes, framesRes, summaryRes] = await Promise.all([
-      fetch("/api/assets"),
-      fetch("/api/scene/frames"),
-      fetch("/api/scene/summary"),
-    ]);
-    assetsData = await assetsRes.json();
-    const frames = await framesRes.json();
-    const summary = await summaryRes.json();
-    currentSelectedAsset = summary.target_asset_id;
-    robotAvatar.position.set(summary.entry.x, ROBOT_GROUND_OFFSET, summary.entry.z);
-
-    renderAssetList(assetsData);
-    build3DBoundingBoxes(frames);
-    const assetCountEl = document.getElementById("asset-count");
-    if (assetCountEl) {
-      assetCountEl.innerText =
-        frames.length + " Objects · " + summary.mapped_asset_count + " Assets";
-    }
-    loadNavigationPath(currentSelectedAsset);
+    body = await res.json();
   } catch (e) {
-    console.error("Error fetching assets", e);
+    body = null;
+  }
+  if (!res.ok) {
+    const detail = body && body.detail ? body.detail : res.status + " " + res.statusText;
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return body;
+}
+
+async function fetchSceneData() {
+  try {
+    const [assets, frames, summary] = await Promise.all([
+      fetchJson("/api/assets"),
+      fetchJson("/api/scene/frames"),
+      fetchJson("/api/scene/summary"),
+    ]);
+    assetsData = assets;
+    framesData = frames;
+    sceneSummary = summary;
+    if (summary.room) {
+      roomBounds = summary.room;
+    }
+    framesById.clear();
+    frames.forEach(function (f) {
+      framesById.set(f.id, f);
+    });
+
+    routeTargetId = summary.target_asset_id;
+    selectedId = routeTargetId;
+    robotAvatar.position.set(summary.entry.x, ROBOT_GROUND_OFFSET, summary.entry.z);
+    lastRobotPos = robotAvatar.position.clone();
+
+    document.getElementById("asset-count").innerText =
+      frames.length + " frames · " + (summary.mapped_asset_count || 0) + " assets";
+
+    buildFrames(frames);
+    renderAssetList(assetsData);
+    await loadRoute(routeTargetId);
+    showSelection(routeTargetId);
+    setStep(1);
+  } catch (e) {
+    console.error("Scene data error", e);
+    showToast("Could not load the scene data: " + e.message);
   }
 }
+
+// ---------------------------------------------------------------- 3D frames
 
 function createFloatingLabelSprite(tag, stateText, colorHex) {
   const canvas = document.createElement("canvas");
@@ -698,109 +554,97 @@ function createFloatingLabelSprite(tag, stateText, colorHex) {
   return sprite;
 }
 
-function build3DBoundingBoxes(frames) {
-  while (boundingFramesGroup.children.length > 0) {
-    boundingFramesGroup.remove(boundingFramesGroup.children[0]);
-  }
+function frameState(frame) {
+  return frame.asset_id ? frame.state || "healthy" : "structure";
+}
 
-  frames.forEach((frame) => {
+function buildFrames(frames) {
+  while (boundingFramesGroup.children.length > 0) {
+    const child = boundingFramesGroup.children[0];
+    boundingFramesGroup.remove(child);
+  }
+  frames.forEach(function (frame) {
     const [w, h, d] = frame.size;
     const [x, y, z] = frame.pos;
-
-    let colorHex = 0x10b981;
-    let colorCss = "#10b981";
-    if (frame.state === "watch") {
-      colorHex = 0xf59e0b;
-      colorCss = "#f59e0b";
-    } else if (frame.state === "degraded") {
-      colorHex = 0xf97316;
-      colorCss = "#f97316";
-    } else if (frame.state === "attention_required") {
-      colorHex = 0xef4444;
-      colorCss = "#ef4444";
-    } else if (!frame.asset_id) {
-      colorHex = 0x00d2ff;
-      colorCss = "#00d2ff";
-    }
-
-    const isSelected = frame.id === currentSelectedAsset;
-    let boxLineWidth = 1;
-    let boxLineOpacity = 0.08;
-    let boxFillOpacity = 0.0;
-    let boxLabelOpacity = 0.0;
-    if (isSelected) {
-      boxLineWidth = 2;
-      boxLineOpacity = 0.95;
-      boxFillOpacity = 0.15;
-      boxLabelOpacity = 1.0;
-    }
+    const state = frameState(frame);
+    const colorHex = STATE_COLORS[state] || STATE_COLORS.structure;
 
     const boxGeo = new THREE.BoxGeometry(w, h, d);
-    const edges = new THREE.EdgesGeometry(boxGeo);
-    const lineMat = new THREE.LineBasicMaterial({
-      color: colorHex,
-      linewidth: boxLineWidth,
-      transparent: true,
-      opacity: boxLineOpacity,
-    });
-    const boxMesh = new THREE.LineSegments(edges, lineMat);
-    boxMesh.position.set(x, y, z);
+    const lineMat = new THREE.LineBasicMaterial({ color: colorHex, transparent: true, opacity: 0, depthTest: true });
+    const box = new THREE.LineSegments(new THREE.EdgesGeometry(boxGeo), lineMat);
+    box.position.set(x, y, z);
 
-    const fillMat = new THREE.MeshBasicMaterial({
-      color: colorHex,
-      transparent: true,
-      opacity: boxFillOpacity,
-      depthWrite: false,
-    });
-    const fillMesh = new THREE.Mesh(boxGeo, fillMat);
-    boxMesh.add(fillMesh);
+    const fillMat = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0, depthWrite: false });
+    const fill = new THREE.Mesh(boxGeo, fillMat);
+    box.add(fill);
 
-    const labelSprite = createFloatingLabelSprite(
-      frame.tag || frame.id,
-      frame.state || frame.label.replace(/_/g, " "),
-      colorCss,
-    );
-    labelSprite.position.set(0, h / 2 + 0.35, 0);
-    labelSprite.material.opacity = boxLabelOpacity;
-    boxMesh.add(labelSprite);
+    let label = null;
+    if (frame.asset_id) {
+      label = createFloatingLabelSprite(frame.tag || frame.id, (frame.state || "").replace(/_/g, " "), STATE_CSS[state]);
+      label.position.set(0, h / 2 + 0.3, 0);
+      label.material.opacity = 0;
+      box.add(label);
+    }
 
-    boxMesh.userData = {
-      id: frame.id,
-      tag: frame.tag,
-      state: frame.state,
-      health: frame.health,
-      label: frame.label,
-      assetClass: frame.class,
-      assetId: frame.asset_id,
-      pos: [x, y, z],
-      size: [w, h, d],
-      lineMat: lineMat,
-      fillMat: fillMat,
-      labelSprite: labelSprite,
-      baseColor: colorHex,
-      isMapped: !!frame.asset_id,
-    };
+    box.userData = { id: frame.id, frame: frame, lineMat: lineMat, fillMat: fillMat, label: label, shown: false };
+    boundingFramesGroup.add(box);
+  });
+  refreshFrameStyles();
+}
 
-    boundingFramesGroup.add(boxMesh);
+// Which frames are drawn, and how strongly:
+//   target / selected: full;  near the robot: full;  other mapped assets: faint;
+//   unmapped structure: hidden unless "All frames" is on.
+function refreshFrameStyles() {
+  boundingFramesGroup.children.forEach(function (box) {
+    const u = box.userData;
+    const f = u.frame;
+    const isTarget = f.id === routeTargetId;
+    const isSelected = f.id === selectedId;
+    const isNear = nearbyIds.has(f.id);
+    let line = 0;
+    let fill = 0;
+    let label = 0;
+    if (isTarget || isSelected) {
+      line = 1;
+      fill = isTarget ? 0.16 : 0.1;
+      label = 1;
+    } else if (isNear) {
+      line = 0.95;
+      fill = 0.08;
+      label = f.asset_id ? 1 : 0;
+    } else if (f.asset_id) {
+      line = showAllFrames ? 0.55 : 0.28;
+    } else if (showAllFrames) {
+      line = 0.35;
+    }
+    u.lineMat.opacity = line;
+    u.fillMat.opacity = fill;
+    if (u.label) {
+      u.label.material.opacity = label;
+    }
+    u.shown = line > 0;
+    box.visible = u.shown;
   });
 }
 
-async function loadNavigationPath(targetId) {
+// ---------------------------------------------------------------- route & robot
+
+async function loadRoute(targetId) {
   try {
-    const res = await fetch(
-      "/api/navigation/path?target_id=" + encodeURIComponent(targetId),
-    );
-    const data = await res.json();
+    const data = await fetchJson("/api/navigation/path?target_id=" + encodeURIComponent(targetId));
     currentPath = data.waypoints;
     pathLengths = cumulativeLengths(currentPath);
-
-    document.getElementById("hud-target-name").innerText =
-      "Target: " + data.target_tag;
-    document.getElementById("hud-dist").innerText = data.total_distance_m + "m";
-
+    routeTargetId = data.target_id || targetId;
+    document.getElementById("hud-target-name").innerText = "Target: " + (data.target_tag || targetId);
+    document.getElementById("hud-dist").innerText = data.total_distance_m + " m";
     renderPathRibbon(currentPath);
+    resetRobot();
+    refreshFrameStyles();
+    return true;
   } catch (err) {
-    console.error("Path error", err);
+    showToast("No collision-free route: " + err.message);
+    return false;
   }
 }
 
@@ -833,187 +677,150 @@ function renderPathRibbon(waypoints) {
   scene.add(pathLineMesh);
 }
 
-function renderAssetList(assets) {
-  const listEl = document.getElementById("asset-list-container");
-  listEl.innerHTML = "";
-
-  assets.forEach(function (a) {
-    const card = document.createElement("div");
-    card.id = "asset-card-" + a.asset_id;
-
-    let cardClass = "asset-card";
-    if (a.asset_id === currentSelectedAsset) {
-      cardClass = "asset-card active";
+function resetRobot() {
+  isNavigating = false;
+  navProgress = 0;
+  document.getElementById("nav-btn-text").innerHTML = "▶ Start inspection";
+  document.getElementById("hud-nav-fill").style.width = "0%";
+  if (currentPath.length > 0) {
+    robotAvatar.position.set(currentPath[0].x, ROBOT_GROUND_OFFSET, currentPath[0].z);
+    if (currentPath.length > 1) {
+      robotAvatar.rotation.y = Math.atan2(currentPath[1].x - currentPath[0].x, currentPath[1].z - currentPath[0].z);
     }
-    card.className = cardClass;
-    if (a.asset_id === currentSelectedAsset) {
-      card.style.background = "rgba(0, 210, 255, 0.16)";
-      card.style.border = "1px solid #00d2ff";
-    } else {
-      card.style.background = "#0c1524";
-      card.style.border = "1px solid rgba(255,255,255,0.12)";
-    }
-    card.style.borderRadius = "6px";
-    card.style.marginBottom = "4px";
-
-    let stateClass = "healthy";
-    let health = 100;
-    if (a.state) {
-      stateClass = a.state.condition_state;
-      health = a.state.health_score;
-    }
-
-    let dotClass = stateClass;
-    if (stateClass === "attention_required") {
-      dotClass = "attention";
-    }
-
-    let healthColor = "#10b981";
-    if (health < 50) {
-      healthColor = "#ef4444";
-    } else if (health < 75) {
-      healthColor = "#f59e0b";
-    }
-
-    let assetClassLabel = "EQUIPMENT";
-    if (a.asset_class) {
-      assetClassLabel = a.asset_class.replace(/_/g, " ");
-    }
-
-    const mainRow = document.createElement("div");
-    mainRow.className = "asset-card-main";
-    mainRow.style.cssText =
-      "display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;user-select:none;min-height:38px;";
-    mainRow.innerHTML =
-      '<div style="display:flex;align-items:center;gap:8px;min-width:0;">' +
-      '<span class="status-dot status-' +
-      dotClass +
-      '" style="width:9px;height:9px;border-radius:50%;flex-shrink:0;"></span>' +
-      '<span style="font-weight:700;color:#ffffff;font-size:13px;letter-spacing:0.3px;">' +
-      a.tag +
-      "</span>" +
-      '<span style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' +
-      assetClassLabel +
-      "</span>" +
-      "</div>" +
-      '<span style="font-family:var(--font-mono);font-weight:700;font-size:12px;color:' +
-      healthColor +
-      ';flex-shrink:0;margin-left:8px;">' +
-      Math.round(health) +
-      "%</span>";
-
-    mainRow.onclick = function () {
-      selectAsset(a.asset_id);
-    };
-
-    const actionsRow = document.createElement("div");
-    actionsRow.className = "asset-actions";
-
-    const focusBtn = document.createElement("button");
-    focusBtn.className = "action-pill";
-    focusBtn.innerHTML = "📍 Focus 3D";
-    focusBtn.onclick = function (e) {
-      e.stopPropagation();
-      focusAssetIn3D(a.asset_id);
-    };
-
-    const navBtn = document.createElement("button");
-    navBtn.className = "action-pill";
-    navBtn.innerHTML = "🚀 Navigate";
-    navBtn.onclick = function (e) {
-      e.stopPropagation();
-      startNavigationTo(a.asset_id);
-    };
-
-    const copilotBtn = document.createElement("button");
-    copilotBtn.className = "action-pill";
-    copilotBtn.innerHTML = "📋 Dossier";
-    copilotBtn.onclick = function (e) {
-      e.stopPropagation();
-      openCopilotForAsset(a.asset_id);
-    };
-
-    actionsRow.appendChild(focusBtn);
-    actionsRow.appendChild(navBtn);
-    actionsRow.appendChild(copilotBtn);
-
-    card.appendChild(mainRow);
-    card.appendChild(actionsRow);
-    listEl.appendChild(card);
-  });
+  }
+  lastRobotPos = robotAvatar.position.clone();
+  nearbyIds = new Set();
+  renderNearby([]);
+  refreshFrameStyles();
+  setStep(1);
 }
 
-function focusAssetIn3D(assetId) {
-  let targetPos = null;
-  boundingFramesGroup.children.forEach(function (child) {
-    if (child.userData && child.userData.id === assetId && child.userData.pos) {
-      targetPos = child.userData.pos;
+function toggleNavigation() {
+  if (currentPath.length < 2) {
+    showToast("No route loaded yet");
+    return;
+  }
+  if (navProgress >= 1.0) {
+    resetRobot();
+  }
+  isNavigating = !isNavigating;
+  document.getElementById("nav-btn-text").innerHTML = isNavigating ? "❚❚ Pause" : "▶ Resume";
+  if (isNavigating) {
+    setStep(2);
+    if (cameraMode === "orbit" || cameraMode === "top") {
+      setCameraMode("follow");
     }
-  });
-
-  if (targetPos) {
-    if (cameraMode !== "orbit") {
-      setCameraMode("orbit", document.getElementById("btn-cam-orbit"));
-    }
-    const [tx, ty, tz] = targetPos;
-    controls.target.set(tx, ty + 0.4, tz);
-    camera.position.set(tx + 2.2, ty + 1.6, tz + 2.5);
-    controls.update();
-    showToast("Camera routed to 3D equipment " + assetId);
+    hideHelp();
   }
 }
 
-async function selectAsset(assetId) {
-  currentSelectedAsset = assetId;
-
-  document.querySelectorAll(".asset-card").forEach(function (el) {
-    el.classList.remove("active");
-  });
-  const currentCard = document.getElementById("asset-card-" + assetId);
-  if (currentCard) {
-    currentCard.classList.add("active");
-  }
-
-  boundingFramesGroup.children.forEach(function (c) {
-    if (c.userData && c.userData.lineMat) {
-      const isSel = c.userData.id === assetId;
-      if (isSel) {
-        c.userData.lineMat.opacity = 1.0;
-        if (c.userData.fillMat) {
-          c.userData.fillMat.opacity = 0.2;
-        }
-        if (c.userData.labelSprite) {
-          c.userData.labelSprite.material.opacity = 1.0;
-        }
-      } else {
-        c.userData.lineMat.opacity = 0.08;
-        if (c.userData.fillMat) {
-          c.userData.fillMat.opacity = 0.0;
-        }
-        if (c.userData.labelSprite) {
-          c.userData.labelSprite.material.opacity = 0.0;
-        }
-      }
-    }
-  });
-
-  await loadNavigationPath(assetId);
-  runCopilotDiagnosis(assetId);
-}
-
-function startNavigationTo(assetId) {
-  selectAsset(assetId);
-  focusAssetIn3D(assetId);
-  if (!isNavigating) {
-    toggleDroneNavigation();
-  }
-}
-
-function openCopilotForAsset(assetId) {
-  selectAsset(assetId);
+function onArrival() {
+  isNavigating = false;
+  document.getElementById("nav-btn-text").innerHTML = "↻ Run again";
+  setStep(3);
+  const frame = framesById.get(routeTargetId);
+  showToast("Arrived at " + (frame ? frame.tag : routeTargetId) + " — AI diagnosis");
   if (!copilotOpen) {
     toggleCopilotDrawer();
   }
+  showSelection(routeTargetId);
+  if (frame) {
+    focusOn(frame.pos, frame.size);
+  }
+}
+
+// ---------------------------------------------------------------- proximity
+
+function distanceToFootprint(rx, rz, frame) {
+  const [x, , z] = frame.pos;
+  const [w, , d] = frame.size;
+  const dx = Math.max(Math.abs(rx - x) - w / 2, 0);
+  const dz = Math.max(Math.abs(rz - z) - d / 2, 0);
+  return Math.hypot(dx, dz);
+}
+
+function checkProximityEvents(rx, rz) {
+  const near = [];
+  framesData.forEach(function (f) {
+    const dist = distanceToFootprint(rx, rz, f);
+    if (dist <= PROXIMITY_RADIUS) {
+      near.push({ frame: f, dist: dist });
+    }
+  });
+  const ids = new Set(near.map(function (n) { return n.frame.id; }));
+  let changed = ids.size !== nearbyIds.size;
+  if (!changed) {
+    ids.forEach(function (id) {
+      if (!nearbyIds.has(id)) changed = true;
+    });
+  }
+  if (changed) {
+    nearbyIds = ids;
+    refreshFrameStyles();
+    renderNearby(near);
+  }
+}
+window.appCheckProximityEvents = checkProximityEvents;
+
+function renderNearby(near) {
+  const box = document.getElementById("proximity-alert");
+  const assets = near.filter(function (n) { return n.frame.asset_id; }).sort(function (a, b) { return a.dist - b.dist; });
+  if (near.length === 0) {
+    box.style.display = "none";
+    return;
+  }
+  box.style.display = "flex";
+  document.getElementById("nearby-count").innerText =
+    assets.length + " assets · " + (near.length - assets.length) + " structures within " + PROXIMITY_RADIUS + " m";
+  const list = document.getElementById("nearby-list");
+  list.innerHTML = "";
+  assets.slice(0, 6).forEach(function (n) {
+    const f = n.frame;
+    const li = document.createElement("li");
+    li.className = "nearby-item";
+    li.innerHTML =
+      '<span class="status-dot status-' + dotClass(f.state) + '"></span>' +
+      "<b>" + escapeHtml(f.tag) + "</b>" +
+      "<span>" + escapeHtml(prettyClass(f.class)) + " · " + escapeHtml(f.state || "") + " · " + Math.round(f.health || 0) + "%</span>" +
+      "<span>" + n.dist.toFixed(1) + " m</span>";
+    li.onclick = function () {
+      showSelection(f.id);
+    };
+    list.appendChild(li);
+  });
+}
+
+// ---------------------------------------------------------------- selection & copilot panel
+
+function showSelection(id) {
+  selectedId = id;
+  refreshFrameStyles();
+  document.querySelectorAll(".asset-card").forEach(function (el) {
+    el.classList.toggle("active", el.dataset.id === id);
+  });
+  const frame = framesById.get(id);
+  if (frame && !frame.asset_id) {
+    renderStructureCard(frame);
+    return;
+  }
+  runCopilotDiagnosis(id);
+}
+
+function renderStructureCard(frame) {
+  setText("card-asset-tag", frame.id + " · " + prettyClass(frame.label));
+  setText("card-asset-class", "Extracted 3D object (no builder-pack asset)");
+  setText("card-asset-area", frame.point_count + " points");
+  const badge = document.getElementById("card-health-badge");
+  badge.innerText = "STRUCTURE";
+  badge.style.color = STATE_CSS.structure;
+  badge.style.borderColor = STATE_CSS.structure;
+  setText(
+    "card-mapping-note",
+    "Size " + frame.size.map(function (s) { return s.toFixed(2); }).join(" × ") +
+      " m · centre (" + frame.pos.map(function (s) { return s.toFixed(2); }).join(", ") + ")",
+  );
+  document.getElementById("telem-block").style.display = "none";
+  document.getElementById("diag-block").style.display = "none";
 }
 
 async function runCopilotDiagnosis(assetId, question) {
@@ -1021,163 +828,109 @@ async function runCopilotDiagnosis(assetId, question) {
   if (question) {
     body.query = question;
   }
+  document.getElementById("diag-block").style.display = "";
+  document.getElementById("telem-block").style.display = "";
+  if (question) {
+    setText("copilot-answer", "Thinking…");
+  }
   try {
-    const [assetRes, diagRes] = await Promise.all([
-      fetch("/api/assets/" + encodeURIComponent(assetId)),
-      fetch("/api/copilot/query", {
+    const [dossier, diag] = await Promise.all([
+      fetchJson("/api/assets/" + encodeURIComponent(assetId)),
+      fetchJson("/api/copilot/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
     ]);
-    const assetDossier = await assetRes.json();
-    const diag = await diagRes.json();
-
-    updateCopilotDrawer(assetDossier, diag);
+    if (selectedId !== assetId && !question) {
+      return; // a newer selection is already being shown
+    }
+    updateCopilotDrawer(dossier, diag, question);
   } catch (err) {
     console.error("Copilot error", err);
+    setText("copilot-answer", "");
+    showToast("Copilot: " + err.message);
   }
 }
 
-function updateCopilotDrawer(dossier, diag) {
-  document.getElementById("card-asset-tag").innerText =
-    "ASSET: " + diag.tag + " (" + diag.asset_id + ")";
-  document.getElementById("card-asset-class").innerText = diag.asset_class;
+function updateCopilotDrawer(dossier, diag, question) {
+  const state = dossier.current_state || dossier.state || {};
+  const tag = diag.tag || dossier.tag || dossier.asset_id;
+  const health = diag.health_score != null ? diag.health_score : state.health_score;
+  const condition = diag.condition_state || state.condition_state || "unknown";
 
-  let areaText = "Boiler Room";
-  if (dossier.asset && dossier.asset.area_name) {
-    areaText = dossier.asset.area_name;
-  }
-  document.getElementById("card-asset-area").innerText = areaText;
+  setText("card-asset-tag", tag + " · " + (diag.asset_id || dossier.asset_id));
+  setText("card-asset-class", prettyClass(diag.asset_class || dossier.asset_class));
+  setText("card-asset-area", dossier.area_name || "Boiler room");
 
-  const hBadge = document.getElementById("card-health-badge");
-  hBadge.innerText =
-    diag.health_score + "% " + diag.condition_state.toUpperCase();
-  if (diag.health_score < 50) {
-    hBadge.style.color = "var(--red)";
-    hBadge.style.borderColor = "var(--red)";
-  } else if (diag.health_score < 75) {
-    hBadge.style.color = "var(--orange)";
-    hBadge.style.borderColor = "var(--orange)";
+  const frame = framesById.get(dossier.asset_id);
+  if (frame && frame.asset_id) {
+    setText(
+      "card-mapping-note",
+      "Synthetic mapping → 3D object " + frame.scene_id + " (" + prettyClass(frame.label) + "), confidence " +
+        (frame.mapping_confidence != null ? frame.mapping_confidence : "—") + (frame.id === routeTargetId ? " · inspection target" : ""),
+    );
   } else {
-    hBadge.style.color = "var(--green)";
-    hBadge.style.borderColor = "var(--green)";
+    setText("card-mapping-note", "Not placed in the 3D scene.");
   }
 
-  document.getElementById("diag-conf").innerText =
-    "Conf: " + diag.confidence_score;
+  const badge = document.getElementById("card-health-badge");
+  badge.innerText = Math.round(health || 0) + "% " + condition.replace(/_/g, " ").toUpperCase();
+  const css = STATE_CSS[condition] || STATE_CSS.healthy;
+  badge.style.color = css;
+  badge.style.borderColor = css;
 
-  let findingIcon = "⚠️";
-  let findingColor = "#fca5a5";
-  let findingBg = "rgba(239, 68, 68, 0.12)";
-  let findingBorder = "rgba(239, 68, 68, 0.35)";
-
-  if (diag.condition_state === "healthy") {
-    findingIcon = "✅";
-    findingColor = "#6ee7b7";
-    findingBg = "rgba(16, 185, 129, 0.12)";
-    findingBorder = "rgba(16, 185, 129, 0.35)";
-  } else if (diag.condition_state === "watch") {
-    findingIcon = "🔍";
-    findingColor = "#fde68a";
-    findingBg = "rgba(245, 158, 11, 0.12)";
-    findingBorder = "rgba(245, 158, 11, 0.35)";
-  }
+  const confidence = diag.confidence_score != null ? diag.confidence_score : diag.model_confidence;
+  setText("diag-conf", "Confidence " + (confidence != null ? Number(confidence).toFixed(2) : "—"));
 
   const findingBox = document.getElementById("finding-box");
-  findingBox.style.background = findingBg;
-  findingBox.style.borderColor = findingBorder;
-  document.getElementById("finding-icon").innerText = findingIcon;
+  const icon = condition === "healthy" ? "✅" : condition === "watch" ? "🔍" : "⚠️";
+  findingBox.style.borderColor = css;
+  findingBox.style.background = css + "1f";
+  setText("finding-icon", icon);
+  setText("primary-finding-text", diag.diagnosis_summary || diag.diagnosis || (diag.issue_code || "") + " signature");
 
-  let findingTitle =
-    diag.issue_code + " Signature (" + diag.health_score + "% Health)";
-  if (diag.diagnosis_summary) {
-    const sentences = diag.diagnosis_summary.split(".");
-    for (let s of sentences) {
-      const clean = s.trim();
-      if (
-        clean.length > 5 &&
-        !clean.includes("/100") &&
-        !clean.includes("evaluated as")
-      ) {
-        findingTitle = clean;
-        break;
-      }
-    }
-  }
-  const findingEl = document.getElementById("primary-finding-text");
-  findingEl.innerText = findingTitle;
-  findingEl.style.color = findingColor;
-
-  const rootCauseList = document.getElementById("root-cause-list");
-  rootCauseList.innerHTML = "";
-
-  let rootCauses = diag.multivariate_evidence.slice(0, 4);
-  if (rootCauses.length === 0) {
-    rootCauses = ["No telemetry drift, alarms or similar cases found for this asset."];
-  }
-  rootCauses.forEach(function (cause) {
-    const li = document.createElement("li");
-    li.className = "root-cause-item";
-    const bullet = document.createElement("span");
-    bullet.className = "root-cause-bullet";
-    bullet.textContent = "•";
-    const text = document.createElement("span");
-    text.textContent = cause;
-    li.append(bullet, text);
-    rootCauseList.appendChild(li);
-  });
-
-  const actionList = document.getElementById("action-list");
-  actionList.innerHTML = "";
-  diag.recommended_actions.forEach(function (action) {
-    const li = document.createElement("li");
-    li.textContent = action;
-    actionList.appendChild(li);
-  });
-
-  document.getElementById("copilot-model-badge").innerText = diag.grounded_mode;
-  let answer = diag.diagnosis;
-  if (diag.answer) {
-    answer = diag.answer;
-  }
-  document.getElementById("copilot-answer").textContent = answer;
+  fillList("root-cause-list", (diag.multivariate_evidence || []).slice(0, 5), "No telemetry drift, alarms or similar cases found.", true);
+  fillList("action-list", diag.recommended_actions || [], "Continue routine monitoring.", false);
 
   const citBox = document.getElementById("evidence-citations-box");
   citBox.innerHTML = "";
-  let chipSources = [];
-  if (diag.citations && diag.citations.length > 0) {
-    chipSources = diag.citations;
-  } else if (diag.evidence_citations && diag.evidence_citations.length > 0) {
-    chipSources = diag.evidence_citations.map(function (cid) {
-      return {
-        source_id: cid,
-        description: "Telemetry / Document Citation",
-      };
-    });
-  }
-
-  chipSources.forEach(function (c) {
+  (diag.citations || []).forEach(function (c) {
     const chip = document.createElement("button");
     chip.className = "evidence-chip";
-    chip.innerText = "[" + c.source_id + "]";
-    chip.title = c.description;
+    chip.innerText = c.source_id;
+    chip.title = c.description || "";
     chip.onclick = function () {
-      showToast("Evidence: " + c.description);
+      showToast(c.source_id + ": " + (c.description || ""));
     };
     citBox.appendChild(chip);
   });
 
   if (diag.safety_guardrails && diag.safety_guardrails.length > 0) {
-    document.getElementById("safety-text").innerText =
-      diag.safety_guardrails[0];
+    setText("safety-text", diag.safety_guardrails[0]);
   }
+  setText("copilot-model-badge", diag.grounded_mode || "evidence engine");
+  setText("copilot-answer", question ? diag.answer || diag.diagnosis || "" : diag.answer || "");
+  drawTelemetryTrend(dossier.recent_telemetry || []);
+}
 
-  let telemRecords = [];
-  if (dossier.recent_telemetry) {
-    telemRecords = dossier.recent_telemetry;
-  }
-  drawTelemetryTrend(telemRecords);
+function fillList(id, items, emptyText, bullets) {
+  const el = document.getElementById(id);
+  el.innerHTML = "";
+  const rows = items.length ? items : [emptyText];
+  rows.forEach(function (item) {
+    const li = document.createElement("li");
+    if (bullets) {
+      li.className = "root-cause-item";
+      li.innerHTML = '<span class="root-cause-bullet">•</span>';
+      const span = document.createElement("span");
+      span.textContent = item;
+      li.appendChild(span);
+    } else {
+      li.textContent = item;
+    }
+    el.appendChild(li);
+  });
 }
 
 function drawTelemetryTrend(records) {
@@ -1185,429 +938,249 @@ function drawTelemetryTrend(records) {
   const ctx = canvas.getContext("2d");
   canvas.width = canvas.clientWidth * window.devicePixelRatio;
   canvas.height = canvas.clientHeight * window.devicePixelRatio;
-
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!records || records.length < 2) {
+  const channels = [
+    ["process_flow_pct", "flow %"],
+    ["vibration_mm_s", "vibration mm/s"],
+    ["bearing_temp_c", "bearing °C"],
+    ["process_pressure_bar", "pressure bar"],
+    ["position_actual_pct", "position %"],
+  ];
+  let key = null;
+  let label = "Recent telemetry";
+  for (const [k, l] of channels) {
+    if (records.some(function (r) { return r[k] !== undefined && r[k] !== null; })) {
+      key = k;
+      label = "Recent " + l;
+      break;
+    }
+  }
+  setText("telem-label", label);
+  if (!key || records.length < 2) {
     return;
   }
-
-  const pts = records.map(function (r) {
-    let val = 50.0;
-    if (
-      r.process_pressure_bar !== undefined &&
-      r.process_pressure_bar !== null
-    ) {
-      val = r.process_pressure_bar;
-    } else if (r.vibration_mm_s !== undefined && r.vibration_mm_s !== null) {
-      val = r.vibration_mm_s;
-    }
-    return val;
-  });
+  const pts = records.map(function (r) { return r[key]; }).filter(function (v) { return v !== null && v !== undefined; });
   const min = Math.min(...pts);
-  const max = Math.max(...pts) + 0.001;
-
+  const max = Math.max(...pts) + 1e-6;
   ctx.strokeStyle = "#00d2ff";
   ctx.lineWidth = 2 * window.devicePixelRatio;
   ctx.beginPath();
-
   pts.forEach(function (val, idx) {
     const x = (idx / (pts.length - 1)) * canvas.width;
-    const y =
-      canvas.height -
-      ((val - min) / (max - min)) * (canvas.height * 0.72) -
-      canvas.height * 0.14;
-    if (idx === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
-    }
+    const y = canvas.height - ((val - min) / (max - min)) * (canvas.height * 0.72) - canvas.height * 0.14;
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
   });
   ctx.stroke();
 }
 
-function setupOmnibar() {
-  const input = document.getElementById("omnibar-input");
-  const suggestionsBox = document.getElementById("omnibar-suggestions");
-  const submitBtn = document.getElementById("omnibar-submit");
+// ---------------------------------------------------------------- equipment list
 
-  function executeOmniQuery(query) {
-    const q = query.trim().toLowerCase();
-    if (q.length === 0) {
-      return;
-    }
-
-    let matched = null;
-
-    if (
-      q.includes("degraded") ||
-      q.includes("foul") ||
-      q.includes("cavitation") ||
-      q.includes("critical") ||
-      q.includes("fail")
-    ) {
-      matched = assetsData.find(function (a) {
-        if (a.state) {
-          return (
-            a.state.condition_state === "attention_required" ||
-            a.state.condition_state === "degraded"
-          );
-        }
-        return false;
-      });
-    } else if (q.includes("pump")) {
-      matched = assetsData.find(function (a) {
-        return a.asset_class === "PROCESS_PUMP";
-      });
-    } else if (q.includes("valve")) {
-      matched = assetsData.find(function (a) {
-        return a.asset_class === "CONTROL_VALVE";
-      });
-    } else if (q.includes("motor")) {
-      matched = assetsData.find(function (a) {
-        return a.asset_class === "ELECTRIC_MOTOR";
-      });
-    } else {
-      matched = assetsData.find(function (a) {
-        return (
-          a.tag.toLowerCase().includes(q) ||
-          a.asset_id.toLowerCase().includes(q)
-        );
-      });
-    }
-
-    if (!matched && assetsData.length > 0) {
-      matched = assetsData[0];
-    }
-
-    if (matched) {
-      suggestionsBox.style.display = "none";
-      input.value =
-        matched.tag + " (" + matched.asset_class.replace("_", " ") + ")";
-      selectAsset(matched.asset_id);
-      focusAssetIn3D(matched.asset_id);
-      if (!copilotOpen) {
-        toggleCopilotDrawer();
-      }
-      showToast(
-        "Omnibar matched: " + matched.tag + " — Focus & Diagnosis activated",
-      );
-    } else {
-      showToast("No equipment found matching query: " + query);
-    }
-  }
-
-  input.oninput = function () {
-    const q = input.value.trim().toLowerCase();
-    if (q.length === 0) {
-      suggestionsBox.style.display = "none";
-      return;
-    }
-
-    const matches = assetsData
-      .filter(function (a) {
-        let matchedText =
-          a.tag.toLowerCase() +
-          " " +
-          a.asset_class.toLowerCase() +
-          " " +
-          a.area_name.toLowerCase();
-        if (a.state) {
-          matchedText +=
-            " " +
-            a.state.condition_state.toLowerCase() +
-            " " +
-            a.state.issue_summary.toLowerCase();
-        }
-        return matchedText.includes(q);
-      })
-      .slice(0, 5);
-
-    if (matches.length > 0) {
-      suggestionsBox.innerHTML = "";
-      matches.forEach(function (m) {
-        const item = document.createElement("div");
-        item.className = "omnibar-suggestion-item";
-
-        let stClass = "healthy";
-        let hScore = 100;
-        if (m.state) {
-          stClass = m.state.condition_state;
-          hScore = m.state.health_score;
-        }
-
-        item.innerHTML =
-          '<div style="display:flex; align-items:center;">' +
-          '<span class="status-dot status-' +
-          stClass +
-          '"></span>' +
-          '<b style="color:#fff; margin-right:6px;">' +
-          m.tag +
-          "</b>" +
-          '<span style="color:var(--muted); font-size:11px;">' +
-          m.asset_class.replace("_", " ") +
-          " (" +
-          m.area_name +
-          ")</span>" +
-          "</div>" +
-          '<span style="font-family:var(--font-mono); font-size:11px; color:var(--accent);">' +
-          hScore +
-          "%</span>";
-
-        item.onclick = function () {
-          input.value = m.tag;
-          suggestionsBox.style.display = "none";
-          selectAsset(m.asset_id);
-          focusAssetIn3D(m.asset_id);
-          if (!copilotOpen) {
-            toggleCopilotDrawer();
-          }
-        };
-        suggestionsBox.appendChild(item);
-      });
-      suggestionsBox.style.display = "flex";
-    } else {
-      suggestionsBox.style.display = "none";
-    }
-  };
-
-  input.onkeydown = function (e) {
-    if (e.key === "Enter") {
-      executeOmniQuery(input.value);
-    }
-  };
-
-  submitBtn.onclick = function () {
-    executeOmniQuery(input.value);
-  };
+function assetState(a) {
+  return (a.state && a.state.condition_state) || "healthy";
 }
 
-function setupPanelCollapses() {
-  const sidebar = document.getElementById("sidebar-metaverse");
-  const leftToggle = document.getElementById("btn-toggle-left-sidebar");
-  const copilot = document.getElementById("copilot-drawer");
-  const rightToggle = document.getElementById("btn-toggle-copilot");
-
-  leftToggle.onclick = toggleLeftSidebar;
-  rightToggle.onclick = toggleCopilotDrawer;
-}
-
-function toggleLeftSidebar() {
-  const sidebar = document.getElementById("sidebar-metaverse");
-  const sidebarContainer = document.getElementById("left-sidebar-container");
-  const leftToggle = document.getElementById("btn-toggle-left-sidebar");
-
-  sidebarOpen = !sidebarOpen;
-  if (sidebarOpen) {
-    sidebarContainer.classList.remove("collapsed");
-    sidebar.classList.remove("collapsed");
-    leftToggle.innerText = "◀";
-    leftToggle.style.right = "-24px";
-    leftToggle.style.borderRadius = "0 6px 6px 0";
-    leftToggle.style.borderLeft = "none";
-    leftToggle.style.borderRight = "1px solid var(--border)";
-  } else {
-    sidebarContainer.classList.add("collapsed");
-    sidebar.classList.add("collapsed");
-    leftToggle.innerText = "▶";
-    leftToggle.style.right = "-24px";
-    leftToggle.style.borderRadius = "0 6px 6px 0";
-  }
-  setTimeout(onWindowResize, 310);
-}
-
-function toggleCopilotDrawer() {
-  const copilot = document.getElementById("copilot-drawer");
-  const copilotContainer = document.getElementById("right-copilot-container");
-  const rightToggle = document.getElementById("btn-toggle-copilot");
-
-  copilotOpen = !copilotOpen;
-  if (copilotOpen) {
-    copilotContainer.classList.remove("collapsed");
-    copilot.classList.remove("collapsed");
-    rightToggle.innerText = "▶";
-    rightToggle.style.left = "-24px";
-  } else {
-    copilotContainer.classList.add("collapsed");
-    copilot.classList.add("collapsed");
-    rightToggle.innerText = "◀";
-    rightToggle.style.left = "-24px";
-  }
-  setTimeout(onWindowResize, 310);
-}
-
-function toggleDroneNavigation() {
-  if (navProgress >= 1.0) {
-    navProgress = 0;
-  }
-  isNavigating = !isNavigating;
-
-  const navBtnText = document.getElementById("nav-btn-text");
-  const navBadge = document.getElementById("nav-badge");
-
-  if (isNavigating) {
-    navBtnText.innerHTML = "❚❚ Pause Drone";
-    navBadge.innerText = "Active";
-    navBadge.style.color = "var(--accent)";
-  } else {
-    navBtnText.innerHTML = "▶ Start Drone";
-    navBadge.innerText = "Paused";
-    navBadge.style.color = "var(--yellow)";
-  }
-}
-
-function animate() {
-  requestAnimationFrame(animate);
-
-  const now = performance.now();
-  const frameSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
-  lastFrameTime = now;
-
-  if (isNavigating && currentPath.length > 1) {
-    const totalLength = pathLengths[pathLengths.length - 1];
-    navProgress += (ROBOT_SPEED_M_S * navSpeed * frameSeconds) / totalLength;
-    if (navProgress >= 1.0) {
-      navProgress = 1.0;
-      isNavigating = false;
-      document.getElementById("nav-btn-text").innerHTML = "▶ Start Drone";
-      document.getElementById("nav-badge").innerText = "Arrived";
-      document.getElementById("nav-badge").style.color = "var(--green)";
-      showToast("Arrived at " + currentSelectedAsset + " — running AI diagnosis");
-      if (!copilotOpen) {
-        toggleCopilotDrawer();
-      }
-      runCopilotDiagnosis(currentSelectedAsset);
-    }
-
-    const travelled = navProgress * totalLength;
-    let segIdx = 0;
-    while (segIdx < currentPath.length - 2 && pathLengths[segIdx + 1] < travelled) {
-      segIdx++;
-    }
-    const segLength = pathLengths[segIdx + 1] - pathLengths[segIdx];
-    let subT = 0;
-    if (segLength > 0) {
-      subT = (travelled - pathLengths[segIdx]) / segLength;
-    }
-
-    const p1 = currentPath[segIdx];
-    const p2 = currentPath[segIdx + 1];
-
-    const curX = p1.x + (p2.x - p1.x) * subT;
-    const curZ = p1.z + (p2.z - p1.z) * subT;
-    const heading = Math.atan2(p2.x - p1.x, p2.z - p1.z);
-
-    robotAvatar.position.x = curX;
-    robotAvatar.position.z = curZ;
-    robotAvatar.rotation.y = heading;
-
-    document.getElementById("hud-nav-fill").style.width =
-      (navProgress * 100).toFixed(1) + "%";
-
-    checkProximityEvents(curX, curZ);
-
-    if (cameraMode === "drone") {
-      camera.position.x = curX - Math.sin(heading) * 2.2;
-      camera.position.z = curZ - Math.cos(heading) * 2.2;
-      camera.position.y = 1.7;
-      controls.target.set(curX, 0.5, curZ);
-    }
-  }
-
-  updateFreeCamera();
-  controls.update();
-  renderer.render(scene, camera);
-}
-
-function checkProximityEvents(rx, rz) {
-  const nearby = [];
-
-  boundingFramesGroup.children.forEach(function (c) {
-    if (c.userData && c.userData.pos) {
-      const [ax, ay, az] = c.userData.pos;
-      const dist = Math.sqrt((rx - ax) ** 2 + (rz - az) ** 2);
-      const isNear = dist < PROXIMITY_RADIUS;
-
-      if (c.userData.lineMat && c.userData.fillMat && c.userData.labelSprite) {
-        if (isNear) {
-          c.userData.lineMat.opacity = 1.0;
-          c.userData.fillMat.opacity = 0.22;
-          c.userData.labelSprite.material.opacity = 1.0;
-          c.userData.labelSprite.position.y =
-            c.userData.size[1] / 2 + 0.42 + Math.sin(Date.now() * 0.005) * 0.04;
-        } else {
-          const isSel = c.userData.id === currentSelectedAsset;
-          if (isSel) {
-            c.userData.lineMat.opacity = 1.0;
-            c.userData.fillMat.opacity = 0.2;
-            c.userData.labelSprite.material.opacity = 1.0;
-          } else {
-            c.userData.lineMat.opacity = 0.08;
-            c.userData.fillMat.opacity = 0.0;
-            c.userData.labelSprite.material.opacity = 0.0;
-          }
-        }
-      }
-
-      if (isNear) {
-        nearby.push({ data: c.userData, dist: dist });
-      }
-    }
-  });
-
-  renderNearbyAssets(nearby);
-}
-
-// Rebuilt only when the set of nearby frames changes, not every animation frame.
-let nearbyKey = "";
-
-function renderNearbyAssets(nearby) {
-  const alertEl = document.getElementById("proximity-alert");
-  const assets = nearby
-    .filter(function (n) {
-      return n.data.isMapped;
-    })
-    .sort(function (a, b) {
-      return a.dist - b.dist;
-    });
-  const key = assets
-    .map(function (n) {
-      return n.data.id;
-    })
-    .join("|") + "#" + nearby.length;
-  if (key === nearbyKey) {
-    return;
-  }
-  nearbyKey = key;
-
-  if (nearby.length === 0) {
-    alertEl.style.display = "none";
-    return;
-  }
-  alertEl.style.display = "flex";
-  document.getElementById("nearby-count").innerText =
-    assets.length + " assets · " + (nearby.length - assets.length) + " structures in " + PROXIMITY_RADIUS + " m";
-
-  const list = document.getElementById("nearby-list");
+function renderAssetList(assets) {
+  const list = document.getElementById("asset-list-container");
   list.innerHTML = "";
-  assets.slice(0, 5).forEach(function (n) {
-    let dotClass = n.data.state;
-    if (dotClass === "attention_required") {
-      dotClass = "attention";
+  const attention = assets.filter(function (a) { return assetState(a) !== "healthy"; })
+    .sort(function (a, b) { return (a.state ? a.state.health_score : 100) - (b.state ? b.state.health_score : 100); });
+  const healthy = assets.filter(function (a) { return assetState(a) === "healthy"; });
+
+  function group(title, items, open) {
+    if (items.length === 0) return;
+    const details = document.createElement("details");
+    details.className = "asset-group";
+    details.open = open;
+    const summary = document.createElement("summary");
+    summary.innerText = title + " (" + items.length + ")";
+    details.appendChild(summary);
+    items.forEach(function (a) {
+      details.appendChild(assetCard(a));
+    });
+    list.appendChild(details);
+  }
+  group("Needs attention", attention, true);
+  group("Healthy", healthy, false);
+}
+
+function assetCard(a) {
+  const state = assetState(a);
+  const health = a.state ? a.state.health_score : 100;
+  const card = document.createElement("div");
+  card.className = "asset-card" + (a.asset_id === selectedId ? " active" : "");
+  card.dataset.id = a.asset_id;
+  const isTarget = a.asset_id === routeTargetId;
+  card.innerHTML =
+    '<div class="asset-card-main">' +
+    '<span class="status-dot status-' + dotClass(state) + '"></span>' +
+    "<b>" + escapeHtml(a.tag) + "</b>" +
+    '<span class="asset-class">' + escapeHtml(prettyClass(a.asset_class)) + (isTarget ? " · target" : "") + "</span>" +
+    '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(health) + "%</span>" +
+    "</div>" +
+    '<div class="asset-actions">' +
+    '<button class="action-pill" data-act="focus">📍 Show in 3D</button>' +
+    '<button class="action-pill" data-act="route">🚶 Route here</button>' +
+    "</div>";
+  card.querySelector(".asset-card-main").onclick = function () {
+    selectAndFocus(a.asset_id);
+  };
+  card.querySelector('[data-act="focus"]').onclick = function (e) {
+    e.stopPropagation();
+    selectAndFocus(a.asset_id);
+  };
+  card.querySelector('[data-act="route"]').onclick = async function (e) {
+    e.stopPropagation();
+    if (await loadRoute(a.asset_id)) {
+      showToast("New inspection target: " + a.tag + " — press Start inspection");
+      renderAssetList(filteredAssets());
+      showSelection(a.asset_id);
     }
-    const li = document.createElement("li");
-    li.className = "nearby-item";
-    li.innerHTML =
-      '<span class="status-dot status-' + dotClass + '"></span>' +
-      "<b>" + n.data.tag + "</b>" +
-      "<span>" + n.data.assetClass + " · " + n.data.state + " · " + n.data.health + "%</span>" +
-      "<span>" + n.dist.toFixed(1) + " m</span>";
-    li.onclick = function () {
-      openCopilotForAsset(n.data.id);
-    };
-    list.appendChild(li);
+  };
+  return card;
+}
+
+function selectAndFocus(id) {
+  showSelection(id);
+  const frame = framesById.get(id);
+  if (frame) {
+    if (cameraMode !== "orbit") setCameraMode("orbit");
+    focusOn(frame.pos, frame.size);
+  } else {
+    showToast("This asset has no 3D frame");
+  }
+}
+
+function filteredAssets() {
+  const q = document.getElementById("asset-search").value.trim().toLowerCase();
+  if (!q) return assetsData;
+  return assetsData.filter(function (a) {
+    return (a.tag + " " + a.asset_class + " " + (a.area_name || "") + " " + assetState(a)).toLowerCase().includes(q);
   });
 }
-window.appCheckProximityEvents = checkProximityEvents;
+
+// ---------------------------------------------------------------- camera
+
+function setCameraMode(mode) {
+  if (freeCam.active && mode !== "free") {
+    exitFreeCamera();
+  }
+  cameraMode = mode;
+  ["orbit", "follow", "top"].forEach(function (m) {
+    document.getElementById("btn-cam-" + m).classList.toggle("active", m === mode);
+  });
+  if (mode === "top") {
+    tweenCamera(new THREE.Vector3(...TOP_VIEW.position), new THREE.Vector3(...TOP_VIEW.target));
+  } else if (mode === "follow") {
+    const p = robotAvatar.position;
+    const dir = new THREE.Vector3().subVectors(camera.position, controls.target).setY(0);
+    if (dir.lengthSq() < 0.01) dir.set(1, 0, 1);
+    dir.normalize().multiplyScalar(3.0);
+    tweenCamera(new THREE.Vector3(p.x + dir.x, 2.2, p.z + dir.z), new THREE.Vector3(p.x, 0.6, p.z));
+  }
+  lastRobotPos = robotAvatar.position.clone();
+}
+
+function resetView() {
+  setCameraMode("orbit");
+  tweenCamera(new THREE.Vector3(...ORBIT_VIEW.position), new THREE.Vector3(...ORBIT_VIEW.target));
+}
+
+function focusOn(pos, size) {
+  const target = new THREE.Vector3(pos[0], pos[1], pos[2]);
+  const extent = Math.max(size ? Math.max(size[0], size[1], size[2]) : 0.5, 0.4);
+  const distance = THREE.MathUtils.clamp(extent * 3.0, 1.2, 6);
+  const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
+  if (dir.lengthSq() < 0.01) dir.set(1, 0.8, 1);
+  dir.normalize();
+  dir.y = Math.max(dir.y, 0.35);
+  dir.normalize();
+  tweenCamera(target.clone().add(dir.multiplyScalar(distance)), target);
+}
+
+function tweenCamera(toPosition, toTarget, ms) {
+  camTween = {
+    fromPos: camera.position.clone(),
+    fromTarget: controls.target.clone(),
+    toPos: toPosition,
+    toTarget: toTarget,
+    start: performance.now(),
+    duration: ms || 650,
+  };
+}
+
+function updateCameraTween() {
+  if (!camTween) return;
+  const t = Math.min((performance.now() - camTween.start) / camTween.duration, 1);
+  const k = t * t * (3 - 2 * t);
+  camera.position.lerpVectors(camTween.fromPos, camTween.toPos, k);
+  controls.target.lerpVectors(camTween.fromTarget, camTween.toTarget, k);
+  if (t >= 1) camTween = null;
+}
+
+// Keep the orbit pivot inside the room so zoom always heads somewhere meaningful.
+function clampTarget() {
+  const margin = 1.5;
+  const t = controls.target;
+  t.x = THREE.MathUtils.clamp(t.x, roomBounds.x[0] - margin, roomBounds.x[1] + margin);
+  t.z = THREE.MathUtils.clamp(t.z, roomBounds.z[0] - margin, roomBounds.z[1] + margin);
+  t.y = THREE.MathUtils.clamp(t.y, 0, (roomBounds.ceiling || 3) + 0.5);
+}
+
+function setupViewportPicking() {
+  const raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.05;
+  const mouse = new THREE.Vector2();
+  let down = null;
+
+  function pick(e) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+  }
+
+  function frameHit() {
+    const shown = boundingFramesGroup.children.filter(function (b) { return b.userData.shown; });
+    const hits = raycaster.intersectObjects(shown, true);
+    for (const hit of hits) {
+      let obj = hit.object;
+      while (obj && !(obj.userData && obj.userData.frame) && obj.parent) obj = obj.parent;
+      if (obj && obj.userData && obj.userData.frame) return { frame: obj.userData.frame, point: hit.point };
+    }
+    return null;
+  }
+
+  renderer.domElement.addEventListener("pointerdown", function (e) {
+    down = { x: e.clientX, y: e.clientY, t: Date.now() };
+  });
+  renderer.domElement.addEventListener("pointerup", function (e) {
+    if (!down || freeCam.active) return;
+    const moved = Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y);
+    if (moved > 5 || Date.now() - down.t > 350) return;
+    pick(e);
+    const hit = frameHit();
+    if (hit) {
+      showSelection(hit.frame.id);
+      if (!copilotOpen) toggleCopilotDrawer();
+    }
+  });
+  renderer.domElement.addEventListener("dblclick", function (e) {
+    if (freeCam.active) return;
+    pick(e);
+    const hit = frameHit();
+    if (hit) {
+      focusOn(hit.frame.pos, hit.frame.size);
+      return;
+    }
+    if (sceneModel) {
+      const hits = raycaster.intersectObject(sceneModel, false);
+      if (hits.length > 0) {
+        focusOn([hits[0].point.x, hits[0].point.y, hits[0].point.z], [0.6, 0.6, 0.6]);
+      }
+    }
+  });
+}
 
 function setupFreeCamera() {
   const canvas = renderer.domElement;
@@ -1671,11 +1244,8 @@ function enterFreeCamera() {
   freeCam.pitch = euler.x;
   camera.rotation.set(freeCam.pitch, freeCam.yaw, 0, "YXZ");
   document.getElementById("freecam-hud").style.display = "block";
-  document.querySelectorAll(".view-toolbar button").forEach(function (button) {
-    button.classList.remove("active");
-    if (button.id === "btn-cam-free") {
-      button.classList.add("active");
-    }
+  ["orbit", "follow", "top"].forEach(function (m) {
+    document.getElementById("btn-cam-" + m).classList.remove("active");
   });
   renderer.domElement.requestPointerLock();
 }
@@ -1683,13 +1253,15 @@ function enterFreeCamera() {
 function exitFreeCamera() {
   freeCam.active = false;
   freeCam.keys.clear();
-  controls.enabled = true;
-  if (document.exitPointerLock) {
-    document.exitPointerLock();
-  }
+  if (document.exitPointerLock) document.exitPointerLock();
   document.getElementById("freecam-hud").style.display = "none";
-  document.getElementById("btn-cam-orbit").classList.add("active");
+  // Re-anchor the orbit pivot in front of where the free camera looks.
+  const forward = new THREE.Vector3();
+  camera.getWorldDirection(forward);
+  controls.target.copy(camera.position).add(forward.multiplyScalar(2.5));
+  controls.enabled = true;
   cameraMode = "orbit";
+  document.getElementById("btn-cam-orbit").classList.add("active");
 }
 
 function updateFreeCamera() {
@@ -1726,148 +1298,356 @@ function updateFreeCamera() {
   }
 }
 
-function setCameraMode(mode, targetBtn) {
-  if (freeCam.active) {
-    exitFreeCamera();
-  }
-  cameraMode = mode;
-  document.querySelectorAll(".view-toolbar button").forEach(function (b) {
-    b.classList.remove("active");
-  });
-  targetBtn.classList.add("active");
+// ---------------------------------------------------------------- animation loop
 
-  if (mode === "top") {
-    camera.position.set(...TOP_VIEW.position);
-    controls.target.set(...TOP_VIEW.target);
-  } else if (mode === "orbit") {
-    camera.position.set(...ORBIT_VIEW.position);
-    controls.target.set(...ORBIT_VIEW.target);
+function animate() {
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min((now - lastFrameTime) / 1000, 0.05);
+  lastFrameTime = now;
+
+  if (isNavigating && currentPath.length > 1) {
+    const total = pathLengths[pathLengths.length - 1];
+    navProgress = Math.min(1, navProgress + (ROBOT_SPEED_M_S * navSpeed * dt) / Math.max(total, 1e-6));
+    const travelled = navProgress * total;
+    let seg = 0;
+    while (seg < currentPath.length - 2 && pathLengths[seg + 1] < travelled) seg++;
+    const segLength = pathLengths[seg + 1] - pathLengths[seg];
+    const t = segLength > 0 ? (travelled - pathLengths[seg]) / segLength : 0;
+    const p1 = currentPath[seg];
+    const p2 = currentPath[seg + 1];
+    robotAvatar.position.x = p1.x + (p2.x - p1.x) * t;
+    robotAvatar.position.z = p1.z + (p2.z - p1.z) * t;
+    robotAvatar.rotation.y = Math.atan2(p2.x - p1.x, p2.z - p1.z);
+    document.getElementById("hud-nav-fill").style.width = (navProgress * 100).toFixed(1) + "%";
+    checkProximityEvents(robotAvatar.position.x, robotAvatar.position.z);
+    if (navProgress >= 1) onArrival();
   }
+
+  // Follow mode: move camera and pivot with the robot, keep the user's zoom/rotation.
+  if (cameraMode === "follow" && lastRobotPos && !camTween) {
+    const delta = new THREE.Vector3().subVectors(robotAvatar.position, lastRobotPos);
+    camera.position.add(delta);
+    controls.target.add(delta);
+  }
+  lastRobotPos = robotAvatar.position.clone();
+
+  updateCameraTween();
+  updateFreeCamera();
+  if (!freeCam.active) {
+    clampTarget();
+    controls.update();
+  }
+  renderer.render(scene, camera);
 }
 
-const btnSemanticExtract = document.getElementById("btn-semantic-extract");
-if (btnSemanticExtract) {
-  btnSemanticExtract.onclick = async function () {
-    const origHtml = btnSemanticExtract.innerHTML;
-    btnSemanticExtract.disabled = true;
-    btnSemanticExtract.innerHTML = "<span>⏳ Segmenting Point Cloud...</span>";
+// ---------------------------------------------------------------- omnibar (natural language)
 
-    try {
-      const res = await fetch("/api/scene/extract-assets", {
-        method: "POST",
-      });
-      const data = await res.json();
-      if (res.ok) {
-        build3DBoundingBoxes(data.all_frames);
-        document.getElementById("asset-count").innerText =
-          data.extracted_count + " Objects · " + data.mapped_asset_count + " Assets";
+function setupOmnibar() {
+  const input = document.getElementById("omnibar-input");
+  const box = document.getElementById("omnibar-suggestions");
 
-        btnSemanticExtract.innerHTML = `<span>✔ ${data.extracted_count} objects in ${data.processing_seconds}s</span>`;
-        setTimeout(() => {
-          btnSemanticExtract.disabled = false;
-          btnSemanticExtract.innerHTML = origHtml;
-        }, 3000);
-      } else {
-        alert("Segmentation error: " + (data.detail || "Unknown error"));
-        btnSemanticExtract.disabled = false;
-        btnSemanticExtract.innerHTML = origHtml;
-      }
-    } catch (err) {
-      console.error("Semantic extraction error", err);
-      alert("Failed to run 3D semantic extraction: " + err.message);
-      btnSemanticExtract.disabled = false;
-      btnSemanticExtract.innerHTML = origHtml;
+  function findAsset(text) {
+    const q = text.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return assetsData.find(function (a) {
+      const tag = a.tag.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const id = a.asset_id.toLowerCase().replace(/[^a-z0-9]/g, "");
+      return q.includes(tag) || q.includes(id);
+    });
+  }
+
+  function run(text) {
+    const q = text.trim();
+    if (!q) return;
+    box.style.display = "none";
+    const lower = q.toLowerCase();
+    const asset = findAsset(q);
+    if (/(need|needs|require).*(attention|maintenance)|degraded|priorit|faulty|worst|critical/.test(lower) && !asset) {
+      document.getElementById("asset-search").value = "";
+      renderAssetList(assetsData);
+      if (!sidebarOpen) toggleLeftSidebar();
+      const worst = assetsData.filter(function (a) { return assetState(a) !== "healthy"; })
+        .sort(function (a, b) { return a.state.health_score - b.state.health_score; });
+      showToast(worst.length + " assets need attention — worst: " + worst.slice(0, 3).map(function (a) { return a.tag; }).join(", "));
+      if (worst[0]) selectAndFocus(worst[0].asset_id);
+      return;
     }
+    if (asset && /(where|show|find|locate|highlight)/.test(lower)) {
+      selectAndFocus(asset.asset_id);
+      return;
+    }
+    if (asset && /(route|reach|go to|navigate|walk|path)/.test(lower)) {
+      loadRoute(asset.asset_id).then(function (ok) {
+        if (ok) {
+          showSelection(asset.asset_id);
+          showToast("Route to " + asset.tag + " ready — press Start inspection");
+        }
+      });
+      return;
+    }
+    // Everything else goes to the AI copilot about the named (or selected) asset.
+    const target = asset ? asset.asset_id : selectedId && framesById.get(selectedId) && framesById.get(selectedId).asset_id ? selectedId : routeTargetId;
+    if (!copilotOpen) toggleCopilotDrawer();
+    selectedId = target;
+    refreshFrameStyles();
+    document.getElementById("copilot-question").value = q;
+    runCopilotDiagnosis(target, q);
+  }
+
+  input.oninput = function () {
+    const q = input.value.trim().toLowerCase();
+    if (q.length < 2) {
+      box.style.display = "none";
+      return;
+    }
+    const matches = assetsData.filter(function (a) {
+      return (a.tag + " " + a.asset_class + " " + (a.area_name || "")).toLowerCase().includes(q);
+    }).slice(0, 5);
+    box.innerHTML = "";
+    matches.forEach(function (m) {
+      const item = document.createElement("div");
+      item.className = "omnibar-suggestion-item";
+      item.innerHTML = '<span><span class="status-dot status-' + dotClass(assetState(m)) + '"></span><b>' +
+        escapeHtml(m.tag) + "</b> " + escapeHtml(prettyClass(m.asset_class)) + "</span><span>" +
+        Math.round(m.state ? m.state.health_score : 100) + "%</span>";
+      item.onclick = function () {
+        input.value = "";
+        box.style.display = "none";
+        selectAndFocus(m.asset_id);
+      };
+      box.appendChild(item);
+    });
+    box.style.display = matches.length ? "flex" : "none";
+  };
+  input.onkeydown = function (e) {
+    if (e.key === "Enter") run(input.value);
+  };
+  document.getElementById("omnibar-submit").onclick = function () {
+    run(input.value);
   };
 }
 
-document.getElementById("btn-start-nav").onclick = toggleDroneNavigation;
+// ---------------------------------------------------------------- panels, toolbar, help
 
-document.getElementById("btn-reset-nav").onclick = function () {
-  isNavigating = false;
-  navProgress = 0;
-  document.getElementById("nav-btn-text").innerHTML = "▶ Start Drone";
-  document.getElementById("nav-badge").innerText = "Ready";
-  document.getElementById("nav-badge").style.color = "var(--green)";
-  document.getElementById("hud-nav-fill").style.width = "0%";
-  if (currentPath.length > 0) {
-    robotAvatar.position.set(currentPath[0].x, ROBOT_GROUND_OFFSET, currentPath[0].z);
-  }
-};
+function setupPanels() {
+  document.getElementById("btn-toggle-left-sidebar").onclick = toggleLeftSidebar;
+  document.getElementById("btn-toggle-copilot").onclick = toggleCopilotDrawer;
+}
 
-document.getElementById("speed-slider").oninput = function (e) {
-  navSpeed = parseFloat(e.target.value);
-  document.getElementById("speed-val").innerText = navSpeed.toFixed(1) + "x";
-};
+function toggleLeftSidebar() {
+  sidebarOpen = !sidebarOpen;
+  document.getElementById("left-sidebar-container").classList.toggle("collapsed", !sidebarOpen);
+  document.getElementById("sidebar-metaverse").classList.toggle("collapsed", !sidebarOpen);
+  document.getElementById("btn-toggle-left-sidebar").innerText = sidebarOpen ? "◀" : "▶";
+  setTimeout(onWindowResize, 310);
+}
 
-document.getElementById("btn-cam-drone").onclick = function (e) {
-  setCameraMode("drone", e.currentTarget);
-};
-document.getElementById("btn-cam-orbit").onclick = function (e) {
-  setCameraMode("orbit", e.currentTarget);
-};
-document.getElementById("btn-cam-top").onclick = function (e) {
-  setCameraMode("top", e.currentTarget);
-};
-document.getElementById("btn-cam-free").onclick = enterFreeCamera;
+function toggleCopilotDrawer() {
+  copilotOpen = !copilotOpen;
+  document.getElementById("right-copilot-container").classList.toggle("collapsed", !copilotOpen);
+  document.getElementById("copilot-drawer").classList.toggle("collapsed", !copilotOpen);
+  document.getElementById("btn-toggle-copilot").innerText = copilotOpen ? "▶" : "◀";
+  setTimeout(onWindowResize, 310);
+}
 
-document
-  .querySelectorAll(".render-mode-btn[data-render-mode]")
-  .forEach(function (button) {
-    button.onclick = function () {
-      applyRenderMode(button.dataset.renderMode);
+function setupToolbar() {
+  document.getElementById("btn-start-nav").onclick = toggleNavigation;
+  document.getElementById("btn-reset-nav").onclick = resetRobot;
+  document.getElementById("speed-slider").oninput = function (e) {
+    navSpeed = parseFloat(e.target.value);
+    setText("speed-val", navSpeed.toFixed(1) + "x");
+  };
+  document.getElementById("btn-cam-orbit").onclick = function () { setCameraMode("orbit"); };
+  document.getElementById("btn-cam-follow").onclick = function () { setCameraMode("follow"); };
+  document.getElementById("btn-cam-top").onclick = function () { setCameraMode("top"); };
+  document.getElementById("btn-cam-reset").onclick = resetView;
+  document.querySelectorAll(".render-mode-btn[data-view]").forEach(function (b) {
+    b.onclick = function () {
+      if (b.dataset.view !== viewKind) loadSceneModel(b.dataset.view);
     };
   });
-document.getElementById("btn-vision-analyze").onclick = analyzeCurrentView;
+  document.getElementById("btn-heat").onclick = function () {
+    applyRenderMode(renderMode === "heat" ? "splat" : "heat");
+  };
+  document.getElementById("btn-all-frames").onclick = function (e) {
+    showAllFrames = !showAllFrames;
+    e.currentTarget.classList.toggle("active", showAllFrames);
+    refreshFrameStyles();
+    showToast(showAllFrames ? "Showing all " + framesData.length + " extracted frames" : "Showing target, selection and nearby frames");
+  };
+
+  const more = document.getElementById("more-dropdown");
+  document.getElementById("btn-more").onclick = function (e) {
+    e.stopPropagation();
+    more.classList.toggle("open");
+  };
+  document.addEventListener("click", function () {
+    more.classList.remove("open");
+  });
+  document.getElementById("btn-cam-free").onclick = enterFreeCamera;
+  document.getElementById("btn-vision-analyze").onclick = analyzeCurrentView;
+  document.getElementById("btn-semantic-extract").onclick = rerunExtraction;
+
+  document.getElementById("btn-ask-copilot").onclick = askCopilot;
+  document.getElementById("copilot-question").onkeydown = function (e) {
+    if (e.key === "Enter") askCopilot();
+  };
+  document.getElementById("btn-submit-wo").onclick = draftWorkOrder;
+  document.getElementById("asset-search").oninput = function () {
+    renderAssetList(filteredAssets());
+  };
+}
 
 function askCopilot() {
-  const input = document.getElementById("copilot-question");
-  const question = input.value.trim();
-  if (!question) {
-    return;
-  }
-  document.getElementById("copilot-answer").textContent = "Thinking…";
-  runCopilotDiagnosis(currentSelectedAsset, question);
+  const question = document.getElementById("copilot-question").value.trim();
+  if (!question) return;
+  const frame = framesById.get(selectedId);
+  const target = frame && !frame.asset_id ? routeTargetId : selectedId || routeTargetId;
+  runCopilotDiagnosis(target, question);
 }
-document.getElementById("btn-ask-copilot").onclick = askCopilot;
-document.getElementById("copilot-question").onkeydown = function (e) {
-  if (e.key === "Enter") {
-    askCopilot();
-  }
-};
 
-document.getElementById("btn-open-copilot").onclick = function () {
-  if (!copilotOpen) {
-    toggleCopilotDrawer();
-  }
-  runCopilotDiagnosis(currentSelectedAsset);
-};
-
-document.getElementById("btn-submit-wo").onclick = async function () {
+async function draftWorkOrder() {
+  const frame = framesById.get(selectedId);
+  const target = frame && !frame.asset_id ? routeTargetId : selectedId || routeTargetId;
   try {
-    const res = await fetch("/api/work-orders/draft", {
+    const wo = await fetchJson("/api/work-orders/draft", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ asset_id: currentSelectedAsset }),
+      body: JSON.stringify({ asset_id: target }),
     });
-    const wo = await res.json();
-    showToast("Maintenance Work Order " + wo.work_order_id + " generated!");
+    showToast("Draft " + (wo.work_order_id || "") + " created for review (not submitted)");
   } catch (err) {
-    showToast("Error generating work order");
+    showToast("Work order: " + err.message);
   }
-};
+}
 
-document.getElementById("asset-search").oninput = function (e) {
-  const q = e.target.value.toLowerCase();
-  const filtered = assetsData.filter(function (a) {
-    return (
-      a.tag.toLowerCase().includes(q) ||
-      a.asset_class.toLowerCase().includes(q) ||
-      a.area_name.toLowerCase().includes(q)
-    );
+async function rerunExtraction() {
+  showToast("Re-running 3D extraction…");
+  try {
+    const data = await fetchJson("/api/scene/extract-assets", { method: "POST" });
+    framesData = data.all_frames || framesData;
+    framesById.clear();
+    framesData.forEach(function (f) { framesById.set(f.id, f); });
+    buildFrames(framesData);
+    showToast(data.extracted_count + " objects in " + data.processing_seconds + " s");
+  } catch (err) {
+    showToast("Extraction failed: " + err.message);
+  }
+}
+
+function setupHelp() {
+  document.getElementById("btn-help").onclick = function () {
+    document.getElementById("help-card").classList.add("open");
+  };
+  document.getElementById("btn-help-close").onclick = hideHelp;
+  let seen = false;
+  try {
+    seen = localStorage.getItem("ayf-help-seen") === "1";
+  } catch (e) {
+    seen = false;
+  }
+  if (!seen) document.getElementById("help-card").classList.add("open");
+}
+
+function hideHelp() {
+  document.getElementById("help-card").classList.remove("open");
+  try {
+    localStorage.setItem("ayf-help-seen", "1");
+  } catch (e) {
+    /* storage unavailable */
+  }
+}
+
+function setStep(n) {
+  document.querySelectorAll("#steps .step").forEach(function (li) {
+    const s = Number(li.dataset.step);
+    li.classList.toggle("active", s === n);
+    li.classList.toggle("done", s < n);
   });
-  renderAssetList(filtered);
-};
+}
+
+// ---------------------------------------------------------------- YOLO (secondary)
+
+function renderVisionDetections(result) {
+  const overlay = document.getElementById("vision-overlay");
+  overlay.innerHTML = "";
+  const imageWidth = result.image.width;
+  const imageHeight = result.image.height;
+  result.detections.forEach(function (detection) {
+    const box = document.createElement("div");
+    box.className = "vision-detection";
+    box.style.left = (detection.box.x / imageWidth) * 100 + "%";
+    box.style.top = (detection.box.y / imageHeight) * 100 + "%";
+    box.style.width = (detection.box.width / imageWidth) * 100 + "%";
+    box.style.height = (detection.box.height / imageHeight) * 100 + "%";
+
+    const label = document.createElement("span");
+    label.className = "vision-detection-label";
+    label.innerText =
+      detection.label + " " + Math.round(detection.confidence * 100) + "%";
+    box.appendChild(label);
+    overlay.appendChild(box);
+  });
+}
+
+async function analyzeCurrentView() {
+  const button = document.getElementById("btn-vision-analyze");
+  const canvas = renderer.domElement;
+  button.disabled = true;
+  button.innerText = "Scanning...";
+  try {
+    const blob = await new Promise(function (resolve) {
+      canvas.toBlob(resolve, "image/jpeg", 0.82);
+    });
+    if (!blob) {
+      throw new Error("Could not capture the 3D view.");
+    }
+    const form = new FormData();
+    form.append("file", blob, "ask-your-factory-view.jpg");
+    form.append(
+      "classes",
+      "person, worker, safety helmet, pump, valve, pipe, tank, boiler, motor, industrial machine, pressure gauge, ladder, fire extinguisher",
+    );
+    const response = await fetch("/api/vision/analyze", {
+      method: "POST",
+      body: form,
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.detail || "YOLO-World analysis failed.");
+    }
+    renderVisionDetections(result);
+    showToast("YOLO-World found " + result.detections.length + " object(s)");
+  } catch (error) {
+    console.error("YOLO-World analysis error", error);
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+    button.innerText = "AI Scan";
+  }
+}
+
+// ---------------------------------------------------------------- helpers
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.innerText = text == null ? "" : String(text);
+}
+
+function prettyClass(value) {
+  return (value || "—").toString().replace(/_/g, " ").toLowerCase();
+}
+
+function dotClass(state) {
+  if (state === "attention_required") return "attention";
+  return state || "healthy";
+}
+
+function escapeHtml(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
 
 function showToast(msg) {
   const t = document.getElementById("toast");
@@ -1880,29 +1660,13 @@ function showToast(msg) {
 
 function onWindowResize() {
   const container = document.getElementById("canvas-container");
-  if (!container || container.clientHeight === 0) {
-    return;
-  }
+  if (!container || container.clientHeight === 0) return;
   camera.aspect = container.clientWidth / container.clientHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(container.clientWidth, container.clientHeight);
-
-  if (
-    pointCloud &&
-    pointCloud.material &&
-    pointCloud.material.uniforms &&
-    pointCloud.material.uniforms.uScale
-  ) {
-    let fovHalfRad = THREE.MathUtils.degToRad(30.0);
-    if (camera && camera.fov) {
-      fovHalfRad = THREE.MathUtils.degToRad(camera.fov * 0.5);
-    }
-    pointCloud.material.uniforms.uScale.value =
-      container.clientHeight / (2.0 * Math.tan(fovHalfRad));
+  if (sceneModel && sceneModel.material && sceneModel.material.uniforms && sceneModel.material.uniforms.uScale) {
+    sceneModel.material.uniforms.uScale.value = container.clientHeight / (2.0 * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)));
   }
 }
 
-window.onload = function () {
-  init3D();
-  runCopilotDiagnosis("ASSET-017");
-};
+window.onload = init3D;

@@ -21,7 +21,12 @@ from app.metaverse.dataset import DATA_DIR
 
 logger = logging.getLogger("ask_your_factory.point_cloud")
 
-RAW_SPLAT_PATH = DATA_DIR / "Industrial Boiler Room.ply"
+RAW_SPLAT_NAME = "Industrial Boiler Room.ply"
+# The raw scan is gitignored; it may live in data/ or data/input/.
+RAW_SPLAT_PATH = next(
+    (p for p in (DATA_DIR / RAW_SPLAT_NAME, DATA_DIR / "input" / RAW_SPLAT_NAME) if p.exists()),
+    DATA_DIR / RAW_SPLAT_NAME,
+)
 VIEWER_PLY_PATH = DATA_DIR / "Industrial_Boiler_Room_standard.ply"
 VIEWER_MESH_PATH = DATA_DIR / "Industrial_Boiler_Room_mesh.ply"
 

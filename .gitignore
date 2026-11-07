@@ -110,3 +110,7 @@ Valmet challenge data/
 *.pt.cache
 backend/database.db-shm
 backend/database.db-wal
+
+# Local challenge inputs and generated caches
+data/input/
+data/processed/

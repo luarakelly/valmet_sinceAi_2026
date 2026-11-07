@@ -1,0 +1,7 @@
+# Shell scripts must keep LF endings or Git Bash fails with "$'\r': command not found".
+*.sh   text eol=lf
+*.bat  text eol=crlf
+*.ply  binary
+*.pt   binary
+*.xlsx binary
+*.docx binary

@@ -24,7 +24,7 @@ from scipy import ndimage
 
 logger = logging.getLogger("ask_your_factory.splat_mesh")
 
-MESH_MARKER = "comment splat-mesh v4"
+MESH_MARKER = "comment splat-mesh v5"
 
 VOXEL = 0.015                # metres per voxel
 MIN_OPACITY = 0.05
@@ -165,12 +165,19 @@ def is_mesh_export(path: Path) -> bool:
 
 
 def _ceiling_height(heights: np.ndarray) -> float:
-    """Densest horizontal layer in the upper half: the ceiling."""
+    """Highest dense horizontal layer in the upper half: the ceiling.
+
+    The densest upper layer is often the overhead pipe rack, not the ceiling; cutting there removed
+    every overhead pipe from the mesh. Take the *highest* layer that is still dense, and never cut
+    below the 97th height percentile.
+    """
     bins = np.arange(heights.min(), heights.max() + 0.02, 0.02)
     counts, edges = np.histogram(heights, bins=bins)
     half = len(counts) // 2
-    densest = half + int(np.argmax(counts[half:]))
-    return float(edges[densest])
+    upper = counts[half:]
+    dense = np.nonzero(upper >= 0.35 * upper.max())[0]
+    highest = half + int(dense[-1]) if len(dense) else half + int(np.argmax(upper))
+    return float(max(edges[highest], np.percentile(heights, 97)))
 
 
 def _write_mesh_ply(path: Path, verts: np.ndarray, rgb: np.ndarray, faces: np.ndarray) -> None:

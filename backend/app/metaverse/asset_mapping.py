@@ -5,6 +5,8 @@ The brief allows non-physical mapping; this one is still plausible and explainab
 - only objects with a free standing spot within REACH_M are eligible, so every asset is serviceable;
 - the inspection target is placed first, on the best-matching object with the longest walk from
   the entry, so the robot crosses the room and passes as much equipment as possible;
+- the other assets are spread out (farthest-point placement among equally good objects), so the
+  nearby-assets display changes along the walk instead of showing one dense cluster;
 - mapping_confidence drops with each step down the preference list (trustworthy-AI requirement).
 """
 
@@ -62,6 +64,16 @@ def bind_assets(
             return preferences.index(obj.label)
         return len(preferences)
 
+    def spread(obj: SceneObject) -> float:
+        """Horizontal distance to the nearest already-bound object (larger = more spread out)."""
+        if not taken:
+            return math.inf
+        by_id = {o.object_id: o for o in eligible}
+        return min(
+            math.hypot(obj.center[0] - by_id[oid].center[0], obj.center[2] - by_id[oid].center[2])
+            for oid in taken
+        )
+
     def place(asset: Dict[str, Any], far_first: bool) -> None:
         asset_class = asset.get("asset_class", "")
         free = [o for o in eligible if o.object_id not in taken]
@@ -71,7 +83,7 @@ def bind_assets(
         def sort_key(obj: SceneObject):
             if far_first:
                 return (rank(obj, asset_class), -walk.get(obj.object_id, 0.0), obj.object_id)
-            return (rank(obj, asset_class), obj.center[0], obj.object_id)
+            return (rank(obj, asset_class), -round(spread(obj), 2), obj.object_id)
 
         best = min(free, key=sort_key)
         best_rank = rank(best, asset_class)
