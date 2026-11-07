@@ -1,0 +1,78 @@
+{
+ "objects": 54,
+ "by_label": {
+  "CANISTER": 1,
+  "CHAIR": 1,
+  "CRATE": 5,
+  "DOOR": 1,
+  "ELECTRICAL_CABINET": 6,
+  "FIRE_EXTINGUISHER": 1,
+  "LADDER": 1,
+  "PALLET": 4,
+  "PIPE": 6,
+  "PRESSURE_GAUGE": 1,
+  "PUMP": 6,
+  "RACK": 2,
+  "TANK": 4,
+  "TARP": 1,
+  "TROLLEY": 7,
+  "VACUUM_CLEANER": 1,
+  "VALVE": 4,
+  "WASHING_MACHINE": 2
+ },
+ "issues": [
+  "V00-3 WASHING_MACHINE skipped: implausible size [1.66, 0.95, 1.05]",
+  "V00-4 WASHING_MACHINE skipped: implausible size [1.4, 1.02, 0.79]",
+  "V01-1 PRESSURE_GAUGE skipped: no compact object behind the box",
+  "V04-2 PUMP skipped: no compact object behind the box",
+  "V05-0 TROLLEY skipped: implausible size [2.02, 1.23, 0.89]",
+  "V07-1 PRESSURE_GAUGE skipped: no compact object behind the box"
+ ],
+ "workbook_coverage": {
+  "classes": {
+   "CONTROL_VALVE": {
+    "in_workbook": 12,
+    "found_in_scan": 4,
+    "missing": 8
+   },
+   "ELECTRIC_MOTOR": {
+    "in_workbook": 6,
+    "found_in_scan": 0,
+    "missing": 6
+   },
+   "PRESSURE_TRANSMITTER": {
+    "in_workbook": 3,
+    "found_in_scan": 1,
+    "missing": 2
+   },
+   "PROCESS_PUMP": {
+    "in_workbook": 6,
+    "found_in_scan": 6,
+    "missing": 0
+   },
+   "VIBRATION_SENSOR": {
+    "in_workbook": 3,
+    "found_in_scan": 0,
+    "missing": 3
+   }
+  },
+  "other_objects": {
+   "CANISTER": 1,
+   "CHAIR": 1,
+   "CRATE": 5,
+   "DOOR": 1,
+   "ELECTRICAL_CABINET": 6,
+   "FIRE_EXTINGUISHER": 1,
+   "LADDER": 1,
+   "PALLET": 4,
+   "PIPE": 6,
+   "RACK": 2,
+   "TANK": 4,
+   "TARP": 1,
+   "TROLLEY": 7,
+   "VACUUM_CLEANER": 1,
+   "WASHING_MACHINE": 2
+  },
+  "unlisted_asset_classes": {}
+ }
+}

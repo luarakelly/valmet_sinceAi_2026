@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 import json
 import logging
 import math
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -45,7 +46,14 @@ def asset_class_of(label: str) -> Optional[str]:
 
 def write_semantic_objects(path: Path, objects: List[SemanticObject]) -> None:
     payload = {"version": SCHEMA_VERSION, "objects": [asdict(obj) for obj in objects]}
-    path.write_text(json.dumps(payload, indent=1))
+    write_json_atomically(path, payload)
+
+
+def write_json_atomically(path: Path, payload: Dict) -> None:
+    """Write beside the target, then rename: a crash can never leave a half-written file."""
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=1))
+    os.replace(temporary, path)
 
 
 def read_semantic_objects(path: Path) -> List[SemanticObject]:

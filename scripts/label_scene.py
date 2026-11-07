@@ -22,7 +22,8 @@ from infra.labeling.pipeline import ViewDetections, build_semantic_objects  # no
 from infra.labeling.segmenter import Detection  # noqa: E402
 from infra.labeling.semantic_objects import write_semantic_objects  # noqa: E402
 from infra.labeling.vocabulary import VOCABULARY  # noqa: E402
-from infra.paths import LABELING_VIEWS_DIR, SEMANTIC_OBJECTS_PATH  # noqa: E402
+from infra.labeling.view_quality import view_problem  # noqa: E402
+from infra.paths import LABELING_VIEWS_DIR, MODEL_OBJECTS_PATH  # noqa: E402
 from infra.spatial.point_cloud import load_scene_cloud  # noqa: E402
 
 EXIT_FAILURE = 1
@@ -30,16 +31,29 @@ EXIT_FAILURE = 1
 
 def main() -> None:
     arguments = _parse()
-    view_ids = sorted(path.stem for path in LABELING_VIEWS_DIR.glob("*.jpg"))
+    view_ids = _usable_views()
     if not view_ids:
         sys.exit("No views in {}. Capture them in the viewer first (?author).".format(LABELING_VIEWS_DIR))
     segmenter = _SegmenterOnDemand(arguments.device)
     views = [_view_detections(view_id, segmenter) for view_id in view_ids]
     cloud = load_scene_cloud()
     objects = build_semantic_objects(cloud.xyz, views)
-    write_semantic_objects(SEMANTIC_OBJECTS_PATH, objects)
-    print("wrote {} objects from {} views to {}".format(len(objects), len(views), SEMANTIC_OBJECTS_PATH))
+    MODEL_OBJECTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    write_semantic_objects(MODEL_OBJECTS_PATH, objects)
+    print("wrote {} model objects from {} views to {}; now run scripts/rebuild_labels.py".format(len(objects), len(views), MODEL_OBJECTS_PATH))
     print(json.dumps(coverage_report(get_dataset().get_assets(), objects), indent=1))
+
+
+def _usable_views():
+    """Captured views whose image is neither black nor smeared (camera inside a wall or pipe)."""
+    usable = []
+    for path in sorted(LABELING_VIEWS_DIR.glob("*.jpg")):
+        problem = view_problem(_load_rgb(path))
+        if problem:
+            print("{}: skipped, {}".format(path.stem, problem))
+        else:
+            usable.append(path.stem)
+    return usable
 
 
 def _parse() -> argparse.Namespace:

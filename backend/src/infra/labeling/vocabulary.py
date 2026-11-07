@@ -26,6 +26,15 @@ VOCABULARY: Tuple[Term, ...] = (
     Term("electrical cabinet", "ELECTRICAL_CABINET", None),
     Term("tank", "TANK", None),
     Term("hazard sign", "HAZARD_SIGN", None),
+    Term("door", "DOOR", None),
+    Term("ladder", "LADDER", None),
+    Term("trolley", "TROLLEY", None),
+    Term("washing machine", "WASHING_MACHINE", None),
+    Term("vacuum cleaner", "VACUUM_CLEANER", None),
+    Term("office chair", "CHAIR", None),
+    Term("tarp", "TARP", None),
+    Term("canister", "CANISTER", None),
+    Term("shelf rack", "RACK", None),
 )
 PROMPT_SEPARATOR = " . "
 

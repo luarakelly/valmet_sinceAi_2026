@@ -54,15 +54,16 @@ Instead of manually searching through industrial equipment and technical documen
 
 ---
 
-## Automatic semantic labels (optional, GPU)
+## Semantic labels (regenerable)
 
-The geometric extraction cannot tell a crate from a pipe. This step names and boxes equipment from photoreal renders:
+The geometric extraction cannot tell a crate from a pipe. Labels come from rendered views, and everything is rebuilt by one command:
 
-1. Start the server, open `http://localhost:8000/?author` and press **Capture labeling views** (40 virtual cameras on walkable floor; each image is saved with its exact camera matrix).
-2. `backend/.venv/Scripts/python scripts/spike_grounded_sam.py` is the quick go/no-go check on a few screenshots in `data/labeling/spike/`.
-3. `backend/.venv/Scripts/python scripts/label_scene.py` runs GroundingDINO + SAM 2 on every view, back-projects the masks onto the scan (±15 cm of the visible surface), votes across views (at least 2 must agree), clusters with DBSCAN (eps 0.10 m, 30 points) and writes `data/semantic_objects.json` plus an Excel coverage report (which of the 30 pack assets were found).
-4. Restart the server: semantic objects replace the geometric ones they cover, carry the asset class, and are drawn as rotated boxes. Without the file everything behaves as before.
-5. `scripts/eval_labels.py` scores the result against the boxes you confirmed with the placement tool.
+1. Open `http://localhost:8000/?author` and press **Capture labeling views** (40 virtual cameras on walkable floor; each image is saved with its exact camera matrix in `data/labeling/views/`).
+2. Boxes are data: `data/view_annotations.json` holds hand-drawn 2D boxes per view (image fractions). Edit it, or add model detections with `scripts/spike_grounded_sam.py` (go/no-go check) and `scripts/label_scene.py` (GroundingDINO + SAM 2 on a GPU, writes `data/labeling/model_objects.json`).
+3. `backend/.venv/Scripts/python scripts/rebuild_labels.py` regenerates `data/semantic_objects.json` and `data/semantic_report.json`. Each 2D box is lifted to 3D (front surface, no floor, one compact cluster, size limits per label), boxes of the same thing from several views are merged, model objects only add what is not already boxed, and everything is clamped to the room.
+4. Bad input never crashes it: unknown labels, inverted boxes, missing cameras and implausible sizes are skipped and listed in the report. The old result is backed up (`.json.bak`), the new one is written atomically, and an empty result never replaces a good file.
+5. Restart the server: semantic objects replace the geometric ones they cover, carry the asset class, and are drawn as rotated boxes. Without the file everything behaves as before.
+6. `scripts/eval_labels.py` scores the result against the boxes you confirmed with the placement tool.
 
 ## The Problem
 

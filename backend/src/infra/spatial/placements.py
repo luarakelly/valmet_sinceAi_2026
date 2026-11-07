@@ -36,17 +36,29 @@ class LiftedBox:
     point_count: int
 
 
-def lift_box(xyz: np.ndarray, view_projection: Sequence[float], image_box: Sequence[float]) -> Optional[LiftedBox]:
+def lift_box(
+    xyz: np.ndarray, view_projection: Sequence[float], image_box: Sequence[float], min_share: float = 0.0
+) -> Optional[LiftedBox]:
     """Fit a 3D box to the nearest surface inside `image_box`; None when nothing solid is there.
 
     view_projection: 16 floats, column-major (three.js Matrix4.elements).
     image_box: x0, y0, x1, y1 as fractions of the image, origin top-left.
+    min_share: skip surfaces with fewer points than this share of the largest one (floaters in front).
     """
     depths, points = _points_in_view_box(xyz, view_projection, image_box)
-    surface = _nearest_surface(depths)
+    surface = _nearest_surface(depths, min_share)
     if len(surface) < MIN_SURFACE_POINTS:
         return None
     return _fit_box(points[surface])
+
+
+def points_in_view_box(xyz: np.ndarray, view_projection: Sequence[float], image_box: Sequence[float]):
+    """(depths, points) of every scan point that projects inside the 2D box."""
+    return _points_in_view_box(xyz, view_projection, image_box)
+
+
+def nearest_surface_indices(depths: np.ndarray, min_share: float = 0.0) -> np.ndarray:
+    return _nearest_surface(depths, min_share)
 
 
 def _points_in_view_box(xyz: np.ndarray, view_projection: Sequence[float], image_box: Sequence[float]):
@@ -63,12 +75,14 @@ def _points_in_view_box(xyz: np.ndarray, view_projection: Sequence[float], image
     return clip[is_in_box, 3], points[is_in_box]
 
 
-def _nearest_surface(depths: np.ndarray) -> np.ndarray:
+def _nearest_surface(depths: np.ndarray, min_share: float = 0.0) -> np.ndarray:
     """Indices of the closest depth cluster that is dense enough to be a real surface."""
     order = np.argsort(depths)
     jumps = np.flatnonzero(np.diff(depths[order]) > DEPTH_GAP_M) + 1
-    for surface in np.split(order, jumps):
-        if len(surface) >= MIN_SURFACE_POINTS:
+    surfaces = np.split(order, jumps)
+    needed = max(MIN_SURFACE_POINTS, min_share * max((len(s) for s in surfaces), default=0))
+    for surface in surfaces:
+        if len(surface) >= needed:
             return surface
     return order[:0]
 

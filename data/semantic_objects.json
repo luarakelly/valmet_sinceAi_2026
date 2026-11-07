@@ -1,0 +1,1031 @@
+{
+ "version": 1,
+ "objects": [
+  {
+   "object_id": "SEM-CANISTER-01",
+   "label": "CANISTER",
+   "asset_class": null,
+   "center": [
+    1.441,
+    0.18,
+    2.421
+   ],
+   "size": [
+    0.381,
+    0.2,
+    0.217
+   ],
+   "yaw": 1.117,
+   "point_count": 1172,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-CHAIR-01",
+   "label": "CHAIR",
+   "asset_class": null,
+   "center": [
+    1.558,
+    0.495,
+    1.65
+   ],
+   "size": [
+    0.544,
+    0.83,
+    0.514
+   ],
+   "yaw": 0.0,
+   "point_count": 21882,
+   "score": 1.0,
+   "view_count": 6
+  },
+  {
+   "object_id": "SEM-CRATE-01",
+   "label": "CRATE",
+   "asset_class": null,
+   "center": [
+    -3.975,
+    0.56,
+    -3.111
+   ],
+   "size": [
+    0.418,
+    0.62,
+    0.578
+   ],
+   "yaw": 1.536,
+   "point_count": 3238,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-CRATE-02",
+   "label": "CRATE",
+   "asset_class": null,
+   "center": [
+    2.001,
+    0.23,
+    2.931
+   ],
+   "size": [
+    0.711,
+    0.28,
+    0.893
+   ],
+   "yaw": 1.553,
+   "point_count": 2627,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-CRATE-03",
+   "label": "CRATE",
+   "asset_class": null,
+   "center": [
+    3.233,
+    0.19,
+    -2.94
+   ],
+   "size": [
+    0.441,
+    0.2,
+    0.506
+   ],
+   "yaw": 0.157,
+   "point_count": 579,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-CRATE-04",
+   "label": "CRATE",
+   "asset_class": null,
+   "center": [
+    3.743,
+    0.465,
+    -2.702
+   ],
+   "size": [
+    1.409,
+    0.73,
+    0.981
+   ],
+   "yaw": 1.553,
+   "point_count": 8771,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-CRATE-05",
+   "label": "CRATE",
+   "asset_class": null,
+   "center": [
+    4.065,
+    0.27,
+    1.845
+   ],
+   "size": [
+    0.872,
+    0.36,
+    0.462
+   ],
+   "yaw": 0.192,
+   "point_count": 3794,
+   "score": 0.75,
+   "view_count": 3
+  },
+  {
+   "object_id": "SEM-DOOR-01",
+   "label": "DOOR",
+   "asset_class": null,
+   "center": [
+    -0.646,
+    1.01,
+    3.471
+   ],
+   "size": [
+    1.509,
+    1.78,
+    0.402
+   ],
+   "yaw": 0.07,
+   "point_count": 37183,
+   "score": 1.0,
+   "view_count": 6
+  },
+  {
+   "object_id": "SEM-ELECTRICAL_CABINET-01",
+   "label": "ELECTRICAL_CABINET",
+   "asset_class": null,
+   "center": [
+    -4.42,
+    0.575,
+    0.485
+   ],
+   "size": [
+    0.428,
+    0.95,
+    0.258
+   ],
+   "yaw": 1.553,
+   "point_count": 2090,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-ELECTRICAL_CABINET-02",
+   "label": "ELECTRICAL_CABINET",
+   "asset_class": null,
+   "center": [
+    -4.405,
+    1.35,
+    2.007
+   ],
+   "size": [
+    0.445,
+    0.94,
+    1.262
+   ],
+   "yaw": 0.175,
+   "point_count": 7442,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-ELECTRICAL_CABINET-03",
+   "label": "ELECTRICAL_CABINET",
+   "asset_class": null,
+   "center": [
+    -4.32,
+    1.11,
+    -0.447
+   ],
+   "size": [
+    0.604,
+    0.96,
+    0.321
+   ],
+   "yaw": 1.536,
+   "point_count": 8392,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-ELECTRICAL_CABINET-04",
+   "label": "ELECTRICAL_CABINET",
+   "asset_class": null,
+   "center": [
+    1.799,
+    0.89,
+    3.311
+   ],
+   "size": [
+    1.563,
+    1.02,
+    0.523
+   ],
+   "yaw": 0.524,
+   "point_count": 7651,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-ELECTRICAL_CABINET-05",
+   "label": "ELECTRICAL_CABINET",
+   "asset_class": null,
+   "center": [
+    3.579,
+    1.315,
+    3.335
+   ],
+   "size": [
+    1.097,
+    0.89,
+    0.333
+   ],
+   "yaw": 0.0,
+   "point_count": 9445,
+   "score": 1.0,
+   "view_count": 5
+  },
+  {
+   "object_id": "SEM-ELECTRICAL_CABINET-06",
+   "label": "ELECTRICAL_CABINET",
+   "asset_class": null,
+   "center": [
+    4.276,
+    1.2,
+    1.217
+   ],
+   "size": [
+    0.506,
+    0.94,
+    0.204
+   ],
+   "yaw": 1.553,
+   "point_count": 943,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-FIRE_EXTINGUISHER-01",
+   "label": "FIRE_EXTINGUISHER",
+   "asset_class": null,
+   "center": [
+    -2.407,
+    1.07,
+    -1.189
+   ],
+   "size": [
+    0.179,
+    0.84,
+    0.477
+   ],
+   "yaw": 0.052,
+   "point_count": 782,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-LADDER-01",
+   "label": "LADDER",
+   "asset_class": null,
+   "center": [
+    3.879,
+    0.81,
+    -0.881
+   ],
+   "size": [
+    1.186,
+    1.38,
+    2.178
+   ],
+   "yaw": 0.0,
+   "point_count": 92202,
+   "score": 1.0,
+   "view_count": 7
+  },
+  {
+   "object_id": "SEM-PALLET-01",
+   "label": "PALLET",
+   "asset_class": null,
+   "center": [
+    -3.168,
+    0.405,
+    1.894
+   ],
+   "size": [
+    1.153,
+    0.57,
+    0.693
+   ],
+   "yaw": 0.506,
+   "point_count": 1814,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-PALLET-02",
+   "label": "PALLET",
+   "asset_class": null,
+   "center": [
+    -2.398,
+    0.29,
+    2.073
+   ],
+   "size": [
+    0.399,
+    0.42,
+    0.279
+   ],
+   "yaw": 1.396,
+   "point_count": 1136,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-PALLET-03",
+   "label": "PALLET",
+   "asset_class": null,
+   "center": [
+    -2.27,
+    0.775,
+    2.173
+   ],
+   "size": [
+    0.053,
+    0.57,
+    0.308
+   ],
+   "yaw": 0.75,
+   "point_count": 846,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-PALLET-04",
+   "label": "PALLET",
+   "asset_class": null,
+   "center": [
+    -2.033,
+    0.46,
+    3.067
+   ],
+   "size": [
+    0.156,
+    0.62,
+    0.188
+   ],
+   "yaw": 0.017,
+   "point_count": 170,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-PIPE-01",
+   "label": "PIPE",
+   "asset_class": null,
+   "center": [
+    -3.151,
+    1.21,
+    -1.276
+   ],
+   "size": [
+    2.175,
+    1.8,
+    0.866
+   ],
+   "yaw": 0.419,
+   "point_count": 6700,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-PIPE-02",
+   "label": "PIPE",
+   "asset_class": null,
+   "center": [
+    -1.824,
+    1.06,
+    -1.323
+   ],
+   "size": [
+    1.081,
+    1.94,
+    0.755
+   ],
+   "yaw": 0.524,
+   "point_count": 8241,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-PIPE-03",
+   "label": "PIPE",
+   "asset_class": null,
+   "center": [
+    -1.365,
+    1.285,
+    3.388
+   ],
+   "size": [
+    0.379,
+    1.63,
+    0.688
+   ],
+   "yaw": 1.536,
+   "point_count": 3159,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-PIPE-04",
+   "label": "PIPE",
+   "asset_class": null,
+   "center": [
+    -1.086,
+    1.35,
+    -1.859
+   ],
+   "size": [
+    1.372,
+    1.66,
+    0.618
+   ],
+   "yaw": 1.501,
+   "point_count": 15556,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-PIPE-05",
+   "label": "PIPE",
+   "asset_class": null,
+   "center": [
+    -0.464,
+    1.095,
+    0.122
+   ],
+   "size": [
+    0.967,
+    1.97,
+    0.998
+   ],
+   "yaw": 0.0,
+   "point_count": 14658,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-PIPE-06",
+   "label": "PIPE",
+   "asset_class": null,
+   "center": [
+    2.844,
+    1.035,
+    -1.774
+   ],
+   "size": [
+    2.621,
+    2.07,
+    3.834
+   ],
+   "yaw": 0.0,
+   "point_count": 45695,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-PRESSURE_GAUGE-01",
+   "label": "PRESSURE_GAUGE",
+   "asset_class": "PRESSURE_TRANSMITTER",
+   "center": [
+    2.857,
+    1.14,
+    -3.38
+   ],
+   "size": [
+    0.109,
+    0.12,
+    0.076
+   ],
+   "yaw": 1.396,
+   "point_count": 335,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-PUMP-01",
+   "label": "PUMP",
+   "asset_class": "PROCESS_PUMP",
+   "center": [
+    -2.285,
+    0.93,
+    -0.087
+   ],
+   "size": [
+    0.181,
+    0.26,
+    0.353
+   ],
+   "yaw": 0.0,
+   "point_count": 2407,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-PUMP-02",
+   "label": "PUMP",
+   "asset_class": "PROCESS_PUMP",
+   "center": [
+    1.586,
+    1.225,
+    3.308
+   ],
+   "size": [
+    0.469,
+    0.33,
+    0.436
+   ],
+   "yaw": 1.518,
+   "point_count": 3586,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-PUMP-03",
+   "label": "PUMP",
+   "asset_class": "PROCESS_PUMP",
+   "center": [
+    2.481,
+    0.995,
+    -1.816
+   ],
+   "size": [
+    0.522,
+    0.31,
+    0.155
+   ],
+   "yaw": 1.466,
+   "point_count": 1272,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-PUMP-04",
+   "label": "PUMP",
+   "asset_class": "PROCESS_PUMP",
+   "center": [
+    2.668,
+    1.22,
+    3.294
+   ],
+   "size": [
+    0.61,
+    0.34,
+    0.461
+   ],
+   "yaw": 0.0,
+   "point_count": 5582,
+   "score": 0.75,
+   "view_count": 3
+  },
+  {
+   "object_id": "SEM-PUMP-05",
+   "label": "PUMP",
+   "asset_class": "PROCESS_PUMP",
+   "center": [
+    4.301,
+    1.2,
+    2.04
+   ],
+   "size": [
+    0.646,
+    0.36,
+    0.387
+   ],
+   "yaw": 1.257,
+   "point_count": 4353,
+   "score": 0.75,
+   "view_count": 3
+  },
+  {
+   "object_id": "SEM-PUMP-06",
+   "label": "PUMP",
+   "asset_class": "PROCESS_PUMP",
+   "center": [
+    4.336,
+    1.32,
+    2.715
+   ],
+   "size": [
+    0.413,
+    0.44,
+    0.399
+   ],
+   "yaw": 1.553,
+   "point_count": 1093,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-RACK-01",
+   "label": "RACK",
+   "asset_class": null,
+   "center": [
+    -2.028,
+    0.835,
+    0.315
+   ],
+   "size": [
+    0.663,
+    1.39,
+    1.727
+   ],
+   "yaw": 0.0,
+   "point_count": 16338,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-RACK-02",
+   "label": "RACK",
+   "asset_class": null,
+   "center": [
+    -1.175,
+    0.92,
+    0.411
+   ],
+   "size": [
+    1.491,
+    1.62,
+    1.617
+   ],
+   "yaw": 0.0,
+   "point_count": 91241,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-TANK-01",
+   "label": "TANK",
+   "asset_class": null,
+   "center": [
+    -2.342,
+    0.76,
+    -2.975
+   ],
+   "size": [
+    0.776,
+    1.34,
+    0.423
+   ],
+   "yaw": 0.035,
+   "point_count": 2191,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-TANK-02",
+   "label": "TANK",
+   "asset_class": null,
+   "center": [
+    -2.158,
+    0.815,
+    -1.245
+   ],
+   "size": [
+    0.663,
+    1.43,
+    0.811
+   ],
+   "yaw": 0.087,
+   "point_count": 22873,
+   "score": 1.0,
+   "view_count": 4
+  },
+  {
+   "object_id": "SEM-TANK-03",
+   "label": "TANK",
+   "asset_class": null,
+   "center": [
+    0.401,
+    0.77,
+    -1.844
+   ],
+   "size": [
+    1.025,
+    1.32,
+    1.054
+   ],
+   "yaw": 0.0,
+   "point_count": 38421,
+   "score": 1.0,
+   "view_count": 6
+  },
+  {
+   "object_id": "SEM-TANK-04",
+   "label": "TANK",
+   "asset_class": null,
+   "center": [
+    1.369,
+    0.86,
+    -2.114
+   ],
+   "size": [
+    0.629,
+    1.24,
+    0.692
+   ],
+   "yaw": 0.0,
+   "point_count": 15170,
+   "score": 1.0,
+   "view_count": 6
+  },
+  {
+   "object_id": "SEM-TARP-01",
+   "label": "TARP",
+   "asset_class": null,
+   "center": [
+    1.716,
+    0.34,
+    2.488
+   ],
+   "size": [
+    0.708,
+    0.52,
+    0.885
+   ],
+   "yaw": 1.553,
+   "point_count": 5642,
+   "score": 1.0,
+   "view_count": 5
+  },
+  {
+   "object_id": "SEM-TROLLEY-01",
+   "label": "TROLLEY",
+   "asset_class": null,
+   "center": [
+    -1.237,
+    0.79,
+    0.865
+   ],
+   "size": [
+    1.571,
+    1.34,
+    0.854
+   ],
+   "yaw": 0.192,
+   "point_count": 45737,
+   "score": 0.75,
+   "view_count": 3
+  },
+  {
+   "object_id": "SEM-TROLLEY-02",
+   "label": "TROLLEY",
+   "asset_class": null,
+   "center": [
+    -0.722,
+    1.235,
+    0.348
+   ],
+   "size": [
+    0.815,
+    0.57,
+    0.313
+   ],
+   "yaw": 0.873,
+   "point_count": 3300,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-TROLLEY-03",
+   "label": "TROLLEY",
+   "asset_class": null,
+   "center": [
+    -0.072,
+    0.46,
+    -1.921
+   ],
+   "size": [
+    1.374,
+    0.76,
+    0.472
+   ],
+   "yaw": 1.257,
+   "point_count": 3748,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-TROLLEY-04",
+   "label": "TROLLEY",
+   "asset_class": null,
+   "center": [
+    1.814,
+    0.61,
+    2.042
+   ],
+   "size": [
+    0.369,
+    1.04,
+    1.185
+   ],
+   "yaw": 1.169,
+   "point_count": 18835,
+   "score": 0.75,
+   "view_count": 3
+  },
+  {
+   "object_id": "SEM-TROLLEY-05",
+   "label": "TROLLEY",
+   "asset_class": null,
+   "center": [
+    1.969,
+    0.545,
+    2.966
+   ],
+   "size": [
+    0.951,
+    0.93,
+    1.11
+   ],
+   "yaw": 0.0,
+   "point_count": 7993,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-TROLLEY-06",
+   "label": "TROLLEY",
+   "asset_class": null,
+   "center": [
+    3.374,
+    0.495,
+    2.552
+   ],
+   "size": [
+    1.441,
+    0.77,
+    1.578
+   ],
+   "yaw": 0.0,
+   "point_count": 25081,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-TROLLEY-07",
+   "label": "TROLLEY",
+   "asset_class": null,
+   "center": [
+    3.761,
+    0.57,
+    -0.161
+   ],
+   "size": [
+    0.981,
+    0.96,
+    0.721
+   ],
+   "yaw": 0.0,
+   "point_count": 9177,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-VACUUM_CLEANER-01",
+   "label": "VACUUM_CLEANER",
+   "asset_class": null,
+   "center": [
+    1.596,
+    0.405,
+    -0.627
+   ],
+   "size": [
+    0.578,
+    0.63,
+    0.739
+   ],
+   "yaw": 0.017,
+   "point_count": 18861,
+   "score": 1.0,
+   "view_count": 4
+  },
+  {
+   "object_id": "SEM-VALVE-01",
+   "label": "VALVE",
+   "asset_class": "CONTROL_VALVE",
+   "center": [
+    -3.495,
+    0.46,
+    1.412
+   ],
+   "size": [
+    0.147,
+    0.14,
+    0.221
+   ],
+   "yaw": 0.716,
+   "point_count": 170,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-VALVE-02",
+   "label": "VALVE",
+   "asset_class": "CONTROL_VALVE",
+   "center": [
+    -1.295,
+    0.525,
+    3.261
+   ],
+   "size": [
+    0.252,
+    0.45,
+    0.532
+   ],
+   "yaw": 0.489,
+   "point_count": 1686,
+   "score": 0.5,
+   "view_count": 2
+  },
+  {
+   "object_id": "SEM-VALVE-03",
+   "label": "VALVE",
+   "asset_class": "CONTROL_VALVE",
+   "center": [
+    2.582,
+    1.125,
+    -1.717
+   ],
+   "size": [
+    0.278,
+    0.29,
+    0.324
+   ],
+   "yaw": 0.0,
+   "point_count": 1671,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-VALVE-04",
+   "label": "VALVE",
+   "asset_class": "CONTROL_VALVE",
+   "center": [
+    4.286,
+    1.01,
+    2.092
+   ],
+   "size": [
+    0.577,
+    0.24,
+    0.243
+   ],
+   "yaw": 1.257,
+   "point_count": 1218,
+   "score": 0.25,
+   "view_count": 1
+  },
+  {
+   "object_id": "SEM-WASHING_MACHINE-01",
+   "label": "WASHING_MACHINE",
+   "asset_class": null,
+   "center": [
+    -0.798,
+    0.59,
+    0.455
+   ],
+   "size": [
+    0.888,
+    0.94,
+    1.185
+   ],
+   "yaw": 1.449,
+   "point_count": 52191,
+   "score": 1.0,
+   "view_count": 5
+  },
+  {
+   "object_id": "SEM-WASHING_MACHINE-02",
+   "label": "WASHING_MACHINE",
+   "asset_class": null,
+   "center": [
+    2.092,
+    0.55,
+    -2.075
+   ],
+   "size": [
+    0.689,
+    0.84,
+    1.282
+   ],
+   "yaw": 0.332,
+   "point_count": 4295,
+   "score": 0.5,
+   "view_count": 2
+  }
+ ]
+}
