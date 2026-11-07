@@ -1184,3 +1184,7 @@ header { gap: 16px; }
 /* Side-panel toggles sit below the floating toolbar so they never cover its buttons. */
 .sidebar-toggle-pill,
 .copilot-toggle-pill { top: 72px; }
+
+/* "Near the robot" group in the Equipment list (replaces the floating panel). */
+.asset-group.near-group summary { color: var(--accent); }
+.asset-group.near-group { border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 6px; }

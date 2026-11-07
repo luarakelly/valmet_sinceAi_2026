@@ -25,6 +25,8 @@ let routeTargetId = null; // the inspection target (does NOT change when you jus
 let selectedId = null; // what the copilot panel shows
 let nearbyIds = new Set();
 let nearLabelIds = new Set(); // the few nearest assets that get a label (keeps the view readable)
+let nearbyAssets = []; // [{assetId, dist}] nearest first, shown in the left list
+const groupOpen = { near: true, attention: true, healthy: false }; // remembers what the user expanded
 let showAllFrames = false;
 
 let currentPath = [];
@@ -790,6 +792,8 @@ function toggleNavigation() {
   document.getElementById("nav-btn-text").innerHTML = isNavigating ? "❚❚ Pause" : "▶ Resume";
   if (isNavigating) {
     setStep(2);
+    groupOpen.near = true;
+    if (!sidebarOpen) toggleLeftSidebar();
     if (cameraMode === "orbit" || cameraMode === "top") {
       setCameraMode("follow");
     }
@@ -851,32 +855,13 @@ function checkProximityEvents(rx, rz) {
 }
 window.appCheckProximityEvents = checkProximityEvents;
 
+// Nearby assets live in the left Equipment list as the "Near the robot" group (no floating panel).
 function renderNearby(near) {
-  const box = document.getElementById("proximity-alert");
-  const assets = near.filter(function (n) { return n.frame.asset_id; }).sort(function (a, b) { return a.dist - b.dist; });
-  if (near.length === 0) {
-    box.style.display = "none";
-    return;
-  }
-  box.style.display = "flex";
-  document.getElementById("nearby-count").innerText =
-    assets.length + " assets · " + (near.length - assets.length) + " structures within " + PROXIMITY_RADIUS + " m";
-  const list = document.getElementById("nearby-list");
-  list.innerHTML = "";
-  assets.slice(0, 6).forEach(function (n) {
-    const f = n.frame;
-    const li = document.createElement("li");
-    li.className = "nearby-item";
-    li.innerHTML =
-      '<span class="status-dot status-' + dotClass(f.state) + '"></span>' +
-      "<b>" + escapeHtml(f.tag) + "</b>" +
-      "<span>" + escapeHtml(prettyClass(f.class)) + " · " + escapeHtml(f.state || "") + " · " + Math.round(f.health || 0) + "%</span>" +
-      "<span>" + n.dist.toFixed(1) + " m</span>";
-    li.onclick = function () {
-      showSelection(f.id);
-    };
-    list.appendChild(li);
-  });
+  nearbyAssets = near
+    .filter(function (n) { return n.frame.asset_id; })
+    .sort(function (a, b) { return a.dist - b.dist; })
+    .map(function (n) { return { assetId: n.frame.asset_id, dist: n.dist }; });
+  renderAssetList(filteredAssets());
 }
 
 // ---------------------------------------------------------------- selection & copilot panel
@@ -1075,25 +1060,33 @@ function renderAssetList(assets) {
   const attention = assets.filter(function (a) { return assetState(a) !== "healthy"; })
     .sort(function (a, b) { return (a.state ? a.state.health_score : 100) - (b.state ? b.state.health_score : 100); });
   const healthy = assets.filter(function (a) { return assetState(a) === "healthy"; });
+  const byId = new Map(assets.map(function (a) { return [a.asset_id, a]; }));
+  const near = nearbyAssets
+    .filter(function (n) { return byId.has(n.assetId); })
+    .map(function (n) { return { asset: byId.get(n.assetId), dist: n.dist }; });
 
-  function group(title, items, open) {
+  function group(key, title, items, card, extraClass) {
     if (items.length === 0) return;
     const details = document.createElement("details");
-    details.className = "asset-group";
-    details.open = open;
+    details.className = "asset-group" + (extraClass ? " " + extraClass : "");
+    details.open = groupOpen[key];
+    details.ontoggle = function () { groupOpen[key] = details.open; };
     const summary = document.createElement("summary");
     summary.innerText = title + " (" + items.length + ")";
     details.appendChild(summary);
-    items.forEach(function (a) {
-      details.appendChild(assetCard(a));
+    items.forEach(function (item) {
+      details.appendChild(card(item));
     });
     list.appendChild(details);
   }
-  group("Needs attention", attention, true);
-  group("Healthy", healthy, false);
+  group("near", "Near the robot · " + PROXIMITY_RADIUS + " m", near, function (n) {
+    return assetCard(n.asset, n.dist.toFixed(1) + " m");
+  }, "near-group");
+  group("attention", "Needs attention", attention, assetCard);
+  group("healthy", "Healthy", healthy, assetCard);
 }
 
-function assetCard(a) {
+function assetCard(a, distanceText) {
   const state = assetState(a);
   const health = a.state ? a.state.health_score : 100;
   const card = document.createElement("div");
@@ -1104,7 +1097,8 @@ function assetCard(a) {
     '<div class="asset-card-main">' +
     '<span class="status-dot status-' + dotClass(state) + '"></span>' +
     "<b>" + escapeHtml(a.tag) + "</b>" +
-    '<span class="asset-class">' + escapeHtml(prettyClass(a.asset_class)) + (isTarget ? " · target" : "") + "</span>" +
+    '<span class="asset-class">' + escapeHtml(prettyClass(a.asset_class)) + (isTarget ? " · target" : "") +
+    (typeof distanceText === "string" ? " · " + escapeHtml(distanceText) : "") + "</span>" +
     '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(health) + "%</span>" +
     "</div>" +
     '<div class="asset-actions">' +
