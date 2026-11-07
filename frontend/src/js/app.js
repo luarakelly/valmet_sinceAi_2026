@@ -30,8 +30,7 @@ let nearLabelIds = new Set(); // the few nearest assets that get a label (keeps 
 let nearbyAssets = []; // [{assetId, dist}] nearest first, shown in the left list
 let nearbyComponents = []; // [{frame, dist}] unbound objects attached to a pack asset's system
 let passedIds = new Set(); // pack assets the robot passed on the current or last walk
-const groupOpen = { near: true, attention: true, healthy: false, detected: false }; // remembers what the user expanded
-let showAllFrames = false;
+const groupOpen = { near: true, attention: true, healthy: false }; // remembers what the user expanded
 
 let currentPath = [];
 let pathLengths = [0];
@@ -798,12 +797,8 @@ function refreshFrameStyles() {
       line = 0.9;
       fill = nearLabelIds.has(f.id) ? 0.06 : 0;
       label = nearLabelIds.has(f.id) ? 1 : 0;
-    } else if (isNear && showAllFrames) {
-      line = 0.5;
     } else if (f.asset_id) {
-      line = showAllFrames ? 0.55 : 0.28;
-    } else if (showAllFrames) {
-      line = 0.35;
+      line = 0.28;
     }
     u.lineMat.opacity = line;
     u.fillMat.opacity = fill;
@@ -1643,47 +1638,7 @@ function renderAssetList(assets) {
   }, "near-group");
   group("attention", "Needs attention", attention, assetCard, "attention-group");
   group("healthy", "Healthy", healthy, assetCard, "healthy-group");
-  renderDetectedGroup(list);
   renderTargetCard();
-}
-
-// "Detected objects": the extraction result (challenge criterion 1) in one place.
-function renderDetectedGroup(list) {
-  if (!framesData.length) return;
-  const mapped = framesData.filter(function (f) { return f.asset_id; }).length;
-  const components = framesData.filter(function (f) { return !f.asset_id && f.part_of; }).length;
-  const counts = {};
-  framesData.filter(function (f) { return !f.asset_id; }).forEach(function (f) {
-    const k = prettyClass(f.label);
-    counts[k] = (counts[k] || 0) + 1;
-  });
-  const details = document.createElement("details");
-  details.className = "asset-group detected-group";
-  details.open = groupOpen.detected;
-  details.ontoggle = function () { groupOpen.detected = details.open; };
-  const summary = document.createElement("summary");
-  summary.innerText = "Detected objects (" + framesData.length + ")";
-  details.appendChild(summary);
-  const body = document.createElement("div");
-  body.className = "detected-body";
-  const rows = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })
-    .map(function (k) { return "<li><span>" + escapeHtml(k) + "</span><b>" + counts[k] + "</b></li>"; }).join("");
-  body.innerHTML =
-    '<div class="detected-line"><b>' + mapped + "</b> mapped to builder-pack assets (synthetic mapping)</div>" +
-    '<div class="detected-line"><b>' + components + "</b> mapped as components of the nearest asset's system</div>" +
-    '<div class="detected-line"><b>' + (framesData.length - mapped) + "</b> other structures, by shape:</div>" +
-    '<ul class="detected-counts">' + rows + "</ul>";
-  const btn = document.createElement("button");
-  btn.className = "action-pill" + (showAllFrames ? " active" : "");
-  btn.textContent = showAllFrames ? "Hide extra frames in 3D" : "Show all " + framesData.length + " in 3D";
-  btn.onclick = function () {
-    showAllFrames = !showAllFrames;
-    refreshFrameStyles();
-    renderAssetList(filteredAssets());
-  };
-  body.appendChild(btn);
-  details.appendChild(body);
-  list.appendChild(details);
 }
 
 // Pinned inspection target at the top of the left column.
@@ -1929,7 +1884,7 @@ function setupViewportPicking() {
       const u = b.userData;
       if (!b.visible) return;
       if (u.label && u.label.visible && u.label.material.opacity > 0) clickable.push(u.label);
-      if (u.fillMat.opacity > 0 || (showAllFrames && u.shown)) clickable.push(b.children[0]);
+      if (u.fillMat.opacity > 0) clickable.push(b.children[0]);
     });
     const hits = raycaster.intersectObjects(clickable, false);
     for (const hit of hits) {

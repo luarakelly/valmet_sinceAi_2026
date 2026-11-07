@@ -965,7 +965,7 @@ body.debug .debug-only { display: block; }
 .loading-fill { height: 100%; width: 2%; background: var(--accent); transition: width 0.25s ease; }
 .loading-text { margin-top: 10px; font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
 
-/* Left column: pinned target, group dots, detected objects. */
+/* Left column: pinned target, group dots. */
 .target-card { margin: 8px 0 10px; }
 .target-card:empty { display: none; }
 .target-card > * { cursor: default; }
@@ -983,13 +983,6 @@ body.debug .debug-only { display: block; }
 .asset-group.near-group summary::before { background: var(--accent); }
 .asset-group.attention-group summary::before { background: var(--red); }
 .asset-group.healthy-group summary::before { background: var(--green); }
-.asset-group.detected-group summary::before { background: #5eead4; }
-.detected-body { padding: 4px 6px 8px; font-size: 12px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 6px; }
-.detected-line b { color: #fff; }
-.detected-counts { list-style: none; margin: 0; padding: 0 0 0 4px; display: grid; gap: 2px; }
-.detected-counts li { display: flex; justify-content: space-between; color: var(--muted); }
-.detected-counts li b { color: var(--text-secondary); }
-.detected-body .action-pill { align-self: flex-start; }
 .cp-asset .card-meta { margin-top: 4px; }
 .cp-diagnosis { border: 1px solid var(--border); border-left-width: 3px; border-radius: 10px; padding: 10px 12px; background: var(--card); display: flex; flex-direction: column; gap: 8px; }
 .cp-row { display: grid; grid-template-columns: 104px 1fr; gap: 8px; font-size: 13px; line-height: 1.4; }

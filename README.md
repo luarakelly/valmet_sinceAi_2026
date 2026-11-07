@@ -28,7 +28,7 @@ The robot starts at the door. The faulty device (P-005) is pinned top left, and 
 3. **Click a label** (or arrive at an asset) — the copilot panel shows observation, hypothesis, next safe check, confidence and the evidence IDs; the object is highlighted through walls (x-ray).
 
 - Camera: **Follow robot** (drag = turn around the robot, wheel = zoom; it stays inside the room) or **Top** (plan view).
-- Left list: target card, *Near the robot*, *Needs attention*, *Healthy*, *Detected objects* (all 144, by shape, with **Show all in 3D**).
+- Left list: target card, *Near the robot*, *Needs attention*, *Healthy*.
 - Ask in the bottom bar: “Why is P-005 flagged?”, “Which assets need attention?”, “Where is M-006?”, “Route to CV-003”. With an LLM key the copilot can also navigate, select, diagnose or reset.
 - **View** menu: Photoreal (default), Point cloud, Height colours, **Verify placement (camera)** — a vision-language model looks at each object and says what it is. Free camera, YOLO and re-extraction are under `?debug=1`.
 - Asset ↔ 3D object links are synthetic unless camera-verified, and are labelled with their mapping confidence.
