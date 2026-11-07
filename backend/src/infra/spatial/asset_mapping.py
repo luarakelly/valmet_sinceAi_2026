@@ -2,9 +2,13 @@
 
 The workbook has no real positions (Scene_Anchors are placeholders on a 30 x 15 m grid; the scan
 room is about 8 x 3 m), so identity has to come from evidence in the scan:
+- confirmed: an operator boxed the asset in the viewer (see PlacementService); beats every guess below;
+- placement-proposed: a detection was lifted to a box but no operator has confirmed it yet;
 - camera-verified: a vision-language model looked at a render of the object and said what it is
   (see VerificationService). Only objects verified as the asset's class are eligible, best first;
 - proposed: objects nobody has looked at yet fall back to shape-based guessing, with low confidence;
+- every object left without its own asset joins the nearest bound asset's system (procedural
+  component mapping, which the brief explicitly allows), so all extracted frames carry pack metadata;
 - an asset with no verified or unverified candidate stays unlocated, except the inspection target,
   which is placed on the nearest reachable object ("assumed") so the route demo can still run.
 
@@ -40,13 +44,20 @@ CONFIDENCE_BY_RANK = (0.85, 0.7, 0.55)
 CLASS_ORDER = ("PROCESS_PUMP", "ELECTRIC_MOTOR", "PRESSURE_TRANSMITTER", "VIBRATION_SENSOR", "CONTROL_VALVE")
 
 
+CONFIRMED = "confirmed"
+PLACEMENT_PROPOSED = "placement_proposed"
 CAMERA_VERIFIED = "camera_verified"
 PROPOSED = "proposed"
 ASSUMED = "assumed"
+COMPONENT = "procedural_component"
+
+CONFIRMED_CONFIDENCE = 1.0
+PROPOSED_PLACEMENT_CONFIDENCE = 0.6
 
 MAX_VERIFIED_CONFIDENCE = 0.95
 PROPOSED_CONFIDENCE_CAP = 0.45  # once camera evidence exists, an unlooked-at object is only a guess
 ASSUMED_CONFIDENCE = 0.2
+COMPONENT_CONFIDENCE = 0.3
 
 
 @dataclass(frozen=True)
@@ -65,6 +76,46 @@ class Binding:
     confidence: float
     status: str = PROPOSED
     evidence: str = ""
+
+
+@dataclass(frozen=True)
+class ComponentLink:
+    """An extracted object without its own pack asset, attached to the nearest bound asset's system."""
+
+    asset: Dict[str, Any]
+    distance_m: float
+
+
+def attach_components(objects: List[SceneObject], bindings: Dict[str, Binding]) -> Dict[str, ComponentLink]:
+    """object_id → link to the nearest bound asset (floor distance), for every object not bound itself."""
+    by_id = {obj.object_id: obj for obj in objects}
+    anchors = [(by_id[object_id], binding.asset) for object_id, binding in bindings.items() if object_id in by_id]
+    links: Dict[str, ComponentLink] = {}
+    if not anchors:
+        return links
+    for obj in objects:
+        if obj.object_id in bindings:
+            continue
+        anchor, asset = min(anchors, key=lambda pair: _floor_distance(obj, pair[0]))
+        links[obj.object_id] = ComponentLink(asset=asset, distance_m=round(_floor_distance(obj, anchor), 2))
+    return links
+
+
+def _floor_distance(a: SceneObject, b: SceneObject) -> float:
+    return math.hypot(a.center[0] - b.center[0], a.center[2] - b.center[2])
+
+
+def confirmed_binding(asset: Dict[str, Any]) -> Binding:
+    return Binding(asset=asset, confidence=CONFIRMED_CONFIDENCE, status=CONFIRMED, evidence="Confirmed by an operator in the viewer")
+
+
+def proposed_binding(asset: Dict[str, Any]) -> Binding:
+    return Binding(
+        asset=asset,
+        confidence=PROPOSED_PLACEMENT_CONFIDENCE,
+        status=PLACEMENT_PROPOSED,
+        evidence="Proposed from a detection; not yet confirmed by an operator",
+    )
 
 
 def choose_target(assets: List[Dict[str, Any]]) -> Dict[str, Any]:

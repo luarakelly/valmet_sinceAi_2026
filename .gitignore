@@ -104,6 +104,11 @@ Desktop.ini
 *.ply.tar.gz
 **/Industrial Boiler Room.ply
 data/Industrial Boiler Room.ply
+**/Equipment Room.ply
+data/Equipment Room.ply
+# Generated from the raw scan on first start
+data/Equipment_Room_standard.ply
+data/Equipment_Room.splat
 Valmet challenge data/
 
 # Optional large model weights (keep pretrained downloads local)
@@ -118,5 +123,8 @@ data/weights/
 # Local challenge inputs and generated caches
 data/input/
 data/processed/
+# Gemini camera-check cache (local); data/asset_placements.json is the team's shared truth and stays tracked
+data/object_verification.json
+.~lock.*#
 .mcp.json
 port_snapshot.tgz

@@ -11,3 +11,5 @@ BACKEND_DIR = REPO_ROOT / "backend"
 DATA_DIR = Path(os.getenv("ASK_YOUR_FACTORY_DATA_DIR", str(REPO_ROOT / "data")))
 FRONTEND_DIR = REPO_ROOT / "frontend"
 WEIGHTS_DIR = DATA_DIR / "weights"
+VERIFICATION_PATH = DATA_DIR / "object_verification.json"
+PLACEMENTS_PATH = DATA_DIR / "asset_placements.json"

@@ -14,6 +14,7 @@ from api.controllers import (
     dashboard_controller as dashboard,
     maintenance_controller as maintenance,
     navigation_controller as navigation,
+    placement_controller as placements,
     scene_controller as scene,
     verification_controller as verification,
     vision_controller as vision,
@@ -32,12 +33,13 @@ from dto.copilot_dto import CopilotQueryResponse
 from dto.dashboard_dto import DashboardSummaryResponse
 from dto.maintenance_dto import MaintenancePriorityRead
 from dto.navigation_dto import NavigationPathResponse, WalkableGridResponse
+from dto.placement_dto import LiftBoxResponse
 from dto.scene_dto import ProximityAssetResponse
 from dto.vision_dto import VisionAnalysisResponse
 from dto.work_order_dto import WorkOrderDraftResponse
 
 router = APIRouter(tags=["Ask Your Factory"])
-get, post = router.get, router.post
+get, post, put, delete = router.get, router.post, router.put, router.delete
 
 # Assets & evidence (API_Contract)
 get("/assets", response_model=List[AssetRead])(assets.list_assets)
@@ -60,6 +62,10 @@ get("/scene/objects/{id}/geometry")(scene.get_object_geometry)
 post("/scene/objects/{id}/verification")(verification.verify_object)
 get("/scene/verification")(verification.list_verification)
 post("/scene/verification/reset")(verification.reset_verification)
+post("/scene/lift-box", response_model=LiftBoxResponse)(placements.lift_box)
+get("/scene/placements")(placements.list_placements)
+put("/scene/placements/{asset_id}")(placements.save_placement)
+delete("/scene/placements/{asset_id}")(placements.delete_placement)
 
 # Navigation
 get("/navigation/path", response_model=NavigationPathResponse)(navigation.get_navigation_path)

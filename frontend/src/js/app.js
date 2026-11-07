@@ -28,6 +28,8 @@ let selectedId = null; // what the copilot panel shows
 let nearbyIds = new Set();
 let nearLabelIds = new Set(); // the few nearest assets that get a label (keeps the view readable)
 let nearbyAssets = []; // [{assetId, dist}] nearest first, shown in the left list
+let nearbyComponents = []; // [{frame, dist}] unbound objects attached to a pack asset's system
+let narratedIds = new Set(); // pack assets the copilot already explained on this walk
 const groupOpen = { near: true, attention: true, healthy: false, detected: false }; // remembers what the user expanded
 let showAllFrames = false;
 
@@ -47,6 +49,7 @@ let copilotOpen = false;
 const ROBOT_GROUND_OFFSET = 0.15;
 const PROXIMITY_RADIUS = 1.5;
 const MAX_NEAR_LABELS = 4;
+const MAX_ROUTE_CITATIONS = 4;
 const XRAY_POINT_SIZE = 0.035;
 const XRAY_BASE_OPACITY = 0.75;
 const XRAY_PULSE_AMPLITUDE = 0.2;
@@ -729,6 +732,11 @@ function frameState(frame) {
   return frame.asset_id ? frame.state || "healthy" : "structure";
 }
 
+// Carries builder-pack metadata: its own asset, or the system it was procedurally attached to.
+function isMapped(frame) {
+  return Boolean(frame.asset_id || frame.part_of);
+}
+
 function buildFrames(frames) {
   while (boundingFramesGroup.children.length > 0) {
     const child = boundingFramesGroup.children[0];
@@ -752,6 +760,10 @@ function buildFrames(frames) {
     let label = null;
     if (frame.asset_id) {
       label = createFloatingLabelSprite(frame.tag || frame.id, (frame.state || "").replace(/_/g, " "), STATE_CSS[state]);
+    } else if (frame.part_of) {
+      label = createFloatingLabelSprite(prettyClass(frame.label), "part of " + frame.part_of.tag, STATE_CSS.structure);
+    }
+    if (label) {
       label.position.set(0, h / 2 + 0.12, 0);
       label.material.opacity = 0;
       box.add(label);
@@ -781,7 +793,7 @@ function refreshFrameStyles() {
       line = 1;
       fill = isTarget ? 0.16 : 0.1;
       label = 1;
-    } else if (isNear && f.asset_id) {
+    } else if (isNear && isMapped(f)) {
       line = 0.9;
       fill = nearLabelIds.has(f.id) ? 0.06 : 0;
       label = nearLabelIds.has(f.id) ? 1 : 0;
@@ -1015,7 +1027,20 @@ function startWalking() {
   navProgress = 0;
   isNavigating = true;
   groupOpen.near = true;
+  narratedIds = new Set();
+  if (!copilotOpen) {
+    toggleCopilotDrawer();
+  }
+  addMessage("ai", "Walking to " + routeTargetLabel() + ". I'll explain each device we pass.");
   hideHelp();
+}
+
+function routeTargetLabel() {
+  const frame = framesById.get(routeTargetId);
+  if (frame && frame.tag) {
+    return frame.tag;
+  }
+  return "the selected point";
 }
 
 // "Go" (target card), "Route here" (any asset) and chat "take me to …": walk there now.
@@ -1094,13 +1119,55 @@ function checkProximityEvents(rx, rz) {
   if (changed) {
     nearbyIds = ids;
     nearLabelIds = new Set(
-      near.filter(function (n) { return n.frame.asset_id; })
-        .sort(function (a, b) { return a.dist - b.dist; })
+      near.filter(function (n) { return isMapped(n.frame); })
+        .sort(function (a, b) { return Boolean(b.frame.asset_id) - Boolean(a.frame.asset_id) || a.dist - b.dist; })
         .slice(0, MAX_NEAR_LABELS)
         .map(function (n) { return n.frame.id; }),
     );
     refreshFrameStyles();
     renderNearby(near);
+    if (isNavigating) {
+      narratePassedAssets(near);
+    }
+  }
+}
+
+// Criterion 3: explain device status along the path, grounded in the builder pack.
+function narratePassedAssets(near) {
+  near.forEach(function (n) {
+    const assetId = n.frame.asset_id;
+    const isNew = assetId && !narratedIds.has(assetId) && assetId !== routeTargetId;
+    if (!isNew) {
+      return;
+    }
+    narratedIds.add(assetId);
+    narrateAsset(assetId);
+  });
+}
+
+async function narrateAsset(assetId) {
+  const asset = assetsData.find(function (a) { return a.asset_id === assetId; });
+  if (!asset) {
+    return;
+  }
+  const state = asset.state || {};
+  const intro = "Passing " + asset.tag + " (" + prettyClass(asset.asset_class) + ", " + state.health_score + "/100, " +
+    prettyClass(state.condition_state) + "): ";
+  if (assetState(asset) === "healthy") {
+    addMessage("ai", intro + (state.issue_summary || "no deviation") + ". Next: " + (state.recommended_next_check || "monitor") + ".",
+      [state.knowledge_doc_id].filter(Boolean));
+    return;
+  }
+  try {
+    const diag = await fetchJson("/api/copilot/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ asset_id: assetId }),
+    });
+    const citations = (diag.evidence_citations || []).filter(function (id) { return id.indexOf("DQ-") !== 0; });
+    addMessage("ai", intro + (diag.diagnosis || state.issue_summary), citations.slice(0, MAX_ROUTE_CITATIONS));
+  } catch (err) {
+    addMessage("ai", intro + (state.issue_summary || "status unavailable") + " (diagnosis failed: " + err.message + ")");
   }
 }
 window.appCheckProximityEvents = checkProximityEvents;
@@ -1111,6 +1178,9 @@ function renderNearby(near) {
     .filter(function (n) { return n.frame.asset_id; })
     .sort(function (a, b) { return a.dist - b.dist; })
     .map(function (n) { return { assetId: n.frame.asset_id, dist: n.dist }; });
+  nearbyComponents = near
+    .filter(function (n) { return !n.frame.asset_id && n.frame.part_of; })
+    .sort(function (a, b) { return a.dist - b.dist; });
   renderAssetList(filteredAssets());
 }
 
@@ -1146,6 +1216,10 @@ function mappingNote(frame) {
 }
 
 function renderStructureCard(frame) {
+  if (frame.part_of) {
+    renderComponentCard(frame);
+    return;
+  }
   setText("card-asset-tag", frame.id + " · " + prettyClass(frame.label));
   setText("card-asset-meta", "Detected 3D object · not linked to a builder-pack asset");
   const seen = frame.seen_as
@@ -1156,6 +1230,21 @@ function renderStructureCard(frame) {
   badge.innerText = "STRUCTURE";
   badge.style.color = STATE_CSS.structure;
   badge.style.borderColor = STATE_CSS.structure;
+  document.getElementById("diag-block").style.display = "none";
+}
+
+function renderComponentCard(frame) {
+  const parent = frame.part_of;
+  const state = parent.state || "healthy";
+  setText("card-asset-tag", frame.id + " · " + prettyClass(frame.label));
+  setText("card-asset-meta", "Part of " + parent.tag + " (" + prettyClass(parent.asset_class) + ") · " + (parent.area_name || parent.area_id || "—") +
+    " · issue " + (parent.issue_code || "—") + " · " + (parent.knowledge_doc_id || ""));
+  setText("card-mapping-note", (frame.mapping_evidence || "") + " · " + frame.point_count + " points · " +
+    frame.size.map(function (s) { return s.toFixed(2); }).join(" × ") + " m");
+  const badge = document.getElementById("card-health-badge");
+  badge.innerText = state.replace(/_/g, " ").toUpperCase();
+  badge.style.color = STATE_CSS[state] || STATE_CSS.healthy;
+  badge.style.borderColor = STATE_CSS[state] || STATE_CSS.healthy;
   document.getElementById("diag-block").style.display = "none";
 }
 
@@ -1390,7 +1479,10 @@ function renderAssetList(assets) {
     });
     list.appendChild(details);
   }
-  group("near", "Near the robot · " + PROXIMITY_RADIUS + " m", near, function (n) {
+  group("near", "Near the robot · " + PROXIMITY_RADIUS + " m", near.concat(nearbyComponents), function (n) {
+    if (n.frame) {
+      return componentCard(n.frame, n.dist.toFixed(1) + " m");
+    }
     return assetCard(n.asset, n.dist.toFixed(1) + " m");
   }, "near-group");
   group("attention", "Needs attention", attention, assetCard, "attention-group");
@@ -1403,6 +1495,7 @@ function renderAssetList(assets) {
 function renderDetectedGroup(list) {
   if (!framesData.length) return;
   const mapped = framesData.filter(function (f) { return f.asset_id; }).length;
+  const components = framesData.filter(function (f) { return !f.asset_id && f.part_of; }).length;
   const counts = {};
   framesData.filter(function (f) { return !f.asset_id; }).forEach(function (f) {
     const k = prettyClass(f.label);
@@ -1421,6 +1514,7 @@ function renderDetectedGroup(list) {
     .map(function (k) { return "<li><span>" + escapeHtml(k) + "</span><b>" + counts[k] + "</b></li>"; }).join("");
   body.innerHTML =
     '<div class="detected-line"><b>' + mapped + "</b> mapped to builder-pack assets (synthetic mapping)</div>" +
+    '<div class="detected-line"><b>' + components + "</b> mapped as components of the nearest asset's system</div>" +
     '<div class="detected-line"><b>' + (framesData.length - mapped) + "</b> other structures, by shape:</div>" +
     '<ul class="detected-counts">' + rows + "</ul>";
   const btn = document.createElement("button");
@@ -1484,6 +1578,26 @@ function assetCard(a, distanceText) {
   card.querySelector('[data-act="route"]').onclick = function (e) {
     e.stopPropagation();
     goTo(a.asset_id);
+  };
+  return card;
+}
+
+// A detected object attached to a pack asset's system (procedural mapping).
+function componentCard(frame, distanceText) {
+  const parent = frame.part_of;
+  const state = parent.state || "healthy";
+  const card = document.createElement("div");
+  card.className = "asset-card component-card" + (frame.id === selectedId ? " active" : "");
+  card.dataset.id = frame.id;
+  card.innerHTML =
+    '<div class="asset-card-main">' +
+    '<span class="status-dot status-' + dotClass(state) + '"></span>' +
+    "<b>" + escapeHtml(prettyClass(frame.label)) + "</b>" +
+    '<span class="asset-class">part of ' + escapeHtml(parent.tag) + " · " + escapeHtml(distanceText) + "</span>" +
+    '<span class="asset-health" style="color:' + (STATE_CSS[state] || STATE_CSS.healthy) + '">' + Math.round(parent.health == null ? 100 : parent.health) + "%</span>" +
+    "</div>";
+  card.querySelector(".asset-card-main").onclick = function () {
+    selectAndFocus(frame.id);
   };
   return card;
 }

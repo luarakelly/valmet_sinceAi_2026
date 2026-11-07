@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from business.errors import NotFoundError
+from business.errors import InvalidRequestError, NotFoundError
 from business.interfaces.ports.outbound import AssetRepository, SceneEngine
 from business.models.records import StateRecord
 
@@ -90,6 +90,12 @@ class SceneService:
         if geometry is None:
             raise NotFoundError("No scene object matches '{}'.".format(identifier))
         return geometry
+
+    def lift_box(self, view_projection: List[float], image_box: List[float]) -> Dict[str, Any]:
+        box = self._scene.lift_box(view_projection, image_box)
+        if box is None:
+            raise InvalidRequestError("No solid surface inside that box. Draw it tighter around the object.")
+        return box
 
     def re_extract(self) -> Dict[str, Any]:
         scene = self._scene.rebuild()

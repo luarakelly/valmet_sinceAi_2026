@@ -15,7 +15,18 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from infra.spatial.asset_mapping import Binding, Verified, bind_assets, choose_target
+from infra.spatial.asset_mapping import (
+    COMPONENT,
+    COMPONENT_CONFIDENCE,
+    Binding,
+    ComponentLink,
+    Verified,
+    attach_components,
+    bind_assets,
+    choose_target,
+    confirmed_binding,
+    proposed_binding,
+)
 from infra.spatial.navigation import (
     ROBOT_RADIUS,
     STANDOFF_M,
@@ -29,6 +40,7 @@ from infra.spatial.navigation import (
     trim_to_standoff,
     walkable_layers,
 )
+from infra.spatial.placements import CONFIRMED_STATUS, drop_covered, lift_box as lift_scan_box, placed_objects
 from infra.spatial.point_cloud import PointCloud, VIEWER_MESH_PATH, VIEWER_PLY_PATH, load_scene_cloud
 from infra.spatial.splat_export import ensure_viewer_splat
 from infra.spatial.segmentation import Room, SceneObject, detect_room, extract_objects
@@ -55,6 +67,7 @@ class ScenePipelineResult:
     target_asset_id: str
     seconds: float
     verified: Dict[str, Verified] = field(default_factory=dict)
+    components: Dict[str, ComponentLink] = field(default_factory=dict)
 
 
 class BoilerRoomScene:
@@ -64,13 +77,15 @@ class BoilerRoomScene:
         self,
         assets_provider: Callable[[], List[Dict[str, Any]]],
         verification_provider: Optional[Callable[[], Dict[str, Dict[str, Any]]]] = None,
+        placement_provider: Optional[Callable[[], Dict[str, Dict[str, Any]]]] = None,
     ) -> None:
         self._assets_provider = assets_provider
         self._verification_provider = verification_provider or (lambda: {})
+        self._placement_provider = placement_provider or (lambda: {})
         self._build()
 
     def _build(self) -> None:
-        self.result = run_pipeline(self._assets_provider(), self._verification_provider())
+        self.result = run_pipeline(self._assets_provider(), self._verification_provider(), self._placement_provider())
         self.frames = [self._frame(obj) for obj in self.result.objects]
 
     def rebuild(self) -> "BoilerRoomScene":
@@ -106,6 +121,7 @@ class BoilerRoomScene:
             "processed_points": len(self.result.cloud),
             "extracted_count": len(self.frames),
             "mapped_asset_count": len(self.result.bindings),
+            "mapped_object_count": len(self.result.bindings) + len(self.result.components),
             "camera_verified_asset_count": sum(1 for b in self.result.bindings.values() if b.status == "camera_verified"),
             "verified_object_count": len(self.result.verified),
             "label_counts": labels,
@@ -175,6 +191,13 @@ class BoilerRoomScene:
             "algorithm": "A* on inflated 2D occupancy grid + line-of-sight smoothing",
         }
 
+    def lift_box(self, view_projection: List[float], image_box: List[float]) -> Optional[Dict[str, Any]]:
+        """3D box of the nearest scan surface inside a 2D box drawn in a rendered view."""
+        lifted = lift_scan_box(self.result.cloud.xyz, view_projection, image_box)
+        if lifted is None:
+            return None
+        return {"center": list(lifted.center), "size": list(lifted.size), "point_count": lifted.point_count}
+
     def get_object_geometry(self, identifier: str) -> Optional[bytes]:
         """The object's own points as little-endian float32 x, y, z triples; None if unknown."""
         frame = self.find_frame(identifier)
@@ -198,6 +221,32 @@ class BoilerRoomScene:
             return None
         return {"category": seen.category, "confidence": seen.confidence, "features": seen.features}
 
+    def _as_component(self, frame: Dict[str, Any]) -> Dict[str, Any]:
+        """Unbound object: show the pack metadata of the system it was procedurally attached to."""
+        link = self.result.components.get(frame["scene_id"])
+        if link is None:
+            return frame
+        asset = link.asset
+        state = asset.get("state") or {}
+        frame.update({
+            "part_of": {
+                "asset_id": asset["asset_id"],
+                "tag": asset.get("tag"),
+                "asset_class": asset.get("asset_class"),
+                "area_id": asset.get("area_id"),
+                "area_name": asset.get("area_name"),
+                "state": state.get("condition_state"),
+                "health": state.get("health_score"),
+                "issue_code": state.get("issue_code"),
+                "knowledge_doc_id": state.get("knowledge_doc_id"),
+                "distance_m": link.distance_m,
+            },
+            "mapping_confidence": COMPONENT_CONFIDENCE,
+            "mapping_status": COMPONENT,
+            "mapping_evidence": "Procedural: part of the nearest pack asset's system ({}, {} m away)".format(asset.get("tag"), link.distance_m),
+        })
+        return frame
+
     def _frame(self, obj: SceneObject) -> Dict[str, Any]:
         binding = self.result.bindings.get(obj.object_id)
         frame: Dict[str, Any] = {
@@ -215,13 +264,14 @@ class BoilerRoomScene:
             "mapping_status": None,
             "mapping_evidence": None,
             "seen_as": self._seen_as(obj),
+            "part_of": None,
             "state": None,
             "health": None,
             "issue_code": None,
             "is_target": False,
         }
         if binding is None:
-            return frame
+            return self._as_component(frame)
 
         asset = binding.asset
         state = asset.get("state") or {}
@@ -249,11 +299,17 @@ class BoilerRoomScene:
         return frame
 
 
-def run_pipeline(assets: List[Dict[str, Any]], verification: Optional[Dict[str, Dict[str, Any]]] = None) -> ScenePipelineResult:
+def run_pipeline(
+    assets: List[Dict[str, Any]],
+    verification: Optional[Dict[str, Dict[str, Any]]] = None,
+    placements: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> ScenePipelineResult:
     started = time.perf_counter()
     cloud = load_scene_cloud()
     room = detect_room(cloud)
-    objects = extract_objects(cloud, room)
+    placements = placements or {}
+    placed = placed_objects(cloud, placements, {asset["asset_id"] for asset in assets})
+    objects = drop_covered(extract_objects(cloud, room), list(placed.values())) + list(placed.values())
     grid = build_grid(cloud, room)
 
     entry_cell = _walkway_end(grid, room)
@@ -269,11 +325,35 @@ def run_pipeline(assets: List[Dict[str, Any]], verification: Optional[Dict[str, 
 
     target = choose_target(assets)
     verified = _verified_objects(verification or {}, objects)
-    bindings = bind_assets(objects, assets, target["asset_id"], reach, walk, verified)
+    bindings = _bind(objects, assets, placed, placements, target["asset_id"], reach, walk, verified)
+    components = attach_components(objects, bindings)
 
     seconds = round(time.perf_counter() - started, 2)
     logger.info("Scene pipeline: %d points → %d objects (%d camera-verified), %d assets bound in %.2fs", len(cloud), len(objects), len(verified), len(bindings), seconds)
-    return ScenePipelineResult(cloud, room, objects, grid, entry, bindings, target["asset_id"], seconds, verified)
+    return ScenePipelineResult(cloud, room, objects, grid, entry, bindings, target["asset_id"], seconds, verified, components)
+
+
+def _bind(
+    objects: List[SceneObject],
+    assets: List[Dict[str, Any]],
+    placed: Dict[str, SceneObject],
+    placements: Dict[str, Dict[str, Any]],
+    target_asset_id: str,
+    reach: Dict[str, float],
+    walk: Dict[str, float],
+    verified: Dict[str, Verified],
+) -> Dict[str, Binding]:
+    """Operator placements are certain (proposals are less so); only unplaced assets are guessed."""
+    placed_ids = {obj.object_id for obj in placed.values()}
+    open_objects = [obj for obj in objects if obj.object_id not in placed_ids]
+    open_assets = [asset for asset in assets if asset["asset_id"] not in placed]
+    bindings = bind_assets(open_objects, open_assets, target_asset_id, reach, walk, verified)
+    for asset in assets:
+        if asset["asset_id"] in placed:
+            is_confirmed = placements[asset["asset_id"]].get("status") == CONFIRMED_STATUS
+            binder = confirmed_binding if is_confirmed else proposed_binding
+            bindings[placed[asset["asset_id"]].object_id] = binder(asset)
+    return bindings
 
 
 STALE_VERIFICATION_M = 0.15

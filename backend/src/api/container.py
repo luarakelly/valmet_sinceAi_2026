@@ -16,6 +16,7 @@ from business.services import (
     DashboardService,
     MaintenanceService,
     NavigationService,
+    PlacementService,
     SceneService,
     VerificationService,
     VisionService,
@@ -25,8 +26,9 @@ from infra.db.sqlmodel.database import engine, init_db
 from infra.db.sqlmodel.repositories import SqlModelAssetRepository
 from infra.importers.workbook.dataset import get_dataset
 from infra.llm import build_language_model
+from infra.paths import PLACEMENTS_PATH, VERIFICATION_PATH
+from infra.spatial.json_record_store import JsonRecordStore
 from infra.spatial.scene_pipeline import BoilerRoomScene
-from infra.spatial.verification_store import JsonVerificationStore
 from infra.vision.yolo_world_detector import YoloWorldDetector
 
 logger = logging.getLogger("ask_your_factory.container")
@@ -43,6 +45,7 @@ class Container:
     maintenance: MaintenanceService
     vision: VisionService
     verification: VerificationService
+    placements: PlacementService
     llm_name: Optional[str]
 
 
@@ -53,8 +56,9 @@ _container_lock = threading.Lock()
 def build_container(populate_db: bool = True) -> Container:
     init_db(populate=populate_db)
     repository = SqlModelAssetRepository(lambda: Session(engine))
-    verification_store = JsonVerificationStore()
-    scene_engine = BoilerRoomScene(get_dataset().get_assets, verification_store.all)
+    verification_store = JsonRecordStore(VERIFICATION_PATH)
+    placement_store = JsonRecordStore(PLACEMENTS_PATH)
+    scene_engine = BoilerRoomScene(get_dataset().get_assets, verification_store.all, placement_store.all)
     llm = build_language_model()
     scene = SceneService(scene_engine, repository)
     assets = AssetService(repository, scene)
@@ -68,6 +72,7 @@ def build_container(populate_db: bool = True) -> Container:
         maintenance=MaintenanceService(repository, scene),
         vision=VisionService(YoloWorldDetector()),
         verification=VerificationService(scene, llm, verification_store),
+        placements=PlacementService(repository, scene, placement_store),
         llm_name=llm.name if llm else None,
     )
     logger.info("Container ready (LLM: %s)", container.llm_name or "none, deterministic evidence engine")

@@ -7,7 +7,7 @@ class VerificationStore(Protocol):
     def all(self) -> Dict[str, Dict[str, Any]]:
         ...
 
-    def save(self, object_id: str, record: Dict[str, Any]) -> None:
+    def save(self, key: str, record: Dict[str, Any]) -> None:
         ...
 
     def clear(self) -> None:
