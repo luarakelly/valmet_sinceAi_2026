@@ -1104,7 +1104,8 @@ body.debug .debug-only { display: block; }
 /* ===================== Asset modal + chat box ===================== */
 :root {
   --modal-z: 50;
-  --modal-height: min(560px, calc(100vh - 64px));
+  --modal-height: min(480px, calc(100vh - 64px));
+  --evidence-height: 180px;
   --chat-z: 60;
   --chat-width: 33vw;
   --chat-height: 50vh;
@@ -1124,12 +1125,12 @@ body.debug .debug-only { display: block; }
 .asset-modal-card {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   grid-template-rows: minmax(0, 1fr);
   gap: 24px;
-  width: min(1100px, 100%);
+  width: min(900px, 100%);
   height: var(--modal-height);
-  padding: 24px;
+  padding: 44px 32px 32px;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--panel-solid);
@@ -1137,8 +1138,8 @@ body.debug .debug-only { display: block; }
 }
 .asset-modal-close {
   position: absolute;
-  top: 10px;
-  right: 12px;
+  top: 8px;
+  right: 14px;
   border: none;
   background: transparent;
   color: var(--muted);
@@ -1146,6 +1147,11 @@ body.debug .debug-only { display: block; }
   cursor: pointer;
 }
 .asset-modal-close:hover { color: var(--text); }
+.cp-why summary { cursor: pointer; }
+.cp-why[open] .why-list {
+  max-height: var(--evidence-height);
+  overflow-y: auto;
+}
 .asset-modal-image {
   display: flex;
   align-items: center;
