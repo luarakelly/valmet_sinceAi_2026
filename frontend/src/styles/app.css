@@ -179,12 +179,18 @@
         top: 0;
         left: 0;
         bottom: 0;
+        width: 340px;
+        max-width: 86vw;
         height: 100%;
         z-index: 20;
         pointer-events: none;
+        transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .sidebar-container.collapsed {
+        transform: translateX(-100%);
       }
       .sidebar {
-        width: 340px;
+        width: 100%;
         height: 100%;
         background: rgba(12, 20, 34, 0.94);
         backdrop-filter: blur(16px);
@@ -197,18 +203,16 @@
         gap: 12px;
         pointer-events: auto;
         box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
-        transition:
-          transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-          opacity 0.2s ease;
+        transition: opacity 0.2s ease;
       }
-      .sidebar.collapsed {
-        transform: translateX(-100%);
+      .sidebar.collapsed,
+      .sidebar-container.collapsed .sidebar {
         pointer-events: none;
         opacity: 0;
       }
       .sidebar-toggle-pill {
         position: absolute;
-        top: 14px;
+        top: 72px;
         right: -24px;
         width: 24px;
         height: 38px;
@@ -269,12 +273,18 @@
         top: 0;
         right: 0;
         bottom: 0;
+        width: 380px;
+        max-width: 86vw;
         height: 100%;
         z-index: 20;
         pointer-events: none;
+        transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .copilot-container.collapsed {
+        transform: translateX(100%);
       }
       .copilot-drawer {
-        width: 380px;
+        width: 100%;
         height: 100%;
         background: rgba(12, 20, 34, 0.94);
         backdrop-filter: blur(16px);
@@ -284,18 +294,16 @@
         flex-direction: column;
         pointer-events: auto;
         box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
-        transition:
-          transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-          opacity 0.2s ease;
+        transition: opacity 0.2s ease;
       }
-      .copilot-drawer.collapsed {
-        transform: translateX(100%);
+      .copilot-drawer.collapsed,
+      .copilot-container.collapsed .copilot-drawer {
         pointer-events: none;
         opacity: 0;
       }
       .copilot-toggle-pill {
         position: absolute;
-        top: 14px;
+        top: 72px;
         left: -24px;
         width: 24px;
         height: 38px;
@@ -1056,7 +1064,6 @@
         }
         .sidebar-container.collapsed,
         .copilot-container.collapsed {
-          width: 24px;
           pointer-events: none;
         }
         .sidebar-container.collapsed .sidebar-toggle-pill,

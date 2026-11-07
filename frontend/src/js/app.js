@@ -42,7 +42,7 @@ let walkGrid = null; // {x_min, z_min, cell, nx, nz, reachable: Uint8Array, bloc
 let lastRobotPos = null;
 let camTween = null;
 let sidebarOpen = true;
-let copilotOpen = true;
+let copilotOpen = false;
 
 const ROBOT_GROUND_OFFSET = 0.15;
 const PROXIMITY_RADIUS = 1.5;
@@ -995,7 +995,6 @@ function startWalking() {
   navProgress = 0;
   isNavigating = true;
   groupOpen.near = true;
-  if (!sidebarOpen) toggleLeftSidebar();
   hideHelp();
 }
 
@@ -1042,8 +1041,7 @@ function onArrival() {
   document.getElementById("hud-nav-fill").style.width = "100%";
   if (routeTargetId === "POINT") return; // walked to a floor point: nothing to diagnose
   const frame = framesById.get(routeTargetId);
-  showToast("Arrived at " + (frame ? frame.tag : routeTargetId) + " — diagnosis on the right");
-  if (!copilotOpen) toggleCopilotDrawer();
+  showToast("Arrived at " + (frame ? frame.tag : routeTargetId));
   showSelection(routeTargetId);
   if (frame) lookAtAsset(frame);
 }
@@ -1172,7 +1170,6 @@ function addMessage(role, text, chips) {
   thread.appendChild(msg);
   while (thread.children.length > 30) thread.removeChild(thread.firstChild);
   thread.scrollTop = thread.scrollHeight;
-  if (!copilotOpen) toggleCopilotDrawer();
   return msg;
 }
 
@@ -1544,7 +1541,6 @@ function setupViewportPicking() {
     const hit = frameHit();
     if (hit) {
       showSelection(hit.frame.id);
-      if (!copilotOpen) toggleCopilotDrawer();
       return;
     }
     const floor = new THREE.Vector3();
@@ -1757,7 +1753,7 @@ function setupOmnibar() {
       goTo(asset.asset_id).then(function (ok) {
         if (ok) {
           addMessage("ai", "Walking to " + asset.tag + ": " + pathLengths[pathLengths.length - 1].toFixed(1) +
-            " m, collision-free route. The diagnosis opens on arrival.");
+            " m, collision-free route.");
         }
       });
       return;
