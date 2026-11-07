@@ -83,6 +83,27 @@ def detect_drift(telemetry: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(drifts, key=lambda d: -abs(d["t_score"]))
 
 
+NAVIGATE_KEYWORDS = ("move", "drive", "walk", "navigate", "route", "go", "reach", "travel", "bring me", "take me")
+SELECT_KEYWORDS = ("select", "show", "highlight", "look", "focus", "find", "locate", "where")
+RESET_KEYWORDS = ("reset", "restart", "home", "origin", "entrance", "entry")
+
+
+def _detect_action(question: Optional[str]) -> str:
+    if not question:
+        return "diagnose"
+    lower = question.lower()
+    for keyword in RESET_KEYWORDS:
+        if keyword in lower:
+            return "reset"
+    for keyword in NAVIGATE_KEYWORDS:
+        if keyword in lower:
+            return "navigate"
+    for keyword in SELECT_KEYWORDS:
+        if keyword in lower:
+            return "select"
+    return "diagnose"
+
+
 class CopilotService:
     """Use case: evidence-grounded diagnosis for one asset, optionally narrated by an LLM."""
 
@@ -91,16 +112,59 @@ class CopilotService:
         self._scene = scene
         self._llm = language_model
 
-    def diagnose(self, identifier: str, question: Optional[str] = None) -> Dict[str, Any]:
+    def _resolve_target_asset(self, identifier: Optional[str], question: Optional[str]) -> Dict[str, Any]:
+        if identifier and identifier.strip():
+            found = self._assets.find(identifier.strip())
+            if found is None:
+                raise NotFoundError(f"Asset with identifier '{identifier}' not found in asset registry.")
+            return found
+
+        all_assets = self._assets.list()
+        states = self._assets.states()
+        if question:
+            lower = question.lower()
+            for asset in all_assets:
+                tag_match = asset["tag"].lower() in lower
+                id_match = asset["asset_id"].lower() in lower
+                if tag_match or id_match:
+                    return asset
+            for asset in all_assets:
+                class_name = asset["asset_class"].lower().replace("_", " ")
+                if class_name in lower:
+                    return asset
+
+        faulty_assets = []
+        for asset in all_assets:
+            state = states.get(asset["asset_id"])
+            if state and state.get("condition_state") != "healthy":
+                faulty_assets.append((state.get("health_score", 100), asset))
+        if faulty_assets:
+            faulty_assets.sort(key=lambda item: item[0])
+            return faulty_assets[0][1]
+
+        target_id = getattr(self._scene, "target_asset_id", None)
+        if target_id:
+            found = self._assets.find(target_id)
+            if found is not None:
+                return found
+
+        if all_assets:
+            return all_assets[0]
+
+        raise NotFoundError("No assets available in repository.")
+
+    def diagnose(self, identifier: Optional[str] = None, question: Optional[str] = None) -> Dict[str, Any]:
         """Collect the evidence for an asset and run the evidence engine (+ optional LLM)."""
-        asset = self._assets.find(identifier.strip())
-        if asset is None:
-            raise NotFoundError("Asset with identifier '{}' not found in asset registry.".format(identifier))
+        asset = self._resolve_target_asset(identifier, question)
         state = self._assets.states([asset["asset_id"]]).get(asset["asset_id"])
         if state is None:
-            raise NotFoundError("No current state for {}.".format(asset["asset_id"]))
+            raise NotFoundError(f"No current state for {asset['asset_id']}.")
         frame = self._scene.find_frame(asset["asset_id"])
-        return self.diagnose_asset(
+        mapping_confidence = None
+        if frame is not None:
+            mapping_confidence = frame.get("mapping_confidence")
+
+        result = self.diagnose_asset(
             asset=asset,
             state=state,
             telemetry=self._assets.recent_telemetry(asset["asset_id"], TELEMETRY_WINDOW),
@@ -109,9 +173,13 @@ class CopilotService:
             docs=self._assets.documents([state.get("knowledge_doc_id"), *GUIDANCE_DOCS]),
             cases=self._assets.service_cases(asset["asset_class"]),
             dq_issues=self._assets.data_quality(asset["asset_id"]),
-            mapping_confidence=frame["mapping_confidence"] if frame is not None else None,
+            mapping_confidence=mapping_confidence,
             question=question,
         )
+        action = _detect_action(question)
+        result["action"] = action
+        result["target_asset_id"] = asset["asset_id"]
+        return result
 
     def diagnose_asset(
         self,
@@ -248,24 +316,36 @@ class CopilotService:
         """Replace narrative fields with the LLM answer, but only if it cites known sources only."""
         allowed = set(result["evidence_citations"])
         prompt = (
-            "You are a field-service copilot for an industrial plant. Use ONLY the evidence JSON below. "
-            "Separate observation from hypothesis, state confidence, cite source IDs in square brackets, "
-            "and never recommend autonomous physical action (DOC-FIELD-SAFETY).\n"
-            f"Technician question: {question or 'Diagnose the current condition and the next safe check.'}\n"
-            "Return JSON: {\"answer\": str, \"recommended_actions\": [str], \"cited_ids\": [str]}.\n"
+            "You are an autonomous AI field-service copilot for an industrial plant controlling an inspection robot. "
+            "Use ONLY the evidence JSON below. Separate observation from hypothesis, state confidence, cite source IDs in square brackets, "
+            "and never recommend autonomous physical repair (DOC-FIELD-SAFETY).\n"
+            f"Technician command or question: {question or 'Diagnose the current condition and the next safe check.'}\n"
+            "Return JSON: {\"action\": \"navigate\" | \"select\" | \"diagnose\" | \"reset\", \"answer\": str, \"recommended_actions\": [str], \"cited_ids\": [str]}.\n"
+            f"Allowed source IDs: {sorted(allowed)}\n"
             f"Evidence: {json.dumps({k: result[k] for k in ('tag', 'asset_class', 'condition_state', 'health_score', 'issue_code', 'diagnosis', 'citations', 'recommended_actions', 'confidence_score')}, default=str)}"
         )
-        payload = self._llm.complete_json(prompt)
-        if not payload:
-            logger.warning("LLM unavailable, keeping deterministic answer")
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            payload = self._llm.complete_json(prompt)
+            if not payload:
+                logger.warning("LLM unavailable, keeping deterministic answer")
+                return
+            cited = set(payload.get("cited_ids") or [])
+            unknown = cited - allowed
+            if unknown:
+                logger.warning("LLM cited unknown sources %s; retrying", unknown)
+                prompt += f"\nYour previous answer was rejected: unknown source IDs {sorted(unknown)}. Cite ONLY allowed source IDs: {sorted(allowed)}."
+                continue
+            answer = payload.get("answer")
+            if not answer:
+                return
+            result["answer"] = answer
+            actions = payload.get("recommended_actions")
+            if actions:
+                result["recommended_actions"] = actions
+                result["recommended_action"] = actions[0]
+            action = payload.get("action")
+            if action in ("navigate", "select", "diagnose", "reset"):
+                result["action"] = action
+            result["grounded_mode"] = f"{self._llm.name} (citations verified)"
             return
-        cited = set(payload.get("cited_ids") or [])
-        if not cited or not cited <= allowed:
-            logger.warning("LLM cited unknown sources %s; keeping deterministic answer", cited - allowed)
-            return
-        if not payload.get("answer"):
-            return
-        result["answer"] = payload["answer"]
-        result["recommended_actions"] = payload.get("recommended_actions") or result["recommended_actions"]
-        result["recommended_action"] = result["recommended_actions"][0]
-        result["grounded_mode"] = f"{self._llm.name} (citations verified)"

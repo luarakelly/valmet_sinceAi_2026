@@ -39,3 +39,22 @@ def test_target_diagnosis_cites_only_existing_evidence():
 
 def test_unknown_asset_is_404():
     assert client.post("/api/copilot/query", json={"asset_id": "NOPE-999"}).status_code == 404
+
+
+def test_copilot_auto_resolves_navigate_action():
+    res = client.post("/api/copilot/query", json={"query": "Move robot to the faulty pump"})
+    assert res.status_code == 200, res.text
+    payload = res.json()
+    assert payload["action"] == "navigate"
+    assert payload["tag"] == "P-005"
+    assert payload["target_asset_id"] == "ASSET-017"
+
+
+def test_copilot_auto_resolves_select_action():
+    res = client.post("/api/copilot/query", json={"query": "Select the worst problem"})
+    assert res.status_code == 200, res.text
+    payload = res.json()
+    assert payload["action"] == "select"
+    assert payload["tag"] == "P-005"
+    assert payload["target_asset_id"] == "ASSET-017"
+

@@ -14,7 +14,10 @@ class EvidenceCitation(BaseModel):
 
 class CopilotQueryRequest(BaseModel):
     """Diagnostic query command directed to an asset."""
-    asset_id: str = Field(description="Target asset identifier or tag (e.g. ASSET-017 or P-005)")
+    asset_id: Optional[str] = Field(
+        default=None,
+        description="Target asset identifier or tag (e.g. ASSET-017 or P-005)"
+    )
     query: Optional[str] = Field(
         default="Diagnose current condition and provide recommended next checks",
         description="Technician question or diagnostic intent"
@@ -53,6 +56,8 @@ class CopilotQueryResponse(BaseModel):
     )
     answer: Optional[str] = Field(default=None, description="LLM answer to the technician's question, when enabled")
     suggested_work_order: Optional[Dict[str, Any]] = None
+    action: Optional[str] = Field(default=None, description="Robot/environment action: navigate, select, diagnose, reset")
+    target_asset_id: Optional[str] = Field(default=None, description="Target asset identifier for action")
 
     asset_class: Optional[str] = None
     diagnosis_summary: Optional[str] = None

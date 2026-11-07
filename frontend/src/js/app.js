@@ -1723,47 +1723,66 @@ function setupOmnibar() {
     });
   }
 
-  function run(text) {
+  async function run(text) {
     const q = text.trim();
-    if (!q) return;
+    if (!q) {
+      return;
+    }
     box.style.display = "none";
     input.value = "";
     addMessage("user", q);
-    const lower = q.toLowerCase();
-    const asset = findAsset(q);
-    if (/(need|needs|require).*(attention|maintenance)|degraded|priorit|faulty|worst|critical/.test(lower) && !asset) {
-      document.getElementById("asset-search").value = "";
-      renderAssetList(assetsData);
-      if (!sidebarOpen) toggleLeftSidebar();
-      const worst = assetsData.filter(function (a) { return assetState(a) !== "healthy"; })
-        .sort(function (a, b) { return a.state.health_score - b.state.health_score; });
-      addMessage("ai", worst.length + " assets need attention. Worst first: " + worst.slice(0, 5).map(function (a) {
-        return a.tag + " (" + Math.round(a.state.health_score) + "%)";
-      }).join(", ") + ". They are listed on the left under Needs attention.");
-      if (worst[0]) selectAndFocus(worst[0].asset_id);
-      return;
+
+    let currentTarget = "";
+    if (selectedId && framesById.has(selectedId)) {
+      const frame = framesById.get(selectedId);
+      if (frame.asset_id) {
+        currentTarget = frame.asset_id;
+      }
     }
-    if (asset && /(where|show|find|locate|highlight)/.test(lower)) {
-      selectAndFocus(asset.asset_id);
-      addMessage("ai", asset.tag + " (" + prettyClass(asset.asset_class) + ") is in " + (asset.area_name || "the boiler room") +
-        " — the camera is now on it. Synthetic mapping to a detected 3D object.");
-      return;
-    }
-    if (asset && /(route|reach|go to|navigate|walk|path)/.test(lower)) {
-      goTo(asset.asset_id).then(function (ok) {
-        if (ok) {
-          addMessage("ai", "Walking to " + asset.tag + ": " + pathLengths[pathLengths.length - 1].toFixed(1) +
-            " m, collision-free route.");
-        }
+
+    const thinking = addMessage("ai", "Processing command…");
+    try {
+      const resp = await fetchJson("/api/copilot/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, asset_id: currentTarget }),
       });
-      return;
+      thinking.remove();
+
+      const action = resp.action || "diagnose";
+      const targetId = resp.target_asset_id || resp.asset_id;
+
+      if (action === "reset") {
+        resetRobot();
+      } else if (action === "navigate" && targetId) {
+        goTo(targetId);
+      } else if (action === "select" && targetId) {
+        selectAndFocus(targetId);
+      } else if (action === "diagnose" && targetId) {
+        selectAndFocus(targetId);
+      }
+
+      const answerText = resp.answer || resp.diagnosis_summary || resp.diagnosis || "Command executed.";
+      const citations = resp.citations || [];
+      const ids = citations
+        .filter(function (c) {
+          return c.source_type !== "data_quality";
+        })
+        .map(function (c) {
+          return c.source_id;
+        })
+        .slice(0, 6);
+
+      addMessage("ai", answerText, ids);
+
+      if (targetId) {
+        const dossier = await fetchJson("/api/assets/" + encodeURIComponent(targetId));
+        updateCopilotDrawer(dossier, resp);
+      }
+    } catch (err) {
+      thinking.remove();
+      addMessage("ai", "Copilot error: " + err.message);
     }
-    // Everything else goes to the AI copilot about the named (or selected) asset.
-    const target = asset ? asset.asset_id : selectedId && framesById.get(selectedId) && framesById.get(selectedId).asset_id ? selectedId : faultTargetId;
-    if (!copilotOpen) toggleCopilotDrawer();
-    selectedId = target;
-    refreshFrameStyles();
-    runCopilotDiagnosis(target, q);
   }
 
   input.oninput = function () {
